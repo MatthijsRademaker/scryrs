@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$ROOT"
-scripts/coverage-test-all
-echo "coverage reports generated in .cache/coverage-out"

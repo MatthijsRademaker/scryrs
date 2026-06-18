@@ -1,7 +1,5 @@
 {
-  "defaultModel": "deepseek/deepseek-v4-flash",
+  "defaultModel": "openai-codex/gpt-5.4",
   "defaultProvider": "deepseek",
-  "packages": [
-    "."
-  ]
+  "packages": ["."]
 }
