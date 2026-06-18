@@ -1,0 +1,24 @@
+# Swarm agent execution logs
+# These are runtime artifacts and should not be committed
+logs/
+
+# Runtime cache artifacts
+cache/
+
+# Local runtime configuration
+.env
+
+# Manager logs (when running locally)
+manager.log
+swarm.db
+swarm.db-journal
+
+# Architecture build artifacts (generated, not committed)
+# Source files in .devagent/architecture/ are committed
+architecture/dist/
+architecture/cache/
+
+# Design assets directory
+# NOTE: You may want to commit your design files (mockups, wireframes, diagrams)
+# Remove the line below if you want to track designs in version control
+# designs/

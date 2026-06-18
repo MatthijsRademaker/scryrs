@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/lib/docker-verification.sh"
+
+usage() {
+    cat >&2 <<'USAGE'
+Usage: scripts/verification-cache list|rm
+
+list  List project-scoped Docker verification cache volumes.
+rm    Remove project-scoped Docker verification cache volumes for this project.
+USAGE
+}
+
+cmd="${1:-}"
+if [ -z "$cmd" ]; then
+    usage
+    exit 1
+fi
+
+verification_require_docker
+project_key="$(verification_project_key)"
+
+case "$cmd" in
+    list)
+        docker volume ls --filter label=dev-swarm.verification-cache=true --filter "label=dev-swarm.project-key=$project_key"
+        ;;
+    rm|remove|clean)
+        mapfile -t volumes < <(docker volume ls -q --filter label=dev-swarm.verification-cache=true --filter "label=dev-swarm.project-key=$project_key")
+        if [ "${#volumes[@]}" -eq 0 ]; then
+            echo "No project-scoped verification cache volumes found for $project_key."
+            exit 0
+        fi
+        docker volume rm "${volumes[@]}"
+        ;;
+    *)
+        usage
+        exit 1
+        ;;
+esac

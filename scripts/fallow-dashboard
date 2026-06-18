@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/.versions"
+source "$ROOT/scripts/lib/docker-verification.sh"
+
+verification_reset
+verification_workdir /workspace/src/dashboard
+verification_add_cache npm /cache/npm npm_config_cache
+
+verification_run_container "$NODE_IMAGE" sh -ceu '
+npm ci --silent >/dev/null
+json_file="$(mktemp)"
+status=0
+if [ "${FRONTEND_HEALTH_TOOL:-fallow}" = "knip" ]; then
+  npx knip --reporter json >"$json_file" || status=$?
+  cat "$json_file"
+  node - "$json_file" <<"NODE"
+const fs = require("fs");
+const data = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const issues = Object.values(data).reduce((sum, value) => {
+  if (Array.isArray(value)) return sum + value.length;
+  return sum;
+}, 0);
+console.log(`knip reported ${issues} issue(s)`);
+NODE
+  exit "$status"
+fi
+
+npx fallow audit --format json --quiet --gate new-only >"$json_file" || status=$?
+cat "$json_file"
+node - "$json_file" <<"NODE"
+const fs = require("fs");
+const data = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const verdict = data.verdict ?? "unknown";
+const dead = data.summary?.dead_code_issues ?? 0;
+const complexity = data.summary?.complexity_findings ?? 0;
+const dupes = data.summary?.duplication_clone_groups ?? 0;
+console.log(`fallow verdict=${verdict} dead_code=${dead} complexity=${complexity} duplication=${dupes}`);
+NODE
+exit "$status"
+'

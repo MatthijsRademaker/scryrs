@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/.versions"
+source "$ROOT/scripts/lib/docker-verification.sh"
+
+verification_reset
+verification_workdir /workspace/src/dashboard
+verification_add_cache npm /cache/npm npm_config_cache
+
+verification_run_container "$NODE_IMAGE" sh -ceu '
+npm ci --silent >/dev/null
+json_file="$(mktemp)"
+status=0
+npx depcruise --config .dependency-cruiser.mjs --output-type json src >"$json_file" || status=$?
+cat "$json_file"
+node - "$json_file" <<"NODE"
+const fs = require("fs");
+const data = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const violations = data.summary?.violations?.length ?? 0;
+console.log(`dependency-cruiser reported ${violations} violation(s)`);
+NODE
+exit "$status"
+'

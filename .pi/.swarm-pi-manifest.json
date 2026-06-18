@@ -1,0 +1,378 @@
+{
+  "sourcePackage": ".pi/swarm-pi-default-setup",
+  "sourceVersion": "local",
+  "files": {
+    "agents/swarm-architect.md": {
+      "sourceHash": "91ad72d54f6d71bc1bdc465b912e896df4c24628f8a80ab59c1fec8349e621fb",
+      "installedHash": "91ad72d54f6d71bc1bdc465b912e896df4c24628f8a80ab59c1fec8349e621fb"
+    },
+    "agents/swarm-lead-dev.md": {
+      "sourceHash": "62cc9b22f26f5b5870df5e9dc4bb62f46a2dd81dc1f588296b9d618ca39ef93b",
+      "installedHash": "62cc9b22f26f5b5870df5e9dc4bb62f46a2dd81dc1f588296b9d618ca39ef93b"
+    },
+    "agents/swarm-productowner.md": {
+      "sourceHash": "7f6f7d500048c2f96bcfe47664eaaebf2ecda8524db1105e04f8a4a2d3918152",
+      "installedHash": "7f6f7d500048c2f96bcfe47664eaaebf2ecda8524db1105e04f8a4a2d3918152"
+    },
+    "agents/swarm-reviewer.md": {
+      "sourceHash": "d75373f55b63bf69752b24cf9683f404a4c9b47c22fc5a4e8989ef92bea3aa05",
+      "installedHash": "d75373f55b63bf69752b24cf9683f404a4c9b47c22fc5a4e8989ef92bea3aa05"
+    },
+    "agents/swarm-room-controller.md": {
+      "sourceHash": "943a91d2a526542c07699accb0878eb04148ba0f759ffb69da47fb6aa81bc36a",
+      "installedHash": "943a91d2a526542c07699accb0878eb04148ba0f759ffb69da47fb6aa81bc36a"
+    },
+    "agents/swarm-spec-writer.md": {
+      "sourceHash": "9b9c84f81b71264f8805be4cd787a930c0023bab15fa29932bbbd45a7bbe5256",
+      "installedHash": "9b9c84f81b71264f8805be4cd787a930c0023bab15fa29932bbbd45a7bbe5256"
+    },
+    "agents/swarm-worker.md": {
+      "sourceHash": "c509f19bfa5ba8fccc2ff9756533a0641c02754297f671b302e08881a3af066e",
+      "installedHash": "c509f19bfa5ba8fccc2ff9756533a0641c02754297f671b302e08881a3af066e"
+    },
+    "config/agents.yaml": {
+      "sourceHash": "b21482dc79d8cc68730df5f1dcb8f4b8bd2572eff71ba1c13b5eb0d81a3f97ea",
+      "installedHash": "b21482dc79d8cc68730df5f1dcb8f4b8bd2572eff71ba1c13b5eb0d81a3f97ea"
+    },
+    "config/providers.yaml": {
+      "sourceHash": "8117480ce973566498f0e554b1a194ca40ca6581f65f4baf6368bb6ed6d4ae36",
+      "installedHash": "8117480ce973566498f0e554b1a194ca40ca6581f65f4baf6368bb6ed6d4ae36"
+    },
+    "extensions/README.md": {
+      "sourceHash": "c803f9b857f79566191e7a6dadb49c36ef0342b2c61ddb6fabea32d0d1679d3d",
+      "installedHash": "c803f9b857f79566191e7a6dadb49c36ef0342b2c61ddb6fabea32d0d1679d3d"
+    },
+    "prompts/investigate-swarm-refinement-room.md": {
+      "sourceHash": "4a72ca56d2e876abee0e1fd817f6295dce67a3fca421c34218830a1be1bc23b3",
+      "installedHash": "4a72ca56d2e876abee0e1fd817f6295dce67a3fca421c34218830a1be1bc23b3"
+    },
+    "prompts/investigate-swarm-run.md": {
+      "sourceHash": "648900654b354909941a16d80b7945540b95e807a38f5fbcc5b9ae20dafc3dbb",
+      "installedHash": "648900654b354909941a16d80b7945540b95e807a38f5fbcc5b9ae20dafc3dbb"
+    },
+    "prompts/investigate.md": {
+      "sourceHash": "2eb7dad20e32d42360a168ac84130f93821439175c805045e2c04ab2295077ed",
+      "installedHash": "2eb7dad20e32d42360a168ac84130f93821439175c805045e2c04ab2295077ed"
+    },
+    "prompts/manual-intervene.md": {
+      "sourceHash": "e9e64e6644b5f41db274206494b29592fa954d11101592c90dd6014330782d86",
+      "installedHash": "e9e64e6644b5f41db274206494b29592fa954d11101592c90dd6014330782d86"
+    },
+    "prompts/opsx-apply.md": {
+      "sourceHash": "9e8e2291460fb85bf89e7d968e109403737f1c231d9efe4759a1c45e3fe46a98",
+      "installedHash": "9e8e2291460fb85bf89e7d968e109403737f1c231d9efe4759a1c45e3fe46a98"
+    },
+    "prompts/opsx-archive.md": {
+      "sourceHash": "d75e9c8bb1e81b5b47669463cc639bd96c91aa03557b46e58de568808db429ec",
+      "installedHash": "d75e9c8bb1e81b5b47669463cc639bd96c91aa03557b46e58de568808db429ec"
+    },
+    "prompts/opsx-explore.md": {
+      "sourceHash": "894fc46af2a61c51a1a8a2178ad1527553d7c0cb8a95179b68d69a1f9451b22c",
+      "installedHash": "894fc46af2a61c51a1a8a2178ad1527553d7c0cb8a95179b68d69a1f9451b22c"
+    },
+    "prompts/opsx-propose.md": {
+      "sourceHash": "bcc21e672d8dd951ef5349a04b1eda4a7fe2f5577846d91c775bd44ad4bb1197",
+      "installedHash": "bcc21e672d8dd951ef5349a04b1eda4a7fe2f5577846d91c775bd44ad4bb1197"
+    },
+    "prompts/opsx-refinement-explore.md": {
+      "sourceHash": "bc13bb77c54282bfe66b96f85231c2ac4184ad7c213cc40bf16e98a8ade333a1",
+      "installedHash": "bc13bb77c54282bfe66b96f85231c2ac4184ad7c213cc40bf16e98a8ade333a1"
+    },
+    "prompts/opsx-refinement-propose.md": {
+      "sourceHash": "f3e34db351df659346e1b0b7ce1811bbdac59796efb13b414f16881fb62ede51",
+      "installedHash": "f3e34db351df659346e1b0b7ce1811bbdac59796efb13b414f16881fb62ede51"
+    },
+    "prompts/opsx-validate.md": {
+      "sourceHash": "ff68c06ae90f33397927ecb8dbc26cc113d05a515630ea03ca5028548c4eca43",
+      "installedHash": "ff68c06ae90f33397927ecb8dbc26cc113d05a515630ea03ca5028548c4eca43"
+    },
+    "prompts/swarm-architecture-review.md": {
+      "sourceHash": "9108096073c03e74daa3f3a26c291b95becdc7c1413872c42ed4f263cbe5b641",
+      "installedHash": "9108096073c03e74daa3f3a26c291b95becdc7c1413872c42ed4f263cbe5b641"
+    },
+    "prompts/swarm-execute-plan.md": {
+      "sourceHash": "2f3122aa01cf62bd1aaa697c6bab9023bd0b1b410a960455658f6e6509f9ecc1",
+      "installedHash": "2f3122aa01cf62bd1aaa697c6bab9023bd0b1b410a960455658f6e6509f9ecc1"
+    },
+    "prompts/swarm-execute-task.md": {
+      "sourceHash": "fa2f10c4aa013a5674c36dc7817082aefcdf372e614c20ae6f80f40db414a7ea",
+      "installedHash": "fa2f10c4aa013a5674c36dc7817082aefcdf372e614c20ae6f80f40db414a7ea"
+    },
+    "prompts/swarm-execute.md": {
+      "sourceHash": "55268a313a30f0e040151b49fef82faa17aae2e7867d9bbcb0215bc3ce0aaf00",
+      "installedHash": "55268a313a30f0e040151b49fef82faa17aae2e7867d9bbcb0215bc3ce0aaf00"
+    },
+    "prompts/swarm-get-feedback.md": {
+      "sourceHash": "a58c706d17dbb0f2b4e6be120e5ad358f84c02463be7196f9b8b01336f8c04ec",
+      "installedHash": "a58c706d17dbb0f2b4e6be120e5ad358f84c02463be7196f9b8b01336f8c04ec"
+    },
+    "prompts/swarm-lead-dev-review.md": {
+      "sourceHash": "7a425c4dc61eb04b9d62ebc1c149f8e697d12c6e0d45f166e4c12e9207bc400a",
+      "installedHash": "7a425c4dc61eb04b9d62ebc1c149f8e697d12c6e0d45f166e4c12e9207bc400a"
+    },
+    "prompts/swarm-plan.md": {
+      "sourceHash": "2b4b82479c5b3063d378e7136ab421d2733f503e4a19e8f483d0f92f85e63a71",
+      "installedHash": "2b4b82479c5b3063d378e7136ab421d2733f503e4a19e8f483d0f92f85e63a71"
+    },
+    "prompts/swarm-refinement-room.md": {
+      "sourceHash": "d7d86c7e2e8b9bd7cd881a67d9b068b2ed89ae82d39fe04e1b585892e43acb1a",
+      "installedHash": "d7d86c7e2e8b9bd7cd881a67d9b068b2ed89ae82d39fe04e1b585892e43acb1a"
+    },
+    "prompts/swarm-refinement.md": {
+      "sourceHash": "5b859d3db025661d1ae50fbc964633b34d19c3cbec0265a7475b5cada69a7308",
+      "installedHash": "5b859d3db025661d1ae50fbc964633b34d19c3cbec0265a7475b5cada69a7308"
+    },
+    "prompts/swarm-repair-commit.md": {
+      "sourceHash": "1bb94989d133c03306b2407db213ed37f2734e274765b32d3a9bbe62ee86d8cf",
+      "installedHash": "1bb94989d133c03306b2407db213ed37f2734e274765b32d3a9bbe62ee86d8cf"
+    },
+    "prompts/swarm-reviewer-review.md": {
+      "sourceHash": "a54202e8fa5bb2cc062a4684060b4aa5b89904c0ca4ab3d56f0b91f46923d123",
+      "installedHash": "a54202e8fa5bb2cc062a4684060b4aa5b89904c0ca4ab3d56f0b91f46923d123"
+    },
+    "prompts/swarm-self-improve-worker.md": {
+      "sourceHash": "2ba5378fc2656762f0a93f6592c7ee912b57fba4a567eeb34ab5297fb9a2bb8d",
+      "installedHash": "2ba5378fc2656762f0a93f6592c7ee912b57fba4a567eeb34ab5297fb9a2bb8d"
+    },
+    "prompts/swarm-spec-write.md": {
+      "sourceHash": "c92bda888a277f61a93c3cfa2258f31024f51a727d34301e706ac63ee9eb027e",
+      "installedHash": "c92bda888a277f61a93c3cfa2258f31024f51a727d34301e706ac63ee9eb027e"
+    },
+    "skills/ccc/SKILL.md": {
+      "sourceHash": "ca3e39077f2d95315b65383d2bb51a43c58fe2e78204aeee0cc99c14c6d05af5",
+      "installedHash": "ca3e39077f2d95315b65383d2bb51a43c58fe2e78204aeee0cc99c14c6d05af5"
+    },
+    "skills/ccc/references/management.md": {
+      "sourceHash": "4d34117d563a3f372bc9680777af3bf220e835cd4d881a7b631547f18d74f6b1",
+      "installedHash": "4d34117d563a3f372bc9680777af3bf220e835cd4d881a7b631547f18d74f6b1"
+    },
+    "skills/ccc/references/settings.md": {
+      "sourceHash": "f6887c308e39ac1ae3f5085271d18cddef4356f7366dbca2539e454c5e7a4f38",
+      "installedHash": "f6887c308e39ac1ae3f5085271d18cddef4356f7366dbca2539e454c5e7a4f38"
+    },
+    "skills/docs-writer/SKILL.md": {
+      "sourceHash": "32e0ea24900fdd0319a9eafdab38e8b6c3b460b780febd96250ad8f8ef345a1c",
+      "installedHash": "32e0ea24900fdd0319a9eafdab38e8b6c3b460b780febd96250ad8f8ef345a1c"
+    },
+    "skills/frontend-design/LICENSE.txt": {
+      "sourceHash": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+      "installedHash": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+    },
+    "skills/frontend-design/SKILL.md": {
+      "sourceHash": "b81e2ff87ed8fa4d6c377ccb127a7254c9e6a77e3ae94f21e6b514f7bb2945a0",
+      "installedHash": "b81e2ff87ed8fa4d6c377ccb127a7254c9e6a77e3ae94f21e6b514f7bb2945a0"
+    },
+    "skills/github-cli/SKILL.md": {
+      "sourceHash": "78b3ea9129e28fc32692ebed85fed1e52bb0424872e75b1bdbd5c6828a79965f",
+      "installedHash": "78b3ea9129e28fc32692ebed85fed1e52bb0424872e75b1bdbd5c6828a79965f"
+    },
+    "skills/likec4-dsl/SKILL.md": {
+      "sourceHash": "f5b9d619e0f42d71381b4b0a0c4270310e18dffccd79abc52c6e8e6e5f5514a2",
+      "installedHash": "f5b9d619e0f42d71381b4b0a0c4270310e18dffccd79abc52c6e8e6e5f5514a2"
+    },
+    "skills/likec4-dsl/evals/evals-public.json": {
+      "sourceHash": "e3db1a99794bf24da8324d95f4d758d14d3db7391491cd095ed7658152c31fc3",
+      "installedHash": "e3db1a99794bf24da8324d95f4d758d14d3db7391491cd095ed7658152c31fc3"
+    },
+    "skills/likec4-dsl/evals/grading-spec.json": {
+      "sourceHash": "33e8569ccebe9c86202cf9fe631a2f410eb52d9700127603f53e22d3b4ac4714",
+      "installedHash": "33e8569ccebe9c86202cf9fe631a2f410eb52d9700127603f53e22d3b4ac4714"
+    },
+    "skills/likec4-dsl/references/bridge-leanix-drawio.md": {
+      "sourceHash": "920a338bea6ffb1a6acc282e0898a53300ed01eb431b077600f7d4c640d84d57",
+      "installedHash": "920a338bea6ffb1a6acc282e0898a53300ed01eb431b077600f7d4c640d84d57"
+    },
+    "skills/likec4-dsl/references/cli.md": {
+      "sourceHash": "e8b40050b2d6eac679c540682f0d75f12226a94ef14a9f14038436883756c5d3",
+      "installedHash": "e8b40050b2d6eac679c540682f0d75f12226a94ef14a9f14038436883756c5d3"
+    },
+    "skills/likec4-dsl/references/configuration.md": {
+      "sourceHash": "7b93d8ed30545571e4c0f2f8fe6b6ea9501e760954544e6f359bd7ab39211313",
+      "installedHash": "7b93d8ed30545571e4c0f2f8fe6b6ea9501e760954544e6f359bd7ab39211313"
+    },
+    "skills/likec4-dsl/references/deployment.md": {
+      "sourceHash": "fdc0baf1b4e0be9bab8bbfab5202b38393c5510f6107aaec58908beb4224268d",
+      "installedHash": "fdc0baf1b4e0be9bab8bbfab5202b38393c5510f6107aaec58908beb4224268d"
+    },
+    "skills/likec4-dsl/references/dynamic-views.md": {
+      "sourceHash": "b6601e95951a7eecaef7fa3aeec6ab9a897f14b7e88b1f86c24260058d291a62",
+      "installedHash": "b6601e95951a7eecaef7fa3aeec6ab9a897f14b7e88b1f86c24260058d291a62"
+    },
+    "skills/likec4-dsl/references/examples.md": {
+      "sourceHash": "07556685f84ae94def13d37695045a9883a3cefc1c644384f1cb550602a3c63f",
+      "installedHash": "07556685f84ae94def13d37695045a9883a3cefc1c644384f1cb550602a3c63f"
+    },
+    "skills/likec4-dsl/references/identifier-validity.md": {
+      "sourceHash": "193cecf1e9c878c644a1d52e8938e9bca368d762b265b0354658a4ab7b8c060b",
+      "installedHash": "193cecf1e9c878c644a1d52e8938e9bca368d762b265b0354658a4ab7b8c060b"
+    },
+    "skills/likec4-dsl/references/include-predicates-wildcards.md": {
+      "sourceHash": "6d5621dac31ffa21d7cb5be96f8b0092f135c43c608b1aebf96fe2598cf1100d",
+      "installedHash": "6d5621dac31ffa21d7cb5be96f8b0092f135c43c608b1aebf96fe2598cf1100d"
+    },
+    "skills/likec4-dsl/references/model.md": {
+      "sourceHash": "e76995bb40431a6232373558567d682b558989135fcef7a884cdac9058af6d2f",
+      "installedHash": "e76995bb40431a6232373558567d682b558989135fcef7a884cdac9058af6d2f"
+    },
+    "skills/likec4-dsl/references/predicates.md": {
+      "sourceHash": "29d5a1da8a45a7211ffcef74660face2e2ab9c6049e16e65dee5bc98536d9ea3",
+      "installedHash": "29d5a1da8a45a7211ffcef74660face2e2ab9c6049e16e65dee5bc98536d9ea3"
+    },
+    "skills/likec4-dsl/references/relationships-bidirectional.md": {
+      "sourceHash": "92cb7609b9392a647d524a2328709b2a9a33172646bc6e61a0185814f31eb4b3",
+      "installedHash": "92cb7609b9392a647d524a2328709b2a9a33172646bc6e61a0185814f31eb4b3"
+    },
+    "skills/likec4-dsl/references/specification.md": {
+      "sourceHash": "124098a42223e4f6aed64ea50f9752f3e3ff8ec04c546999e89d4119d7d1b11f",
+      "installedHash": "124098a42223e4f6aed64ea50f9752f3e3ff8ec04c546999e89d4119d7d1b11f"
+    },
+    "skills/likec4-dsl/references/style-tokens-colors.md": {
+      "sourceHash": "5b247cb006255d24d56a50fa0ba469b2198d45c9c042b3c5ec348ba59098f16b",
+      "installedHash": "5b247cb006255d24d56a50fa0ba469b2198d45c9c042b3c5ec348ba59098f16b"
+    },
+    "skills/likec4-dsl/references/troubleshooting.md": {
+      "sourceHash": "70dab4ae3374d8f997022b856e20ee23fdab2ef3231327e109e337cdb85f9074",
+      "installedHash": "70dab4ae3374d8f997022b856e20ee23fdab2ef3231327e109e337cdb85f9074"
+    },
+    "skills/likec4-dsl/references/views.md": {
+      "sourceHash": "f438d2c9523ed1fd5cbaf148e3707d7f57af6d01389cd24e11f56f9747a515ea",
+      "installedHash": "f438d2c9523ed1fd5cbaf148e3707d7f57af6d01389cd24e11f56f9747a515ea"
+    },
+    "skills/mcp-builder/LICENSE.txt": {
+      "sourceHash": "14099b9c79d031b9d4b32c736a4e20f2b941f52dd79500532d62d26dd716110c",
+      "installedHash": "14099b9c79d031b9d4b32c736a4e20f2b941f52dd79500532d62d26dd716110c"
+    },
+    "skills/mcp-builder/SKILL.md": {
+      "sourceHash": "0f4592dcb53cf2b5d6b7febee6b4152018b565551a1c29e3c612f57b218ab295",
+      "installedHash": "0f4592dcb53cf2b5d6b7febee6b4152018b565551a1c29e3c612f57b218ab295"
+    },
+    "skills/mcp-builder/reference/evaluation.md": {
+      "sourceHash": "6d0b58e7b086e42693abc9d7e921d7d3379e7e1e6edd61395f1586d074fe150f",
+      "installedHash": "6d0b58e7b086e42693abc9d7e921d7d3379e7e1e6edd61395f1586d074fe150f"
+    },
+    "skills/mcp-builder/reference/mcp_best_practices.md": {
+      "sourceHash": "80fb4369a349447cf18ecdd7494fe7938b6065377e9f08c077cec411093a3007",
+      "installedHash": "80fb4369a349447cf18ecdd7494fe7938b6065377e9f08c077cec411093a3007"
+    },
+    "skills/mcp-builder/reference/node_mcp_server.md": {
+      "sourceHash": "b6521f4810d509440a5885f463f9e16b16632145a59f90db74858b57fb0780d4",
+      "installedHash": "b6521f4810d509440a5885f463f9e16b16632145a59f90db74858b57fb0780d4"
+    },
+    "skills/mcp-builder/reference/python_mcp_server.md": {
+      "sourceHash": "4fda54a3e825517fb6451acd1da2bc538a617f5fbe28c50767a88bb5e54e9fd0",
+      "installedHash": "4fda54a3e825517fb6451acd1da2bc538a617f5fbe28c50767a88bb5e54e9fd0"
+    },
+    "skills/mcp-builder/scripts/connections.py": {
+      "sourceHash": "9403668a2041568772082a8b334122c1f88daf0541fb393af4522d0094a47a6e",
+      "installedHash": "9403668a2041568772082a8b334122c1f88daf0541fb393af4522d0094a47a6e"
+    },
+    "skills/mcp-builder/scripts/evaluation.py": {
+      "sourceHash": "49ed1d17cdce5da101b210197740713f49b935c29d4f339542a14b132658e6f7",
+      "installedHash": "49ed1d17cdce5da101b210197740713f49b935c29d4f339542a14b132658e6f7"
+    },
+    "skills/mcp-builder/scripts/example_evaluation.xml": {
+      "sourceHash": "9272b348ddcc4b06ba562367ccd0770e018158c0068ac5116d5e34aaeff8777a",
+      "installedHash": "9272b348ddcc4b06ba562367ccd0770e018158c0068ac5116d5e34aaeff8777a"
+    },
+    "skills/mcp-builder/scripts/requirements.txt": {
+      "sourceHash": "d5d7558b2368ecea9dfeed7d1fbc71ee9e0750bebd1282faa527d528a344c3c7",
+      "installedHash": "d5d7558b2368ecea9dfeed7d1fbc71ee9e0750bebd1282faa527d528a344c3c7"
+    },
+    "skills/openspec-apply-change/SKILL.md": {
+      "sourceHash": "932d083c75cb893c013685811f646a59374d0e5d226d01b9e9e425e0762a5476",
+      "installedHash": "932d083c75cb893c013685811f646a59374d0e5d226d01b9e9e425e0762a5476"
+    },
+    "skills/openspec-archive-change/SKILL.md": {
+      "sourceHash": "e111d71216167eea10cec26abe8f6e15d925efeef2fd9925ffa219f55145acce",
+      "installedHash": "e111d71216167eea10cec26abe8f6e15d925efeef2fd9925ffa219f55145acce"
+    },
+    "skills/openspec-explore/SKILL.md": {
+      "sourceHash": "d377459327732a5466f6ae7e48ceaeaf3ad33c46be75a088495aa66a791fde32",
+      "installedHash": "d377459327732a5466f6ae7e48ceaeaf3ad33c46be75a088495aa66a791fde32"
+    },
+    "skills/openspec-propose/SKILL.md": {
+      "sourceHash": "84c2a750e978070d0aacfa09f0ab6c0a4e7f5a48e0c991fc66269a49f4b91267",
+      "installedHash": "84c2a750e978070d0aacfa09f0ab6c0a4e7f5a48e0c991fc66269a49f4b91267"
+    },
+    "skills/playwright-cli/SKILL.md": {
+      "sourceHash": "8d38aaa8d491ff6e6cafb73c0662e26401e3ba5e1bcd374def9a06efbbbe595f",
+      "installedHash": "8d38aaa8d491ff6e6cafb73c0662e26401e3ba5e1bcd374def9a06efbbbe595f"
+    },
+    "skills/playwright-cli/references/element-attributes.md": {
+      "sourceHash": "bf19aa4671e0a50a0fefa9c790f39124e803060eefe395042b723c29fcb7faa2",
+      "installedHash": "bf19aa4671e0a50a0fefa9c790f39124e803060eefe395042b723c29fcb7faa2"
+    },
+    "skills/playwright-cli/references/playwright-tests.md": {
+      "sourceHash": "d770e9eb15cf1e266b9d92e788722fa189941f89346702a6800b06e25416c4e7",
+      "installedHash": "d770e9eb15cf1e266b9d92e788722fa189941f89346702a6800b06e25416c4e7"
+    },
+    "skills/playwright-cli/references/request-mocking.md": {
+      "sourceHash": "54e801c9663fc2b6d68ceb058cb1c360724c2499f42acc7852a68e83e5b5f37c",
+      "installedHash": "54e801c9663fc2b6d68ceb058cb1c360724c2499f42acc7852a68e83e5b5f37c"
+    },
+    "skills/playwright-cli/references/running-code.md": {
+      "sourceHash": "0729425a05ee7f16510dae80f1e18041fef53041f1d15cfb2f77a3b30b648244",
+      "installedHash": "0729425a05ee7f16510dae80f1e18041fef53041f1d15cfb2f77a3b30b648244"
+    },
+    "skills/playwright-cli/references/session-management.md": {
+      "sourceHash": "97d9a564f9661bf7f6c940d884f20d79f912e7c84df4d3d5742383b9ff1c7a22",
+      "installedHash": "97d9a564f9661bf7f6c940d884f20d79f912e7c84df4d3d5742383b9ff1c7a22"
+    },
+    "skills/playwright-cli/references/storage-state.md": {
+      "sourceHash": "1122778c9b13b44bddebb4476a7f99d918afd31757be8b4fade3cb09c3d48c99",
+      "installedHash": "1122778c9b13b44bddebb4476a7f99d918afd31757be8b4fade3cb09c3d48c99"
+    },
+    "skills/playwright-cli/references/test-generation.md": {
+      "sourceHash": "f08d14388b7002963e27bd242550154cb1379def89597464deb36b6f7afca15f",
+      "installedHash": "f08d14388b7002963e27bd242550154cb1379def89597464deb36b6f7afca15f"
+    },
+    "skills/playwright-cli/references/tracing.md": {
+      "sourceHash": "792e0ac7705e56ac48df84c0f5400221ce86107897c671590a64a4ea6a82508e",
+      "installedHash": "792e0ac7705e56ac48df84c0f5400221ce86107897c671590a64a4ea6a82508e"
+    },
+    "skills/playwright-cli/references/video-recording.md": {
+      "sourceHash": "db920168840dc5e0313a48ef6beaabb64f60823347add9b2670f44baa5e0bb10",
+      "installedHash": "db920168840dc5e0313a48ef6beaabb64f60823347add9b2670f44baa5e0bb10"
+    },
+    "skills/project-docs/SKILL.md": {
+      "sourceHash": "f44a8851667de8f0174d300751877428617075f30b2ca8c1db0816c91656993d",
+      "installedHash": "f44a8851667de8f0174d300751877428617075f30b2ca8c1db0816c91656993d"
+    },
+    "skills/swarm-board/SKILL.md": {
+      "sourceHash": "181d5adf0e6d3f30de8074c5faa2a0790e008e35d4ac409397076571d1b5e15b",
+      "installedHash": "181d5adf0e6d3f30de8074c5faa2a0790e008e35d4ac409397076571d1b5e15b"
+    },
+    "skills/swarm-eval-loop/SKILL.md": {
+      "sourceHash": "5a45443596203fb6f0699ca680466008af823a57812a29c1f31861727d602f35",
+      "installedHash": "5a45443596203fb6f0699ca680466008af823a57812a29c1f31861727d602f35"
+    },
+    "skills/tdd/SKILL.md": {
+      "sourceHash": "c54024d6bce972adf0032062ae85749bf52e0f55fd1bdf06df2d7626f205207a",
+      "installedHash": "c54024d6bce972adf0032062ae85749bf52e0f55fd1bdf06df2d7626f205207a"
+    },
+    "skills/tdd/deep-modules.md": {
+      "sourceHash": "f2123700bf953db1740625686c75bdd145efd486357c47c6818c869fee657a32",
+      "installedHash": "f2123700bf953db1740625686c75bdd145efd486357c47c6818c869fee657a32"
+    },
+    "skills/tdd/interface-design.md": {
+      "sourceHash": "764c5ff0e3fa6b4ab7095eb65ccc7201e090baf19fa16051dfdb72c06d27417d",
+      "installedHash": "764c5ff0e3fa6b4ab7095eb65ccc7201e090baf19fa16051dfdb72c06d27417d"
+    },
+    "skills/tdd/mocking.md": {
+      "sourceHash": "3ceb807fdf4a47d6a93d4d9a891e5ba6d362a6247bd08adc451feebfc17361ef",
+      "installedHash": "3ceb807fdf4a47d6a93d4d9a891e5ba6d362a6247bd08adc451feebfc17361ef"
+    },
+    "skills/tdd/refactoring.md": {
+      "sourceHash": "54fced22dd1911b7094c3fe7979b7c1a40d40be307482c4adf7dc0588f27d6cc",
+      "installedHash": "54fced22dd1911b7094c3fe7979b7c1a40d40be307482c4adf7dc0588f27d6cc"
+    },
+    "skills/tdd/tests.md": {
+      "sourceHash": "e12182f5c4c6a844b7c6ab4b8d2623b642aaaae5460fe58ed087efd4f3d5fb8a",
+      "installedHash": "e12182f5c4c6a844b7c6ab4b8d2623b642aaaae5460fe58ed087efd4f3d5fb8a"
+    },
+    "skills/workflow-taskflow-expert/SKILL.md": {
+      "sourceHash": "1fd3a5d7f0c30c6c18c43316ad2a00b9d4ef27dff651ec0dea17c825c5c63628",
+      "installedHash": "1fd3a5d7f0c30c6c18c43316ad2a00b9d4ef27dff651ec0dea17c825c5c63628"
+    }
+  }
+}

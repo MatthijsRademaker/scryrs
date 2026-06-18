@@ -1,0 +1,40 @@
+# Provider definitions for LLM backends.
+# This is the authoritative source; Pi configuration is generated from this file.
+
+providers:
+  llamacpp:
+    npm: "@ai-sdk/openai-compatible"
+    name: "llama.cpp bare metal"
+    options:
+      baseURL: "http://host.docker.internal:8080/v1"
+    models:
+      qwen-3.6:
+        id: "qwen3.6-35b-a3b-mtp"
+        name: "qwen-3.6"
+
+  deepseek:
+    models:
+      deepseek-v4-flash:
+        options:
+          reasoningEffort: max
+          textVerbosity: medium
+      deepseek-v4-pro:
+        options:
+          reasoningEffort: max
+          textVerbosity: medium
+
+  openai-codex:
+    models:
+      gpt-5.4:
+        id: "gpt-5.4"
+        options:
+          reasoningEffort: high
+          textVerbosity: medium
+      gpt-5.4-mini:
+        options:
+          reasoningEffort: high
+          textVerbosity: medium
+      gpt-5.5:
+        options:
+          reasoningEffort: high
+          textVerbosity: medium

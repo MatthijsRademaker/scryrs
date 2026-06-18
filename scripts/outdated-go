@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/.versions"
+source "$ROOT/scripts/lib/docker-verification.sh"
+
+verification_reset
+verification_run_as_root
+verification_workdir /workspace/src
+verification_add_cache go-build /cache/go-build GOCACHE
+verification_add_cache go-mod /cache/go-mod GOMODCACHE
+verification_add_env HOME=/tmp
+verification_add_env GO_MOD_OUTDATED_VERSION="$GO_MOD_OUTDATED_VERSION"
+
+verification_run_container "$GO_IMAGE" sh -ceu '
+apk add --no-cache bash >/dev/null
+export GOBIN=/tmp/go-bin
+export PATH="$GOBIN:$PATH"
+mkdir -p "$GOBIN"
+go install github.com/psampaz/go-mod-outdated@"$GO_MOD_OUTDATED_VERSION"
+
+report_file="$(mktemp)"
+status=0
+go list -u -m -json all | go-mod-outdated -direct -update -style markdown -ci >"$report_file" || status=$?
+cat "$report_file"
+updates="$(grep -cE "^\|" "$report_file" || true)"
+if [ "$updates" -gt 2 ]; then
+  updates=$((updates - 2))
+else
+  updates=0
+fi
+if [ "$status" -ne 0 ]; then
+  echo "go-mod-outdated found ${updates} outdated direct module(s)"
+  exit "$status"
+fi
+echo "go-mod-outdated found ${updates} outdated direct module(s)"
+'

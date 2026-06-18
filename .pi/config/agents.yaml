@@ -1,0 +1,16 @@
+# Repo-local Pi agent model tiers.
+# Edit this file, then run: scripts/sync-pi-agent-models
+
+modelTiers:
+  light: opencode-go/deepseek-v4-flash
+  medium: opencode-go/deepseek-v4-pro
+  heavy: openai-codex/gpt-5.5
+
+agents:
+  swarm-architect: light
+  swarm-lead-dev: medium
+  swarm-productowner: medium
+  swarm-reviewer: light
+  swarm-room-controller: light
+  swarm-spec-writer: heavy
+  swarm-worker: medium

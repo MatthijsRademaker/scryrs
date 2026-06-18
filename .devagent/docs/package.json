@@ -1,0 +1,23 @@
+{
+  "name": "devagent-docs",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "codegen": "npx likec4 gen webcomponent -o docs/public/likec4-webcomponent.js ../architecture",
+    "build": "bun run codegen && rspress build",
+    "dev": "rspress dev",
+    "preview": "rspress preview"
+  },
+  "dependencies": {
+    "@rspress/core": "^2.0.11"
+  },
+  "devDependencies": {
+    "@types/node": "^22.8.1",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "likec4": "^1.53.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  }
+}

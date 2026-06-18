@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/.versions"
+source "$ROOT/scripts/lib/docker-verification.sh"
+
+verification_reset
+verification_workdir /workspace/src/dashboard
+verification_add_cache npm /cache/npm npm_config_cache
+
+verification_run_container "$NODE_IMAGE" sh -ceu '
+npm ci --silent >/dev/null
+json_file="$(mktemp)"
+status=0
+npx eslint . --format json >"$json_file" || status=$?
+cat "$json_file"
+node - "$json_file" <<"NODE"
+const fs = require("fs");
+const path = process.argv[2];
+const results = JSON.parse(fs.readFileSync(path, "utf8"));
+let errors = 0;
+let warnings = 0;
+for (const result of results) {
+  errors += result.errorCount || 0;
+  warnings += result.warningCount || 0;
+}
+console.log(`eslint found ${errors} error(s) and ${warnings} warning(s)`);
+NODE
+exit "$status"
+'

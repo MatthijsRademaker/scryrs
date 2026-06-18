@@ -1,0 +1,14 @@
+[
+  {
+    "text": "Vision & Strategy",
+    "items": [
+      { "text": "Vision & Goals", "link": "/vision" }
+    ]
+  },
+  {
+    "text": "Documentation",
+    "items": [
+      { "text": "Architecture", "link": "/architecture" }
+    ]
+  }
+]

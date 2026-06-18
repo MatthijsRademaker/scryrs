@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Install git pre-commit hook.
+set -euo pipefail
+
+if ! docker info >/dev/null 2>&1; then
+    echo "[ERROR] Docker is not available. Ensure Docker is installed and configured correctly." >&2
+    echo "[HINT] Check your DOCKER_HOST environment variable or Docker daemon configuration." >&2
+    exit 1
+fi
+
+ROOT="$(git rev-parse --show-toplevel)"
+HOOK="$ROOT/.git/hooks/pre-commit"
+
+cat > "$HOOK" <<'INNER'
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+"$ROOT/scripts/precommit-run" "$@"
+INNER
+
+chmod +x "$HOOK"
+echo "Installed pre-commit hook at $HOOK"

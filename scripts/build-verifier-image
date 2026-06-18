@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/.versions"
+exec docker build \
+  --build-arg "PYTHON_IMAGE=$PYTHON_IMAGE" \
+  --build-arg "PRE_COMMIT_VERSION=$PRE_COMMIT_VERSION" \
+  -t "$PRECOMMIT_VERIFIER_IMAGE" \
+  "$ROOT/scripts/docker/verifier"

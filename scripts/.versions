@@ -1,0 +1,17 @@
+# Pinned tool images for Docker-backed scripts
+GO_IMAGE=golang:1.26.2-alpine
+GOLANGCI_LINT_IMAGE=golangci/golangci-lint:v2.12.2-alpine
+NODE_IMAGE=node:22-alpine
+NODE24_IMAGE=node:24-alpine
+BUF_IMAGE=bufbuild/buf:1.56.0
+PYTHON_IMAGE=python:3.12-slim
+EVAL_IMAGE=dev-swarm-evaluation:local
+GOFUMPT_VERSION=v0.10.0
+GOIMPORTS_VERSION=v0.45.0
+GCI_VERSION=v0.14.0
+GOVULNCHECK_VERSION=v1.4.0
+GO_MOD_OUTDATED_VERSION=v0.9.0
+GO_CALLVIS_VERSION=v0.7.1
+PRE_COMMIT_VERSION=4.0.1
+PRECOMMIT_VERIFIER_IMAGE=${PRECOMMIT_VERIFIER_IMAGE:-dev-swarm-precommit-verifier:local}
+POSTGRES_TEST_IMAGE=${POSTGRES_TEST_IMAGE:-postgres:16-alpine}

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/.versions"
+USER_ID="${HOST_UID:-$(id -u)}"
+GROUP_ID="${HOST_GID:-$(id -g)}"
+exec docker run --rm --user "$USER_ID:$GROUP_ID" "$PRECOMMIT_VERIFIER_IMAGE" sh -c 'pre-commit --version && git --version && docker --version'

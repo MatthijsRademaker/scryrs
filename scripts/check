@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Placeholder: project-specific checks.
+# Replace with actual checks. For Docker-backed tools, source scripts/lib/docker-verification.sh
+# and use Docker-managed verification cache volumes instead of repository-local .cache tool caches.
+# Examples: verification_add_cache go-build /cache/go-build GOCACHE; verification_add_cache go-mod /cache/go-mod GOMODCACHE; verification_add_cache npm /cache/npm npm_config_cache.
+set -euo pipefail
+echo "[scripts/check] TODO: replace this placeholder with actual project checks" >&2
+exit 1

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/.versions"
+source "$ROOT/scripts/lib/docker-verification.sh"
+
+WORKSPACE="$(verification_workspace_root)"
+
+verification_reset
+verification_workdir "$WORKSPACE"
+verification_with_docker_socket
+verification_add_arg -v "$WORKSPACE:$WORKSPACE"
+verification_add_cache pre-commit /cache/pre-commit PRE_COMMIT_HOME
+verification_add_cache pre-commit-home /cache/pre-commit-home HOME
+verification_add_env PROJECT_WORK_DIR="$WORKSPACE"
+verification_add_env AGENT_PROJECT_WORK_DIR="$WORKSPACE"
+verification_add_env HOST_UID="$(verification_workspace_uid)"
+verification_add_env HOST_GID="$(verification_workspace_gid)"
+
+verification_run_container "$PRECOMMIT_VERIFIER_IMAGE" \
+  sh -c 'git config --global --add safe.directory "$PWD" && pre-commit run "$@"' \
+  sh "$@"

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Placeholder: project-specific tests.
+# Replace with actual tests. For Docker-backed tools, source scripts/lib/docker-verification.sh
+# and run containers as the workspace UID/GID with named cache volumes such as /cache/go-build, /cache/go-mod, and /cache/npm.
+set -euo pipefail
+echo "[scripts/test] TODO: replace this placeholder with actual project tests" >&2
+exit 1

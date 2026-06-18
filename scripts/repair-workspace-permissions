@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/lib/docker-verification.sh"
+
+WORKSPACE="$(verification_workspace_root)"
+USER_ID="$(verification_workspace_uid)"
+GROUP_ID="$(verification_workspace_gid)"
+
+echo "[RECOVERY] Repairing workspace ownership for stale root-owned files."
+echo "[RECOVERY] Workspace: $WORKSPACE"
+echo "[RECOVERY] Target owner: $USER_ID:$GROUP_ID"
+
+if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+    exec sudo chown -R "$USER_ID:$GROUP_ID" "$WORKSPACE"
+fi
+
+verification_require_docker
+exec docker run --rm \
+  -v "$WORKSPACE:/workspace" \
+  "$VERIFY_CACHE_INIT_IMAGE" \
+  sh -c 'chown -R "$1:$2" /workspace' sh "$USER_ID" "$GROUP_ID"
