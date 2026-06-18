@@ -1,4 +1,6 @@
 {
+  "defaultModel": "deepseek/deepseek-v4-flash",
+  "defaultProvider": "deepseek",
   "packages": [
     "."
   ]
