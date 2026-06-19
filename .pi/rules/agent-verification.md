@@ -13,7 +13,7 @@ After making code changes, run verification through Docker:
 scripts/precommit-run
 ```
 
-This runs all pre-commit hooks (`go vet`, `go build`, `go test`, dashboard checks, proto generation)
+This runs all pre-commit hooks (cargo fmt, cargo check, cargo clippy, cargo test)
 inside Docker containers. It is the authoritative verification path used by CI and worker agents.
 
 For receipt-backed full verification, use `run_development_verification` in-session or
@@ -21,26 +21,16 @@ For receipt-backed full verification, use `run_development_verification` in-sess
 
 ## Individual scripts
 
-To run specific checks in isolation, use the individual scripts instead of the full pre-commit run:
+To run specific checks in isolation, use the individual scripts:
 
 ```bash
-scripts/check-go          # go vet
-scripts/format-go         # go formatting/import verification
-scripts/lint-go           # golangci-lint backend profile
-scripts/vuln-go           # govulncheck
-scripts/test-go           # go test -v ./...
-scripts/build-go          # go build -v ./...
-scripts/check-dashboard   # dashboard type-check
-scripts/lint-dashboard    # dashboard ESLint
-scripts/fallow-dashboard  # dashboard dead-code/health audit
-scripts/depcruise-dashboard # dashboard dependency graph rules
-scripts/audit-dashboard   # dashboard package security audit
-scripts/build-dashboard   # dashboard production build
-scripts/generate-proto    # buf generate
+scripts/check        # cargo fmt --check, cargo check, cargo clippy
+scripts/test         # cargo test --workspace --all-targets
+scripts/security     # cargo-deny, cargo-audit (security advisories)
 ```
 
 ## Do not use
 
-- `go build`, `go test`, `go vet` directly from host (no Go SDK)
+- `cargo build`, `cargo test`, `cargo clippy` directly from host (no Rust SDK)
 - `make lint`, `make test`, `make build` from `src/` (host SDK convenience, not available to agents)
 - Any Node.js or Python tooling directly from host
