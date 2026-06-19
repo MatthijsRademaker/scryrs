@@ -31,10 +31,10 @@ Use `ccc` for semantic exploration when you need to understand code paths, call 
 
 ### When to use each skill
 
-| Skill | Use when the review needs |
-|---|---|
-| `ccc` | Code path discovery, call-site exploration, or pattern comparison across the repository |
-| `swarm-board` | Task metadata, task comments, current status, or board-side context |
+| Skill                      | Use when the review needs                                                                                                  |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `ccc`                      | Code path discovery, call-site exploration, or pattern comparison across the repository                                    |
+| `swarm-board`              | Task metadata, task comments, current status, or board-side context                                                        |
 | `workflow-taskflow-expert` | Workflow/taskflow/gate logic in `src/manager/flowcontroller/`, `src/shared/types/` — gate policies, scheduling, validation |
 
 Use the appropriate skill when deep domain knowledge is required for a finding.

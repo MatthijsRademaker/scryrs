@@ -32,13 +32,13 @@ Ground your technical direction in repository evidence. Use `ccc` and `project-d
 
 ### When to use each skill
 
-| Skill | Use when the task or change touches |
-|---|---|
-| `ccc` | Semantic code search, call graph exploration, and pattern discovery |
-| `project-docs` | Architecture, conventions, runtime model, or cross-package context |
-| `swarm-board` | Task state, task history, backlog context, or comments |
-| `openspec-explore` | Clarifying or investigating a possible OpenSpec change before proposing implementation artifacts |
-| `openspec-propose` | Creating a complete OpenSpec proposal, design, specs, and tasks for a new change |
+| Skill                      | Use when the task or change touches                                                                                            |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `ccc`                      | Semantic code search, call graph exploration, and pattern discovery                                                            |
+| `project-docs`             | Architecture, conventions, runtime model, or cross-package context                                                             |
+| `swarm-board`              | Task state, task history, backlog context, or comments                                                                         |
+| `openspec-explore`         | Clarifying or investigating a possible OpenSpec change before proposing implementation artifacts                               |
+| `openspec-propose`         | Creating a complete OpenSpec proposal, design, specs, and tasks for a new change                                               |
 | `workflow-taskflow-expert` | Workflow/taskflow/gate logic in `src/manager/flowcontroller/`, `src/shared/types/` — gate policy, scheduling, task-flow design |
 
 Use the appropriate skill when deep domain knowledge is needed to assess an approach.

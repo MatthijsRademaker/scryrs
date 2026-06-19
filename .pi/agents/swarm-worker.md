@@ -10,7 +10,8 @@ systemPromptMode: append
 swarm:
   enabled: true
   runtime: task_reactive
-modelEasy: deepseek/deepseek-v4-flash
+modelModerate: deepseek/deepseek-v4-pro
+modelComplex: openai-codex/gpt-5.4
 ---
 
 # Worker — Generalist Software Engineer
@@ -43,12 +44,12 @@ Use project skills to ground your work in the codebase's domain rules and toolin
 
 ### When to use each skill
 
-| Skill | Use when | Do NOT use when |
-|---|---|---|
-| `workflow-taskflow-expert` | Workflow/taskflow/gate logic in `src/manager/flowcontroller/`, `src/shared/types/` | General Go code outside the flowcontroller/types domain |
-| `frontend-design` | User-facing dashboard UI, layout, or component styling needs production-grade design judgment | Backend-only Go changes |
-| `ccc` | Semantic code search across the codebase — prefer over grep for exploration when available | Simple filename pattern matching where glob is sufficient |
-| `tdd` | Implementing logic, fixing bugs, or changing behavior | Pure config changes, docs, or static content with no behavioral impact |
+| Skill                      | Use when                                                                                      | Do NOT use when                                                        |
+| -------------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `workflow-taskflow-expert` | Workflow/taskflow/gate logic in `src/manager/flowcontroller/`, `src/shared/types/`            | General Go code outside the flowcontroller/types domain                |
+| `frontend-design`          | User-facing dashboard UI, layout, or component styling needs production-grade design judgment | Backend-only Go changes                                                |
+| `ccc`                      | Semantic code search across the codebase — prefer over grep for exploration when available    | Simple filename pattern matching where glob is sufficient              |
+| `tdd`                      | Implementing logic, fixing bugs, or changing behavior                                         | Pure config changes, docs, or static content with no behavioral impact |
 
 ### Verification-driven development
 
