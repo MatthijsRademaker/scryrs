@@ -6,11 +6,9 @@ agent_types:
   - swarm-worker
 ---
 
-$ARGUMENTS
-
 <context>
 You are gathering planning inputs in response to a code review.
-Task request content (including review feedback and task comments) is provided via $ARGUMENTS in the prompt body above.
+Review feedback and task comments are provided in the context window.
 Your output will be consumed by another LLM, so optimize for unambiguous structure over human readability.
 </context>
 
@@ -19,7 +17,7 @@ Review the current branch changes and any provided task comments, then produce s
 </task>
 
 <scope_discipline>
-- Treat the task request content provided via $ARGUMENTS above, the task ID, and current branch diff as the complete scope.
+- Treat the current task prompt, task ID, injected `## Task ID Context`, and current branch diff as the complete scope.
 - Do not pull in unrelated tasks, experiments, evaluations, historical repo work, or broader process concerns unless they are directly needed to understand this task's review feedback.
 - Ground every observation in the current task comments, current diff, or repository files inspected specifically for this task.
 - If an observation cannot be tied back to this task, exclude it.
@@ -27,8 +25,8 @@ Review the current branch changes and any provided task comments, then produce s
 
 <requirements>
 <requirement>Run `git diff` against the PR base to understand the current branch changes.</requirement>
-<requirement>Locate the `### Task Comments` section in the task request content above and aggregate all substantive durable task comments across review rounds before writing any diff-based observations.</requirement>
-<requirement>Read durable task comments from the task request content above. These are the primary review feedback items.</requirement>
+<requirement>Locate the `### Task Comments` section in the provided task context and aggregate all substantive durable task comments across review rounds before writing any diff-based observations.</requirement>
+<requirement>Read durable task comments from the provided task context. These are the primary review feedback items.</requirement>
 <requirement>Call out repeated or previously unresolved feedback explicitly so downstream execution can prioritize recurring defects first.</requirement>
 <requirement>Preserve durable task comment metadata for every task-comment-derived item: author, source, created_at, and agent_run_id when present.</requirement>
 <requirement>Treat all substantive durable task comments as primary review inputs. Do not privilege `Source=review` over other gate-agent outputs (architect, lead-dev, reviewer).</requirement>

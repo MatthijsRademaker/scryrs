@@ -10,6 +10,7 @@ systemPromptMode: append
 swarm:
   enabled: true
   runtime: task_reactive
+modelModerate: deepseek/deepseek-v4-pro
 ---
 
 # Spec-Writer — Task Specification Specialist

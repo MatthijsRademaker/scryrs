@@ -3,6 +3,7 @@ description: Enter explore mode - think through ideas, investigate problems, cla
 swarm: true
 agent_types:
   - swarm-refinement-room
+  - swarm-lead-dev
 ---
 
 Enter explore mode. Think deeply. Visualize freely. Follow the conversation wherever it goes.

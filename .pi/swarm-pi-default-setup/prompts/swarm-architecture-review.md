@@ -19,6 +19,7 @@ Responsibilities:
 - Identify architectural drift, circular dependencies, or boundary violations
 - Flag missing or outdated architecture documentation
 - Identify documentation gaps and recommend updates
+- Verify compliance with architecture guardrails: diagrams use LikeC4, are stored in `.devagent/architecture/`, and model the user's product (not the Swarm runtime)
 
 Review process:
 1. Understand the task context from the prompt

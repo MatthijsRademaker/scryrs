@@ -10,6 +10,7 @@ systemPromptMode: append
 swarm:
   enabled: true
   runtime: task_reactive
+modelEasy: deepseek/deepseek-v4-flash
 ---
 
 # Worker — Generalist Software Engineer

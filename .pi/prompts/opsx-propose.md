@@ -3,6 +3,7 @@ description: Propose a new change - create it and generate all artifacts in one 
 swarm: true
 agent_types:
   - swarm-refinement-room
+  - swarm-lead-dev
 ---
 
 Propose a new change - create the change and generate all artifacts in one step.
@@ -19,7 +20,12 @@ $ARGUMENTS
 
 ---
 
-**Input**: `$ARGUMENTS` is the change name for manual non-swarm use. In swarm context, `DEV_SWARM_TASK_ID` takes precedence — the harness always sets it.
+**Input**: `$ARGUMENTS` can be additional input. In swarm context, `DEV_SWARM_TASK_ID` takes precedence — the harness always sets it.
+
+The change name is resolved in this priority order:
+
+1. `DEV_SWARM_TASK_ID` environment variable (set automatically by the swarm harness; always the task UUID)
+2. Descriptive name (fallback for manual use on the host)
 
 **Important naming rule**: Openspec change names must start with a letter. Task UUIDs may start with a digit (e.g. `31b9047a-...`). To satisfy this constraint, swarm task IDs are always prefixed with `task-`.
 
@@ -28,6 +34,7 @@ $ARGUMENTS
 1. **Determine the change name**
 
    Check the authoritative source first:
+
    ```bash
    echo "DEV_SWARM_TASK_ID=${DEV_SWARM_TASK_ID:-}"
    ```
@@ -122,4 +129,3 @@ After completing all artifacts, summarize:
 - If a change with that name already exists, ask if user wants to continue it or create a new one
 - After creating the change directory (step 2), verify `openspec/changes/<name>/.openspec.yaml` exists at exactly the expected path. In swarm context the expected path is `openspec/changes/task-<TASK_ID>/`. If it doesn't match, stop and fix the mismatch — do not proceed with artifact creation.
 - Verify each artifact file exists after writing before proceeding to next
-- **Specs artifact must pass `--strict` validation**: The specs `outputPath` is `specs/**/*.md`. You MUST create proper capability folders under `specs/` with delta headers (`## MODIFIED`, `## ADDED`, or `## REMOVED`) and at least one scenario block — NEVER create a bare `README.md` or a flat file claiming "no spec changes." Even for pure bug fixes or refactors, every requirement referenced in the proposal SHALL have a corresponding capability folder with a delta header. For a bug fix that doesn't change capability semantics, create a `## MODIFIED` delta that documents the current expected behavior plus a verification scenario proving the fix. Use `openspec instructions specs` output as the authoritative structure guide.
