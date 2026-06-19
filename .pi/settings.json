@@ -1,5 +1,5 @@
 {
-  "defaultModel": "openai-codex/gpt-5.4",
-  "defaultProvider": "deepseek",
+  "defaultModel": "gpt-5.4",
+  "defaultProvider": "openai-codex",
   "packages": ["."]
 }
