@@ -1,8 +1,8 @@
-//! Feature-gated CLI scaffold for scryrs.
+//! v0 CLI contract: single placeholder command `scryrs hotspots <PATH>`.
 
 use std::io::{self, Write};
 
-use scryrs_types::{FeatureDescriptor, SCHEMA_VERSION};
+use scryrs_types::SCHEMA_VERSION;
 
 pub fn run<I, S>(args: I) -> i32
 where
@@ -27,17 +27,25 @@ where
         [flag] if flag == "--version" || flag == "-V" => {
             writeln!(out, "scryrs {}", env!("CARGO_PKG_VERSION")).map_or(1, |_| 0)
         }
-        [command] if command == "components" => write_components_text(&mut out).map_or(1, |_| 0),
-        [command, flag, format]
-            if command == "components" && flag == "--format" && format == "json" =>
-        {
-            write_components_json(&mut out).map_or(1, |_| 0)
+        [command, _path] if command == "hotspots" => write_hotspots_json(&mut out).map_or(1, |_| 0),
+        [command] if command == "hotspots" => {
+            if writeln!(err, "error: missing required PATH argument").is_err()
+                || writeln!(err, "usage: scryrs hotspots <PATH>").is_err()
+            {
+                1
+            } else {
+                2
+            }
         }
-        [command] if is_known_stub(command) => writeln!(
-            out,
-            "scryrs {command}: scaffold only; implementation pending"
-        )
-        .map_or(1, |_| 0),
+        [command, _path, ..] if command == "hotspots" => {
+            if writeln!(err, "error: unexpected argument after PATH").is_err()
+                || writeln!(err, "usage: scryrs hotspots <PATH>").is_err()
+            {
+                1
+            } else {
+                2
+            }
+        }
         [unknown, ..] => {
             if writeln!(err, "unknown command: {unknown}").is_err()
                 || writeln!(err, "run `scryrs --help`").is_err()
@@ -50,116 +58,23 @@ where
     }
 }
 
-#[allow(clippy::vec_init_then_push)]
-fn descriptors() -> Vec<FeatureDescriptor> {
-    let mut features = Vec::new();
-
-    #[cfg(feature = "core")]
-    features.push(scryrs_core::descriptor());
-
-    #[cfg(feature = "graph")]
-    features.push(scryrs_graph::descriptor());
-
-    #[cfg(feature = "policy")]
-    features.push(scryrs_policy::descriptor());
-
-    #[cfg(feature = "curator")]
-    features.push(scryrs_curator::descriptor());
-
-    #[cfg(feature = "llm")]
-    features.push(scryrs_llm::descriptor());
-
-    #[cfg(feature = "markdown")]
-    features.push(scryrs_adapter_markdown::descriptor());
-
-    #[cfg(feature = "rspress")]
-    features.push(scryrs_adapter_rspress::descriptor());
-
-    #[cfg(feature = "runtime")]
-    features.push(scryrs_runtime::descriptor());
-
-    #[cfg(feature = "sandbox")]
-    features.push(scryrs_sandbox::descriptor());
-
-    #[cfg(feature = "telemetry")]
-    features.push(scryrs_telemetry::descriptor());
-
-    features
-}
-
 fn write_help(out: &mut impl Write) -> io::Result<()> {
     writeln!(
         out,
         "scryrs - context intelligence for AI-assisted codebases\n\n\
 Usage:\n\
-  scryrs components [--format json]\n\
-  scryrs trace\n\
-  scryrs hotspots\n\
-  scryrs propose\n\
-  scryrs graph\n\
-  scryrs route\n\
-  scryrs adapters\n\n\
-Scaffold commands print placeholders until feature implementations land."
+  scryrs hotspots <PATH>\n\n\
+scryrs hotspots emits a versioned JSON summary for the given repository path.\n\
+This is a v0 placeholder contract; only this command is defined."
     )
 }
 
-fn write_components_text(out: &mut impl Write) -> io::Result<()> {
-    for feature in descriptors() {
-        writeln!(out, "{} - {}", feature.title, feature.summary)?;
-    }
-
-    Ok(())
-}
-
-fn write_components_json(out: &mut impl Write) -> io::Result<()> {
-    let components = descriptors();
-    writeln!(out, "{{")?;
-    writeln!(
+fn write_hotspots_json(out: &mut impl Write) -> io::Result<()> {
+    write!(
         out,
-        "  \"schemaVersion\": \"{}\",",
-        escape_json(SCHEMA_VERSION)
-    )?;
-    writeln!(out, "  \"components\": [")?;
-
-    for (index, feature) in components.iter().enumerate() {
-        let comma = if index + 1 == components.len() {
-            ""
-        } else {
-            ","
-        };
-        writeln!(
-            out,
-            "    {{ \"id\": \"{}\", \"title\": \"{}\", \"summary\": \"{}\" }}{}",
-            escape_json(feature.id),
-            escape_json(feature.title),
-            escape_json(feature.summary),
-            comma
-        )?;
-    }
-
-    writeln!(out, "  ]")?;
-    writeln!(out, "}}")
-}
-
-fn is_known_stub(command: &str) -> bool {
-    matches!(
-        command,
-        "trace"
-            | "hotspots"
-            | "report"
-            | "suggest-docs"
-            | "propose"
-            | "graph"
-            | "route"
-            | "adapters"
+        "{{\"schemaVersion\":\"{}\",\"command\":\"hotspots\",\"status\":\"placeholder\"}}",
+        SCHEMA_VERSION
     )
-}
-
-fn escape_json(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
 }
 
 #[cfg(test)]
@@ -167,17 +82,86 @@ mod tests {
     use super::*;
 
     #[test]
-    fn help_returns_success() {
+    fn help_flag_prints_help_and_exits_0() {
         let mut out = Vec::new();
         let mut err = Vec::new();
 
         assert_eq!(run_with_writers(["--help"], &mut out, &mut err), 0);
         assert!(err.is_empty());
-        assert!(String::from_utf8_lossy(&out).contains("Usage:"));
+        let output = String::from_utf8_lossy(&out);
+        assert!(output.contains("Usage:"));
+        assert!(output.contains("hotspots <PATH>"));
     }
 
     #[test]
-    fn unknown_command_returns_usage_error() {
+    fn short_help_flag_prints_help_and_exits_0() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(run_with_writers(["-h"], &mut out, &mut err), 0);
+        assert!(err.is_empty());
+        assert!(String::from_utf8_lossy(&out).contains("hotspots <PATH>"));
+    }
+
+    #[test]
+    fn version_flag_prints_version_and_exits_0() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(run_with_writers(["--version"], &mut out, &mut err), 0);
+        assert!(err.is_empty());
+        assert!(String::from_utf8_lossy(&out).contains("scryrs "));
+    }
+
+    #[test]
+    fn short_version_flag_prints_version_and_exits_0() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(run_with_writers(["-V"], &mut out, &mut err), 0);
+        assert!(err.is_empty());
+        assert!(String::from_utf8_lossy(&out).contains("scryrs "));
+    }
+
+    #[test]
+    fn bare_invocation_prints_help_and_exits_0() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(run_with_writers(Vec::<&str>::new(), &mut out, &mut err), 0);
+        assert!(err.is_empty());
+        assert!(String::from_utf8_lossy(&out).contains("hotspots <PATH>"));
+    }
+
+    #[test]
+    fn hotspots_with_path_emits_json_and_exits_0() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(["hotspots", "/tmp"], &mut out, &mut err),
+            0
+        );
+        assert!(err.is_empty());
+
+        let output = String::from_utf8_lossy(&out);
+        assert!(output.contains("\"schemaVersion\":\"0.1.0\""));
+        assert!(output.contains("\"command\":\"hotspots\""));
+        assert!(output.contains("\"status\":\"placeholder\""));
+    }
+
+    #[test]
+    fn hotspots_without_path_exits_2_with_error() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(run_with_writers(["hotspots"], &mut out, &mut err), 2);
+        assert!(out.is_empty());
+        assert!(String::from_utf8_lossy(&err).contains("missing required PATH argument"));
+    }
+
+    #[test]
+    fn unknown_command_exits_2_with_error() {
         let mut out = Vec::new();
         let mut err = Vec::new();
 
@@ -187,18 +171,54 @@ mod tests {
     }
 
     #[test]
-    fn components_can_be_emitted_as_json() {
+    fn components_command_exits_2() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(run_with_writers(["components"], &mut out, &mut err), 2);
+        assert!(out.is_empty());
+        assert!(String::from_utf8_lossy(&err).contains("unknown command: components"));
+    }
+
+    #[test]
+    fn hotspots_with_extra_args_exits_2_with_error() {
         let mut out = Vec::new();
         let mut err = Vec::new();
 
         assert_eq!(
-            run_with_writers(["components", "--format", "json"], &mut out, &mut err),
-            0
+            run_with_writers(["hotspots", "/tmp", "extra"], &mut out, &mut err),
+            2
         );
-        assert!(err.is_empty());
+        assert!(out.is_empty());
+        let err_str = String::from_utf8_lossy(&err);
+        assert!(err_str.contains("unexpected argument after PATH"));
+        assert!(!err_str.contains("unknown command"));
+    }
 
-        let output = String::from_utf8_lossy(&out);
-        assert!(output.contains("\"schemaVersion\": \"0.1.0\""));
-        assert!(output.contains("\"components\""));
+    #[test]
+    fn previously_stubbed_commands_exit_2() {
+        for cmd in &[
+            "trace",
+            "propose",
+            "graph",
+            "route",
+            "adapters",
+            "report",
+            "suggest-docs",
+        ] {
+            let mut out = Vec::new();
+            let mut err = Vec::new();
+
+            assert_eq!(
+                run_with_writers([*cmd], &mut out, &mut err),
+                2,
+                "command '{cmd}' should exit 2"
+            );
+            assert!(out.is_empty(), "command '{cmd}' should not produce stdout");
+            assert!(
+                String::from_utf8_lossy(&err).contains("unknown command"),
+                "command '{cmd}' should produce unknown command error on stderr"
+            );
+        }
     }
 }
