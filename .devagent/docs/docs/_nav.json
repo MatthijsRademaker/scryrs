@@ -10,5 +10,11 @@
     "items": [
       { "text": "Architecture", "link": "/architecture" }
     ]
+  },
+  {
+    "text": "Technical",
+    "items": [
+      { "text": "CLI v0 Contract", "link": "/cli-v0-contract" }
+    ]
   }
 ]
