@@ -7,7 +7,7 @@
 ## 2. scryrs-cli clap migration
 
 - [x] 2.1 Add pre-clap normalization at top of `run_with_writers`: map root-level `-hj` to `--help-json` before constructing clap args vec
-- [x] 2.2 Define `clap::Command` with builder API: root command with `no_binary_name(true)`, `subcommand_required(false)`, `disable_help_flag(true)`, `disable_version_flag(true)`; one `hotspots` subcommand with a required positional `PATH` argument
+- [x] 2.2 Define `clap::Command` with builder API: root command with `no_binary_name(true)`, `subcommand_required(false)`; one `hotspots` subcommand with `disable_help_flag(true)`, `disable_version_flag(true)` and a required positional `PATH` argument
 - [x] 2.3 Implement `try_get_matches_from` dispatch: on `Ok(matches)` with `hotspots` subcommand matched, call `write_hotspots_json`; on `Err(e)`, match `e.kind()`
 - [x] 2.4 Handle `ErrorKind::DisplayHelp` and `ErrorKind::DisplayVersion` by routing to existing `write_help` and version output; exit 0 (or 1 on I/O error)
 - [x] 2.5 Map clap usage errors (`InvalidSubcommand`, `MissingRequiredArgument`, `TooManyValues`, `UnknownArgument`) to contract's three-line error format on stderr; exit 2 (or 1 on I/O error)
