@@ -1,0 +1,8 @@
+too-many-lines-threshold = 150
+type-complexity-threshold = 300
+cognitive-complexity-threshold = 25
+disallowed-methods = [
+  { path = "std::process::Command::spawn", reason = "Use a capability-scoped command broker." },
+  { path = "std::process::Command::output", reason = "Use a capability-scoped command broker." },
+  { path = "std::process::Command::status", reason = "Use a capability-scoped command broker." },
+]

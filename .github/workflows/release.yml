@@ -1,0 +1,42 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install 1.85.0 --profile minimal
+          rustup default 1.85.0
+
+      - name: Build
+        run: cargo build -p scryrs-cli --release --locked --all-features
+
+      - name: Generate checksum
+        run: sha256sum target/release/scryrs > target/release/scryrs-linux-x86_64.sha256
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: scryrs-linux-x86_64
+          path: |
+            target/release/scryrs
+            target/release/scryrs-linux-x86_64.sha256
+
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: target/release/scryrs

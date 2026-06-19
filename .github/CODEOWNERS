@@ -1,0 +1,8 @@
+# Guardrail-sensitive files should get explicit maintainer review.
+/.github/ @matthijsrademaker
+/Cargo.toml @matthijsrademaker
+/Cargo.lock @matthijsrademaker
+/deny.toml @matthijsrademaker
+/clippy.toml @matthijsrademaker
+/rust-toolchain.toml @matthijsrademaker
+/crates/scryrs-cli/ @matthijsrademaker

@@ -1,17 +1,165 @@
-import ClientOnly from '../theme/ClientOnly';
+# Architecture
 
-# Architecture Diagrams
+scryrs is a Rust workspace split by product capability: the CLI composes feature-gated crates, the deterministic core owns trace and hotspot logic, guardrail crates bound risky behavior, and adapters publish knowledge to documentation systems without making any single docs framework mandatory.
 
-This page is populated during the Architecture & Documentation onboarding step.
+## Workspace Topology
 
-{/* ARCH-DOCS-AGENT: Replace placeholder content in this file with prose and
-actual <likec4-view> embeds whose view-id values match files in
-.devagent/architecture/views/. Remove this comment after updating the page. */}
+```text
++--------------------------------------------------------------+
+| User / CI / Agent                                             |
++------------------------------+-------------------------------+
+                               | `scryrs` binary
++------------------------------v-------------------------------+
+| crates/scryrs-cli                                             |
+| Feature-gated command surface and machine-readable output     |
++------+-------------+-------------+------------+--------------+
+       |             |             |            |
++------v------+ +----v-----+ +-----v-----+ +----v--------------+
+| core suite  | | graph    | | curator   | | runtime           |
+| crates/     | | crates/  | | crates/   | | crates/           |
+| scryrs-core | | scryrs-  | | scryrs-   | | scryrs-runtime    |
+|             | | graph    | | curator   | |                  |
++------+------+ +----+-----+ +-----+-----+ +----+--------------+
+       |             |             |            |
+       +-------------+-------------+------------+
+                         |
+               +---------v---------+
+               | crates/scryrs-    |
+               | types             |
+               | Shared contracts  |
+               +-------------------+
 
-<ClientOnly>
++--------------------------------------------------------------+
+| Optional boundaries                                           |
++----------------------+---------------------+-----------------+
+| adapters             | guardrails           | llm             |
+| markdown / rspress   | policy/sandbox/      | bounded model   |
+| publishing surfaces  | telemetry crates     | transport       |
++----------------------+---------------------+-----------------+
+```
 
-{/* Add <likec4-view view-id="YOUR_VIEW_ID" ... /> embeds here after generating
-the LikeC4 model for this project. Keep this block empty until valid view IDs
-exist so the docs page does not render broken diagrams. */}
+The key architectural separation: **suite crates own product capabilities**, **guardrail crates bound unsafe or privacy-sensitive behavior**, and **adapters are publishing surfaces**. `crates/scryrs-cli` composes those pieces through Cargo features; `crates/scryrs-types` keeps cross-crate contracts small and explicit.
 
-</ClientOnly>
+## Runtime Flow
+
+```text
+Agent session
+    ↓
+scryrs trace collection       (crates/scryrs-core)
+    ↓
+deterministic hotspot scoring (crates/scryrs-core)
+    ↓
+knowledge graph update        (crates/scryrs-graph)
+    ↓
+reviewable proposal creation  (crates/scryrs-curator)
+    ↓
+publishing adapter            (crates/scryrs-adapter-markdown / rspress)
+    ↓
+agent routing hint            (crates/scryrs-runtime)
+```
+
+The LLM layer is not in the policy path. `crates/scryrs-llm` is an optional transport boundary for explanation, suggestion ranking, or patch drafting. Deterministic crates produce evidence first; model-backed features can interpret that evidence later.
+
+## Crate Responsibilities
+
+| Crate | Role | Why it exists |
+| --- | --- | --- |
+| `crates/scryrs-cli` | Main `scryrs` binary | Keeps user, CI, and agent command behavior in one feature-gated shell. |
+| `crates/scryrs-types` | Shared contracts | Prevents circular dependencies and keeps cross-crate data shapes explicit. |
+| `crates/scryrs-core` | Trace and hotspot foundation | Preserves standalone hotspot detection without docs-site assumptions. |
+| `crates/scryrs-graph` | Knowledge graph foundation | Owns routing graph concepts separate from trace collection. |
+| `crates/scryrs-curator` | Proposal foundation | Turns hotspots into reviewable docs, skill, decision, or memory proposals. |
+| `crates/scryrs-runtime` | Agent-side routing foundation | Helps future agents choose relevant context faster. |
+| `crates/scryrs-adapter-markdown` | Markdown publishing adapter | Supports generic docs repos and simple file-based output. |
+| `crates/scryrs-adapter-rspress` | Rspress publishing adapter | Makes Rspress first-class without making it foundational. |
+| `crates/scryrs-policy` | Deterministic guardrail decisions | Keeps policy decisions in code, not prompts. |
+| `crates/scryrs-sandbox` | Tool and filesystem capability policy | Establishes read/write/exec boundaries before tool execution exists. |
+| `crates/scryrs-telemetry` | Privacy and telemetry defaults | Makes observability opt-in and redaction-first. |
+| `crates/scryrs-llm` | Optional model boundary | Keeps provider/model transport replaceable and outside deterministic policy. |
+| `xtask` | Repository automation | Provides a stable place for bootstrap, CI, release, and generated-artifact tasks. |
+
+## Cargo Feature Model
+
+`crates/scryrs-cli/Cargo.toml` is the composition point.
+
+```text
+default
+= core + graph + curator + markdown + runtime + guardrails
+
+guardrails
+= policy + sandbox + telemetry
+
+full
+= default + llm + rspress
+```
+
+This lets users keep the CLI lean for standalone hotspot analysis while enabling richer suite behavior when needed:
+
+```bash
+cargo run -p scryrs-cli -- components
+cargo run -p scryrs-cli --no-default-features --features core -- components
+cargo run -p scryrs-cli --features full -- components --format json
+```
+
+## Guardrail Boundary
+
+```text
++----------------------+
+| CLI command           |
++----------+-----------+
+           |
++----------v-----------+
+| deterministic policy  |  crates/scryrs-policy
++----------+-----------+
+           | allow / deny
++----------v-----------+
+| capability boundary   |  crates/scryrs-sandbox
++----------+-----------+
+           | events, redacted logs
++----------v-----------+
+| telemetry boundary    |  crates/scryrs-telemetry
++----------+-----------+
+           | optional explanation or draft
++----------v-----------+
+| bounded LLM adapter   |  crates/scryrs-llm
++----------------------+
+```
+
+Policy comes before model use. Sandbox and telemetry crates exist even before full implementations so future features have obvious homes and do not smuggle shell access, write access, or remote logging into product crates.
+
+## Publishing Surfaces
+
+scryrs does not replace a documentation system. It tells the docs system what it should know.
+
+```text
+hotspots / proposals / graph
+          ↓
++---------------------------+
+| adapter crates            |
++---------------------------+
+| scryrs-adapter-markdown   | -> /docs, /memory-inbox, /adr
+| scryrs-adapter-rspress    | -> Rspress routes, llms.txt integration
+| future adapters           | -> Docusaurus, VitePress, internal docs repos
++---------------------------+
+```
+
+Adapters depend on shared contracts and suite outputs. Core detection should never depend on Rspress, Markdown layout, or a published docs site.
+
+## Source-of-Truth Rules
+
+- `Cargo.toml` defines workspace membership, shared dependency aliases, and workspace lint policy.
+- `crates/scryrs-cli/Cargo.toml` defines the product feature matrix.
+- `crates/scryrs-types/src/lib.rs` owns shared contracts used across suite crates.
+- `scripts/check`, `scripts/test`, and `scripts/security` are local guardrail entry points.
+- `.github/workflows/ci.yml` mirrors fast-lane checks for pull requests and `main`.
+- `deny.toml`, `clippy.toml`, `rustfmt.toml`, and `rust-toolchain.toml` capture tool policy.
+
+## Current Limitations
+
+- Behavior is scaffold-level: commands print placeholders and crates expose minimal public contracts.
+- No LikeC4 architecture model exists yet, so this page uses text diagrams instead of embedded generated diagrams.
+- Rust toolchain is not installed in the current local environment, so cargo-backed verification is blocked until `rust-toolchain.toml` can be installed.
+
+## Related Pages
+
+- [Vision & Goals](./vision.md) — product positioning, suite narrative, scope, and anti-goals.

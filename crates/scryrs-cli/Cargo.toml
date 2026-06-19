@@ -1,0 +1,45 @@
+[package]
+name = "scryrs-cli"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "scryrs"
+path = "src/main.rs"
+
+[features]
+default = ["core", "graph", "curator", "markdown", "runtime", "guardrails"]
+full = ["default", "llm", "rspress"]
+guardrails = ["policy", "sandbox", "telemetry"]
+core = ["dep:scryrs-core"]
+graph = ["dep:scryrs-graph"]
+curator = ["dep:scryrs-curator"]
+llm = ["dep:scryrs-llm"]
+markdown = ["dep:scryrs-adapter-markdown"]
+policy = ["dep:scryrs-policy"]
+rspress = ["dep:scryrs-adapter-rspress"]
+runtime = ["dep:scryrs-runtime"]
+sandbox = ["dep:scryrs-sandbox"]
+telemetry = ["dep:scryrs-telemetry"]
+
+[dependencies]
+scryrs-adapter-markdown = { workspace = true, optional = true }
+scryrs-adapter-rspress = { workspace = true, optional = true }
+scryrs-core = { workspace = true, optional = true }
+scryrs-curator = { workspace = true, optional = true }
+scryrs-graph = { workspace = true, optional = true }
+scryrs-llm = { workspace = true, optional = true }
+scryrs-policy = { workspace = true, optional = true }
+scryrs-runtime = { workspace = true, optional = true }
+scryrs-sandbox = { workspace = true, optional = true }
+scryrs-telemetry = { workspace = true, optional = true }
+scryrs-types.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[lints]
+workspace = true

@@ -1,0 +1,6 @@
+[alias]
+xtask = "run -p xtask --"
+ci-fast = "xtask ci-fast"
+
+[term]
+color = "auto"
