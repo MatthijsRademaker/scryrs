@@ -22,3 +22,8 @@ architecture/cache/
 # NOTE: You may want to commit your design files (mockups, wireframes, diagrams)
 # Remove the line below if you want to track designs in version control
 # designs/
+refinement-room/ledgers/
+refinement-room/runtime-room-definitions/
+hook-failures/
+sessions/
+
