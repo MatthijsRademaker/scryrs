@@ -29,8 +29,9 @@ where
         }
         [command, _path] if command == "hotspots" => write_hotspots_json(&mut out).map_or(1, |_| 0),
         [command] if command == "hotspots" => {
-            if writeln!(err, "error: missing required PATH argument").is_err()
-                || writeln!(err, "usage: scryrs hotspots <PATH>").is_err()
+            if writeln!(err, "scryrs hotspots: missing required PATH argument").is_err()
+                || writeln!(err, "Usage: scryrs hotspots <PATH>").is_err()
+                || writeln!(err, "See `scryrs --help`").is_err()
             {
                 1
             } else {
@@ -38,8 +39,9 @@ where
             }
         }
         [command, _path, ..] if command == "hotspots" => {
-            if writeln!(err, "error: unexpected argument after PATH").is_err()
-                || writeln!(err, "usage: scryrs hotspots <PATH>").is_err()
+            if writeln!(err, "scryrs hotspots: unexpected argument after PATH").is_err()
+                || writeln!(err, "Usage: scryrs hotspots <PATH>").is_err()
+                || writeln!(err, "See `scryrs --help`").is_err()
             {
                 1
             } else {
@@ -47,8 +49,8 @@ where
             }
         }
         [unknown, ..] => {
-            if writeln!(err, "unknown command: {unknown}").is_err()
-                || writeln!(err, "run `scryrs --help`").is_err()
+            if writeln!(err, "unknown command: '{unknown}'").is_err()
+                || writeln!(err, "See `scryrs --help`").is_err()
             {
                 1
             } else {
@@ -61,11 +63,30 @@ where
 fn write_help(out: &mut impl Write) -> io::Result<()> {
     writeln!(
         out,
-        "scryrs - context intelligence for AI-assisted codebases\n\n\
-Usage:\n\
+        "scryrs — context intelligence for AI-assisted codebases\n\n\
+Discover, analyze, and navigate hotspots in your codebase.\n\n\
+USAGE\n\
   scryrs hotspots <PATH>\n\n\
-scryrs hotspots emits a versioned JSON summary for the given repository path.\n\
-This is a v0 placeholder contract; only this command is defined."
+ARGUMENTS\n\
+  <PATH>    Path to the repository root directory (required)\n\n\
+OUTPUT\n\
+  A single-line JSON object with the following envelope:\n\
+    {{\n\
+      \"schemaVersion\": \"{}\",\n\
+      \"command\": \"hotspots\",\n\
+      \"status\": \"placeholder\"\n\
+    }}\n\n\
+EXAMPLES\n\
+  scryrs hotspots /path/to/repo\n\
+  scryrs hotspots .\n\n\
+OPTIONS\n\
+  -h, --help       Print this help message and exit\n\
+  -V, --version    Print version and exit\n\n\
+EXIT CODES\n\
+  0    Success (output written to stdout)\n\
+  1    I/O error (output could not be written)\n\
+  2    Usage error (invalid arguments)",
+        SCHEMA_VERSION
     )
 }
 
@@ -89,8 +110,10 @@ mod tests {
         assert_eq!(run_with_writers(["--help"], &mut out, &mut err), 0);
         assert!(err.is_empty());
         let output = String::from_utf8_lossy(&out);
-        assert!(output.contains("Usage:"));
-        assert!(output.contains("hotspots <PATH>"));
+        assert!(output.contains("USAGE"));
+        assert!(output.contains("EXAMPLES"));
+        assert!(output.contains("OPTIONS"));
+        assert!(output.contains("EXIT CODES"));
     }
 
     #[test]
@@ -100,7 +123,7 @@ mod tests {
 
         assert_eq!(run_with_writers(["-h"], &mut out, &mut err), 0);
         assert!(err.is_empty());
-        assert!(String::from_utf8_lossy(&out).contains("hotspots <PATH>"));
+        assert!(String::from_utf8_lossy(&out).contains("USAGE"));
     }
 
     #[test]
@@ -130,7 +153,10 @@ mod tests {
 
         assert_eq!(run_with_writers(Vec::<&str>::new(), &mut out, &mut err), 0);
         assert!(err.is_empty());
-        assert!(String::from_utf8_lossy(&out).contains("hotspots <PATH>"));
+        let output = String::from_utf8_lossy(&out);
+        assert!(output.contains("USAGE"));
+        assert!(output.contains("EXAMPLES"));
+        assert!(output.contains("EXIT CODES"));
     }
 
     #[test]
@@ -157,7 +183,11 @@ mod tests {
 
         assert_eq!(run_with_writers(["hotspots"], &mut out, &mut err), 2);
         assert!(out.is_empty());
-        assert!(String::from_utf8_lossy(&err).contains("missing required PATH argument"));
+        let err_str = String::from_utf8_lossy(&err);
+        assert!(err_str.contains("scryrs hotspots:"));
+        assert!(err_str.contains("missing required PATH argument"));
+        assert!(err_str.contains("Usage: scryrs hotspots <PATH>"));
+        assert!(err_str.contains("See `scryrs --help`"));
     }
 
     #[test]
@@ -167,7 +197,9 @@ mod tests {
 
         assert_eq!(run_with_writers(["unknown"], &mut out, &mut err), 2);
         assert!(out.is_empty());
-        assert!(String::from_utf8_lossy(&err).contains("unknown command: unknown"));
+        let err_str = String::from_utf8_lossy(&err);
+        assert!(err_str.contains("unknown command: 'unknown'"));
+        assert!(err_str.contains("See `scryrs --help`"));
     }
 
     #[test]
@@ -177,7 +209,9 @@ mod tests {
 
         assert_eq!(run_with_writers(["components"], &mut out, &mut err), 2);
         assert!(out.is_empty());
-        assert!(String::from_utf8_lossy(&err).contains("unknown command: components"));
+        let err_str = String::from_utf8_lossy(&err);
+        assert!(err_str.contains("unknown command: 'components'"));
+        assert!(err_str.contains("See `scryrs --help`"));
     }
 
     #[test]
@@ -192,6 +226,8 @@ mod tests {
         assert!(out.is_empty());
         let err_str = String::from_utf8_lossy(&err);
         assert!(err_str.contains("unexpected argument after PATH"));
+        assert!(err_str.contains("Usage: scryrs hotspots <PATH>"));
+        assert!(err_str.contains("See `scryrs --help`"));
         assert!(!err_str.contains("unknown command"));
     }
 
@@ -215,9 +251,14 @@ mod tests {
                 "command '{cmd}' should exit 2"
             );
             assert!(out.is_empty(), "command '{cmd}' should not produce stdout");
+            let err_str = String::from_utf8_lossy(&err);
             assert!(
-                String::from_utf8_lossy(&err).contains("unknown command"),
+                err_str.contains("unknown command:"),
                 "command '{cmd}' should produce unknown command error on stderr"
+            );
+            assert!(
+                err_str.contains("See `scryrs --help`"),
+                "command '{cmd}' should include escalation to --help on stderr"
             );
         }
     }
