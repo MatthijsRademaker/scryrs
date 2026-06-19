@@ -1,5 +1,7 @@
 {
   "defaultModel": "gpt-5.4",
   "defaultProvider": "openai-codex",
+  "defaultThinkingLevel": "high",
+
   "packages": ["."]
 }
