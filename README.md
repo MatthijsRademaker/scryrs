@@ -49,19 +49,17 @@ xtask
 
 ## Feature split
 
-The CLI is feature-based:
+The CLI ships a single v0 placeholder command:
 
 ```bash
-cargo run -p scryrs-cli -- components
-cargo run -p scryrs-cli --no-default-features --features core -- components
-cargo run -p scryrs-cli --features full -- components --format json
+cargo run -p scryrs-cli -- hotspots /path/to/repo
 ```
 
 Default features include the standalone suite, Markdown adapter, runtime, and deterministic guardrail support. `full` adds the optional LLM boundary and Rspress adapter.
 
 ## Current status
 
-Scaffold plus first guardrail pass. Core behavior still comes next.
+v0 CLI contract frozen. Single placeholder command `scryrs hotspots <PATH>` emits versioned JSON. Engine behavior comes next.
 
 ## Local checks
 

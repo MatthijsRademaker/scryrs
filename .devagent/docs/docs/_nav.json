@@ -1,14 +1,20 @@
 [
   {
-    "text": "Vision & Strategy",
+    "text": "Vision &amp; Strategy",
     "items": [
-      { "text": "Vision & Goals", "link": "/vision" }
+      { "text": "Vision &amp; Goals", "link": "/vision" }
     ]
   },
   {
     "text": "Documentation",
     "items": [
       { "text": "Architecture", "link": "/architecture" }
+    ]
+  },
+  {
+    "text": "Technical",
+    "items": [
+      { "text": "CLI v0 Contract", "link": "/cli-v0-contract" }
     ]
   }
 ]
