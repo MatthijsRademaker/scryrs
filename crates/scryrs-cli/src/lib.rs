@@ -37,6 +37,15 @@ where
                 2
             }
         }
+        [command, _path, ..] if command == "hotspots" => {
+            if writeln!(err, "error: unexpected argument after PATH").is_err()
+                || writeln!(err, "usage: scryrs hotspots <PATH>").is_err()
+            {
+                1
+            } else {
+                2
+            }
+        }
         [unknown, ..] => {
             if writeln!(err, "unknown command: {unknown}").is_err()
                 || writeln!(err, "run `scryrs --help`").is_err()
@@ -61,7 +70,7 @@ This is a v0 placeholder contract; only this command is defined."
 }
 
 fn write_hotspots_json(out: &mut impl Write) -> io::Result<()> {
-    writeln!(
+    write!(
         out,
         "{{\"schemaVersion\":\"{}\",\"command\":\"hotspots\",\"status\":\"placeholder\"}}",
         SCHEMA_VERSION
@@ -169,6 +178,21 @@ mod tests {
         assert_eq!(run_with_writers(["components"], &mut out, &mut err), 2);
         assert!(out.is_empty());
         assert!(String::from_utf8_lossy(&err).contains("unknown command: components"));
+    }
+
+    #[test]
+    fn hotspots_with_extra_args_exits_2_with_error() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(["hotspots", "/tmp", "extra"], &mut out, &mut err),
+            2
+        );
+        assert!(out.is_empty());
+        let err_str = String::from_utf8_lossy(&err);
+        assert!(err_str.contains("unexpected argument after PATH"));
+        assert!(!err_str.contains("unknown command"));
     }
 
     #[test]
