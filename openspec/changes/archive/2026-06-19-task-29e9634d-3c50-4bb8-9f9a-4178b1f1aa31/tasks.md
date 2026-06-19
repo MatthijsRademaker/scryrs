@@ -1,6 +1,6 @@
 ## 1. Workspace Dependency
 
-- [x] 1.1 Add `clap = { version = "4", features = ["derive"] }` to `[workspace.dependencies]` in root `Cargo.toml`
+- [x] 1.1 Add `clap = { version = "4" }` to `[workspace.dependencies]` in root `Cargo.toml`
 - [x] 1.2 Add `clap = { workspace = true }` to `crates/scryrs-cli/Cargo.toml` `[dependencies]`
 - [x] 1.3 Add `clap = { workspace = true }` to `xtask/Cargo.toml` `[dependencies]`
 

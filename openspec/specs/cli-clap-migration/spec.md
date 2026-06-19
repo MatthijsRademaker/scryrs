@@ -1,8 +1,11 @@
 # cli-clap-migration Specification
 
 ## Purpose
-TBD - created by archiving change task-29e9634d-3c50-4bb8-9f9a-4178b1f1aa31. Update Purpose after archive.
+
+Migrates scryrs-cli and xtask from hand-written argument parsers to clap (builder API, try_get_matches_from), preserving the frozen v0 CLI contract with pre-clap normalization for the -hj alias, custom help/error rendering, and writer-injected testability.
+
 ## Requirements
+
 ### Requirement: scryrs-cli parses arguments via clap builder API
 
 The `run_with_writers` function SHALL use `clap::Command` built via the builder API and `try_get_matches_from` to parse arguments, replacing the current `match args.as_slice()` hand-written parser.
@@ -245,4 +248,3 @@ All tests SHALL continue to use writer injection (`Vec<u8>` for stdout/stderr) w
 - **WHEN** `cargo test -p scryrs-cli` is executed
 - **THEN** all 20+ tests SHALL pass
 - **AND** no test SHALL be removed unless its contract is deliberately modified and the corresponding spec is updated
-

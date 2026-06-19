@@ -2,6 +2,7 @@
 
 use std::io::{self, Write};
 
+use clap::{Arg, Command};
 use scryrs_types::SCHEMA_VERSION;
 
 /// Version of the `--help-json` surface document format, independent of
@@ -23,49 +24,93 @@ where
     O: Write,
     E: Write,
 {
-    let args: Vec<String> = args.into_iter().map(Into::into).collect();
+    let mut args: Vec<String> = args.into_iter().map(Into::into).collect();
 
-    match args.as_slice() {
-        [] => write_help(&mut out).map_or(1, |_| 0),
-        [flag] if flag == "--help" || flag == "-h" => write_help(&mut out).map_or(1, |_| 0),
-        [flag] if flag == "--version" || flag == "-V" => {
-            writeln!(out, "scryrs {}", env!("CARGO_PKG_VERSION")).map_or(1, |_| 0)
-        }
-        [flag] if flag == "--help-json" || flag == "-hj" => {
-            write_cli_surface(&mut out).map_or(1, |_| 0)
-        }
-        [command, path] if command == "hotspots" && !path.starts_with('-') => {
-            write_hotspots_json(&mut out).map_or(1, |_| 0)
-        }
-        [command] if command == "hotspots" => {
-            if writeln!(err, "scryrs hotspots: missing required PATH argument").is_err()
-                || writeln!(err, "Usage: scryrs hotspots <PATH>").is_err()
+    // D1: Pre-clap normalization: root-level -hj -> --help-json
+    if args.len() == 1 && args[0] == "-hj" {
+        args[0] = "--help-json".to_string();
+    }
+
+    // D5: Pre-clap --help-json handling (not a clap flag)
+    if args.len() == 1 && args[0] == "--help-json" {
+        return write_cli_surface(&mut out).map_or(1, |_| 0);
+    }
+
+    // Unknown command check before clap dispatch.
+    // Only known root-level entrypoints pass through to clap.
+    // Everything else produces the contract error: "unknown command: 'X'".
+    if !args.is_empty() {
+        let first = &args[0];
+        if first != "hotspots"
+            && first != "--help"
+            && first != "-h"
+            && first != "--version"
+            && first != "-V"
+        {
+            if writeln!(err, "unknown command: '{first}'").is_err()
                 || writeln!(err, "See `scryrs --help`").is_err()
             {
-                1
-            } else {
-                2
+                return 1;
+            }
+            return 2;
+        }
+    }
+
+    // D2: Clap builder API with try_get_matches_from (never get_matches_from).
+    // Help/version flags enabled on root (so clap triggers DisplayHelp/DisplayVersion).
+    // Disabled on the hotspots subcommand so --help/--version after hotspots are
+    // rejected as unknown arguments (preserving the v0 contract).
+    let cmd = Command::new("scryrs")
+        .no_binary_name(true)
+        .subcommand_required(false)
+        .version(env!("CARGO_PKG_VERSION"))
+        .subcommand(
+            Command::new("hotspots")
+                .disable_help_flag(true)
+                .disable_version_flag(true)
+                .arg(Arg::new("PATH").required(true).value_name("PATH")),
+        );
+
+    match cmd.try_get_matches_from(&args) {
+        Ok(matches) => {
+            match matches.subcommand() {
+                Some(("hotspots", _)) => write_hotspots_json(&mut out).map_or(1, |_| 0),
+                // Bare invocation (no subcommand matched).
+                _ => write_help(&mut out).map_or(1, |_| 0),
             }
         }
-        [command, _path, ..] if command == "hotspots" => {
-            if writeln!(err, "scryrs hotspots: unexpected argument after PATH").is_err()
-                || writeln!(err, "Usage: scryrs hotspots <PATH>").is_err()
-                || writeln!(err, "See `scryrs --help`").is_err()
-            {
-                1
-            } else {
-                2
+        Err(e) => match e.kind() {
+            // D3/D4: Help and version — route to existing contract functions.
+            clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::MissingSubcommand => {
+                write_help(&mut out).map_or(1, |_| 0)
             }
-        }
-        [unknown, ..] => {
-            if writeln!(err, "unknown command: '{unknown}'").is_err()
-                || writeln!(err, "See `scryrs --help`").is_err()
-            {
-                1
-            } else {
-                2
+            clap::error::ErrorKind::DisplayVersion => {
+                writeln!(out, "scryrs {}", env!("CARGO_PKG_VERSION")).map_or(1, |_| 0)
             }
-        }
+            // D4: Usage errors -> exit 2 with contract three-line format.
+            clap::error::ErrorKind::MissingRequiredArgument => {
+                if writeln!(err, "scryrs hotspots: missing required PATH argument").is_err()
+                    || writeln!(err, "Usage: scryrs hotspots <PATH>").is_err()
+                    || writeln!(err, "See `scryrs --help`").is_err()
+                {
+                    1
+                } else {
+                    2
+                }
+            }
+            clap::error::ErrorKind::TooManyValues | clap::error::ErrorKind::UnknownArgument => {
+                if writeln!(err, "scryrs hotspots: unexpected argument after PATH").is_err()
+                    || writeln!(err, "Usage: scryrs hotspots <PATH>").is_err()
+                    || writeln!(err, "See `scryrs --help`").is_err()
+                {
+                    1
+                } else {
+                    2
+                }
+            }
+            // Unrecognized clap error -> exit 1.
+            _ => 1,
+        },
     }
 }
 
@@ -491,6 +536,26 @@ mod tests {
             run_with_writers(["hotspots", "--help-json"], &mut out, &mut err),
             2,
             "--help-json after hotspots must exit 2 (no per-command introspection in v0)"
+        );
+        assert!(out.is_empty());
+        let err_str = String::from_utf8_lossy(&err);
+        assert!(
+            err_str.contains("unexpected argument after PATH"),
+            "should report flag-like argument as invalid, got: {err_str}"
+        );
+    }
+
+    #[test]
+    fn hotspots_short_hj_exits_2() {
+        // -hj after a subcommand is not normalized (normalization only at root level)
+        // and is rejected as an invalid argument.
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(["hotspots", "-hj"], &mut out, &mut err),
+            2,
+            "-hj after hotspots must exit 2 (normalization only at root level)"
         );
         assert!(out.is_empty());
         let err_str = String::from_utf8_lossy(&err);
