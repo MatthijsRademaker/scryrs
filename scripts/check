@@ -6,6 +6,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib/docker-verification.sh"
 
+step "cargo fmt"
+# Write-mode format first so pre-commit hooks and hookSelfFix can restage.
+run_rust cargo fmt
+
 step "cargo fmt --all --check"
 run_rust cargo fmt --all --check
 
