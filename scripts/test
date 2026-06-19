@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
+# Run Rust tests inside a Docker container.
+# No host Rust toolchain required — works on swarm worker agents via DinD.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$ROOT"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/docker-verification.sh"
 
-if ! command -v cargo >/dev/null 2>&1; then
-  echo "cargo not found; install Rust toolchain from rust-toolchain.toml" >&2
-  exit 127
-fi
-
-cargo test --workspace --all-targets --all-features --locked
+step "cargo test --workspace --all-targets --all-features --locked"
+run_rust cargo test --workspace --all-targets --all-features --locked

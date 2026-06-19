@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Full pre-commit verification suite.
+# All checks run inside Docker containers — no host toolchain required.
+# Works on swarm worker agents via DinD.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 

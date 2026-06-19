@@ -1,23 +1,17 @@
 #!/usr/bin/env bash
+# Run Rust security checks inside a Docker container.
+# No host Rust toolchain required — works on swarm worker agents via DinD.
+# Uses a newer Rust image for security tools (advisory DB needs CVSS 4.0 support).
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$ROOT"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/docker-verification.sh"
 
-if ! command -v cargo >/dev/null 2>&1; then
-  echo "cargo not found; install Rust toolchain from rust-toolchain.toml" >&2
-  exit 127
-fi
+ensure_cargo_tool cargo-deny
+ensure_cargo_tool cargo-audit
 
-if ! command -v cargo-deny >/dev/null 2>&1; then
-  echo "cargo-deny not found; install with: cargo install --locked cargo-deny" >&2
-  exit 127
-fi
+step "cargo deny check"
+run_rust --image "$SECURITY_RUST_IMAGE" -- cargo deny check
 
-if ! command -v cargo-audit >/dev/null 2>&1; then
-  echo "cargo-audit not found; install with: cargo install --locked cargo-audit" >&2
-  exit 127
-fi
-
-cargo deny check
-cargo audit
+step "cargo audit"
+run_rust --image "$SECURITY_RUST_IMAGE" -- cargo audit
