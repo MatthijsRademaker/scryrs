@@ -26,6 +26,7 @@ sandbox = ["dep:scryrs-sandbox"]
 telemetry = ["dep:scryrs-telemetry"]
 
 [dependencies]
+clap = { workspace = true }
 scryrs-adapter-markdown = { workspace = true, optional = true }
 scryrs-adapter-rspress = { workspace = true, optional = true }
 scryrs-core = { workspace = true, optional = true }

@@ -39,6 +39,7 @@ print_stdout = "deny"
 print_stderr = "deny"
 
 [workspace.dependencies]
+clap = { version = "4" }
 scryrs-adapter-markdown = { path = "crates/scryrs-adapter-markdown" }
 scryrs-adapter-rspress = { path = "crates/scryrs-adapter-rspress" }
 scryrs-core = { path = "crates/scryrs-core" }
