@@ -37,14 +37,49 @@ No human-readable text is emitted to stdout for this command. Agents should pars
 |------|----------|-----------|
 | `-h`, `--help` | Help text to stdout | 0 |
 | `-V`, `--version` | Version string to stdout | 0 |
+| `-hj`, `--help-json` | Machine-readable CLI surface document to stdout | 0 |
 
 Bare `scryrs` (no arguments) prints help to stdout and exits 0.
+
+### `--help-json` surface document
+
+The `--help-json` flag emits a versioned JSON document describing the complete CLI surface — commands, arguments, flags, output contracts, and exit codes — in a deterministic, machine-readable format.
+
+**When to use:** An agent should call `scryrs --help-json` to discover the CLI surface before invoking commands. The document is idempotent: calling it repeatedly returns identical output.
+
+**Output:** A single JSON object written to stdout. Stderr is empty. Exit code is 0.
+
+**Top-level fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `surfaceVersion` | string | Semver version of the surface document format (independent of output envelope `schemaVersion`) |
+| `binary` | string | Binary name (`"scryrs"`) |
+| `commands` | array | Command entries, each with `name`, `description`, `arguments`, and `output` metadata |
+| `globalFlags` | array | Flag entries, each with `name`, `short`, `long`, `description`, and `action` |
+| `rootBehavior` | object | Describes bare-invocation behavior (`action`, `exitCode`) |
+| `exitCodes` | object | Maps numeric exit codes (`"0"`, `"1"`, `"2"`) to their meanings |
+
+**Command entry structure:** Each entry in `commands` includes:
+
+- `name` (string): Command name
+- `description` (string): Human-readable description
+- `arguments` (array): Positional arguments, each with `name`, `type`, `required` (boolean), and `description`
+- `output` (object): Output contract with `mimeType` and `fields` array (each field: `name`, `type`, `description`, `optional`)
+
+**Versioning policy:** The `surfaceVersion` field follows semver:
+
+- **Major bump:** Breaking changes to the surface document format (field renames, removals, structural changes)
+- **Minor bump:** Additive changes (new commands, new flags, new fields)
+- **Patch bump:** Clarifications (description text changes, documentation fixes)
+
+Agents should check `surfaceVersion` before parsing to detect format changes. The surface version is independent of the output envelope's `schemaVersion`.
 
 ## Exit-code policy
 
 | Code | Meaning |
 |------|---------|
-| 0 | Successful command, help display, version display |
+| 0 | Successful command, help display, version display, surface document display |
 | 2 | Unknown commands, missing required arguments, invalid arguments, unsupported paths (usage errors) |
 | 1 | Unexpected runtime failures (I/O errors, internal panics) |
 
@@ -66,6 +101,7 @@ All error messages and human-facing diagnostics are written to stderr.
 
 - Any command other than `hotspots` (including `components`, `trace`, `propose`, `graph`, `route`, `adapters`, `report`, `suggest-docs`)
 - `scryrs hotspots` without a PATH argument
+- `scryrs hotspots <FLAG>` — flags after a command fall through to the positional argument parser and are rejected as invalid arguments (no per-command introspection in v0)
 
 ## Out of scope for v0
 
