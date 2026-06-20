@@ -96,31 +96,31 @@ scryrs — context intelligence for AI-assisted codebases
 Discover, analyze, and navigate hotspots in your codebase.
 
 USAGE
-  scryrs hotspots <PATH>
+scryrs hotspots <PATH>
 
 ARGUMENTS
-  <PATH>    Path to the repository root directory (required)
+<PATH>    Path to the repository root directory (required)
 
 OUTPUT
-  A single-line JSON object with the following envelope:
-    {
-      "schemaVersion": "0.1.0",
-      "command": "hotspots",
-      "status": "placeholder"
-    }
+A single-line JSON object with the following envelope:
+{
+"schemaVersion": "0.1.0",
+"command": "hotspots",
+"status": "placeholder"
+}
 
 EXAMPLES
-  scryrs hotspots /path/to/repo
-  scryrs hotspots .
+scryrs hotspots /path/to/repo
+scryrs hotspots .
 
 OPTIONS
-  -h, --help       Print this help message and exit
-  -V, --version    Print version and exit
+-h, --help       Print this help message and exit
+-V, --version    Print version and exit
 
 EXIT CODES
-  0    Success (output written to stdout)
-  1    I/O error (output could not be written)
-  2    Usage error (invalid arguments)
+0    Success (output written to stdout)
+1    I/O error (output could not be written)
+2    Usage error (invalid arguments)
 ```
 
 **`--version`** prints the binary version:
