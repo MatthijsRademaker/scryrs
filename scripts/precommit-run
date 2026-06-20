@@ -2,8 +2,37 @@
 # Full pre-commit verification suite.
 # All checks run inside Docker containers — no host toolchain required.
 # Works on swarm worker agents via DinD.
+#
+# Usage:
+#   scripts/precommit-run                     # standard checks (lint + test)
+#   scripts/precommit-run --with-trace-verify # also run cross-harness trace verification
 set -euo pipefail
+
+WITH_TRACE=false
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--with-trace-verify)
+			WITH_TRACE=true
+			shift
+			;;
+		*)
+			echo "ERROR: unknown flag: $1" >&2
+			echo "Usage: scripts/precommit-run [--with-trace-verify]" >&2
+			exit 2
+			;;
+	esac
+done
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# Standard checks (lint + test)
 "$ROOT/scripts/check"
 "$ROOT/scripts/test"
+
+# Optional: cross-harness trace capture verification
+if $WITH_TRACE; then
+	echo ""
+	echo "==> Running cross-harness trace verification"
+	"$ROOT/scripts/verify-trace-capture"
+fi

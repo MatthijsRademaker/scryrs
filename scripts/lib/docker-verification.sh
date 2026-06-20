@@ -16,10 +16,15 @@ export DOCKER_HOST
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PROJECT_NAME="$(basename "$ROOT")"
 
+# Source pinned image versions (NODE_IMAGE, GO_IMAGE, etc.).
+source "$ROOT/scripts/.versions" 2>/dev/null || true
+
 # Rust toolchain image. Override with RUST_IMAGE env var.
 RUST_IMAGE="${RUST_IMAGE:-rust:1.85.0}"
 # Security tools need a newer Rust (advisory DBs use CVSS 4.0). Override with SECURITY_RUST_IMAGE env var.
 SECURITY_RUST_IMAGE="${SECURITY_RUST_IMAGE:-rust:1.88.0}"
+# Node.js image, sourced from scripts/.versions. Override with NODE_IMAGE env var.
+NODE_IMAGE="${NODE_IMAGE:-node:22-alpine}"
 
 # --- Volume names (project-scoped, DinD-isolated) ---
 CACHE_VOLUME_REGISTRY="${PROJECT_NAME}-cargo-registry"
@@ -123,6 +128,51 @@ ensure_cargo_tool() {
 		-e PATH="/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
 		"$image" \
 		cargo install --locked --root /usr/local/cargo-installed "${install_args[@]}"
+}
+
+# Run a command inside a Node.js verification container.
+# Mounts the repo at /workspace with the caller's UID/GID for correct file ownership.
+# Uses $NODE_IMAGE (default node:22-alpine, sourced from scripts/.versions).
+# To use a different image: run_node --image node:24-alpine -- command args...
+# To pass env vars: run_node -e KEY=VALUE -e KEY2=VALUE2 -- command args...
+run_node() {
+	local image="$NODE_IMAGE"
+	local -a env_args=()
+
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--image)
+			image="$2"
+			shift 2
+			;;
+		-e)
+			env_args+=(-e "$2")
+			shift 2
+			;;
+		--)
+			shift
+			break
+			;;
+		*)
+			break
+			;;
+		esac
+	done
+
+	local uid
+	uid="$(id -u)"
+	local gid
+	gid="$(id -g)"
+
+	_pull_image_if_missing "$image"
+
+	docker_cmd run --rm \
+		-u "${uid}:${gid}" \
+		-v "$ROOT:/workspace" \
+		-w /workspace \
+		"${env_args[@]}" \
+		"$image" \
+		"$@"
 }
 
 # Print a header for a verification step.

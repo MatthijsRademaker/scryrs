@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# Cross-harness end-to-end verification entrypoint.
+#
+# Builds the real scryrs binary via Docker (Rust container) and drives both
+# Claude Code and Pi hook fixtures against it (Node container). Run this to
+# prove that reference hooks correctly feed scryrs record --stdin without
+# changing agent-visible behavior.
+#
+# Uses node:22 (Debian-based, glibc) so the Rust-compiled scryrs binary runs
+# without recompilation for musl.
+#
+# Usage:
+#   scripts/verify-trace-capture              # run both fixtures
+#   scripts/verify-trace-capture --claude-only  # Claude Code only
+#   scripts/verify-trace-capture --pi-only       # Pi hook only
+#
+# Prerequisites:
+#   - Docker (host or DinD)
+#   - No host Node.js required
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DOCKER_LIB="$ROOT/scripts/lib/docker-verification.sh"
+
+if [[ ! -f "$DOCKER_LIB" ]]; then
+	echo "ERROR: docker-verification.sh not found at $DOCKER_LIB" >&2
+	exit 2
+fi
+
+# shellcheck source=scripts/lib/docker-verification.sh
+source "$DOCKER_LIB"
+
+RUN_CLAUDE=true
+RUN_PI=true
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--claude-only)
+			RUN_CLAUDE=true
+			RUN_PI=false
+			shift
+			;;
+		--pi-only)
+			RUN_CLAUDE=false
+			RUN_PI=true
+			shift
+			;;
+		*)
+			echo "ERROR: unknown flag: $1" >&2
+			echo "Usage: scripts/verify-trace-capture [--claude-only|--pi-only]" >&2
+			exit 2
+			;;
+	esac
+done
+
+# ---------------------------------------------------------------------------
+# 1. Build scryrs binary (needed by both fixtures)
+# ---------------------------------------------------------------------------
+step "Building scryrs binary (cargo build --release)"
+run_rust cargo build --release
+
+# Verify the binary exists
+SCYRRS_BIN="$ROOT/target/release/scryrs"
+if [[ ! -x "$SCYRRS_BIN" ]]; then
+	echo "ERROR: scryrs binary not found at $SCYRRS_BIN after build" >&2
+	exit 1
+fi
+echo "  scryrs binary built at target/release/scryrs"
+
+CLAUDE_EXIT=0
+PI_EXIT=0
+
+# Use node:22 (Debian-based, glibc) because scryrs is compiled on rust:1.85.0
+# which also uses glibc. Alpine-based node images use musl and won't run the binary.
+FIXTURE_NODE_IMAGE="${FIXTURE_NODE_IMAGE:-node:22}"
+
+# ---------------------------------------------------------------------------
+# 2. Claude Code fixture
+# ---------------------------------------------------------------------------
+if $RUN_CLAUDE; then
+	step "Running Claude Code E2E fixture"
+	run_node --image "$FIXTURE_NODE_IMAGE" \
+		-e "PATH=/workspace/target/release:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+		-- \
+		node /workspace/scripts/verification/claude-code-e2e.mjs \
+		|| CLAUDE_EXIT=$?
+	if [[ $CLAUDE_EXIT -eq 0 ]]; then
+		echo "  Claude Code fixture: PASSED"
+	else
+		echo "  Claude Code fixture: FAILED (exit $CLAUDE_EXIT)" >&2
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# 3. Pi fixture
+# ---------------------------------------------------------------------------
+if $RUN_PI; then
+	step "Running Pi E2E fixture"
+	run_node --image "$FIXTURE_NODE_IMAGE" \
+		-e "PATH=/workspace/target/release:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+		-- \
+		node /workspace/scripts/verification/pi-hook-e2e.mjs \
+		|| PI_EXIT=$?
+	if [[ $PI_EXIT -eq 0 ]]; then
+		echo "  Pi fixture: PASSED"
+	else
+		echo "  Pi fixture: FAILED (exit $PI_EXIT)" >&2
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# 4. Summary
+# ---------------------------------------------------------------------------
+echo ""
+echo "============================================"
+echo "Cross-harness verification summary"
+echo "============================================"
+
+if $RUN_CLAUDE; then
+	if [[ $CLAUDE_EXIT -eq 0 ]]; then
+		echo "  Claude Code: PASSED"
+	else
+		echo "  Claude Code: FAILED"
+	fi
+fi
+
+if $RUN_PI; then
+	if [[ $PI_EXIT -eq 0 ]]; then
+		echo "  Pi:          PASSED"
+	else
+		echo "  Pi:          FAILED"
+	fi
+fi
+
+echo "============================================"
+
+ALL_EXIT=$((CLAUDE_EXIT + PI_EXIT))
+if [[ $ALL_EXIT -ne 0 ]]; then
+	if $RUN_CLAUDE && [[ $CLAUDE_EXIT -ne 0 ]]; then
+		echo "Run with --claude-only to debug the Claude Code fixture." >&2
+	fi
+	if $RUN_PI && [[ $PI_EXIT -ne 0 ]]; then
+		echo "Run with --pi-only to debug the Pi fixture." >&2
+	fi
+	exit 1
+fi
+
+exit 0
