@@ -1,0 +1,88 @@
+{
+  "manifest_version": "0.1.0",
+  "trace_schema_version": "0.1.0",
+
+  "scope": "hook-interface-manifest — This manifest defines hook interfaces and the scryrs record invocation contract. It is not a tool catalog, MCP descriptor, agent-callable surface, or tool-output rewriter.",
+
+  "_anti_patterns": {
+    "_comment": "The following are explicitly OUT OF SCOPE for this manifest.",
+    "NOT_mcp_descriptor": "This manifest does not define MCP methods, tools/capabilities, server descriptors, or agent-callable surfaces.",
+    "NOT_tool_catalog": "This manifest does not register or catalog tools for agent consumption. Intercepted tool names are observational metadata describing what the hooks observe.",
+    "NOT_agent_callable": "scryrs is not callable as an agent tool. Do not model it as a tool the agent can invoke.",
+    "NOT_tool_output_rewriter": "This manifest does not describe tool output rewriting, augmentation, or modification."
+  },
+
+  "record": {
+    "command": "scryrs",
+    "args": ["record", "--stdin"],
+    "description": "Canonical hook ingestion path. Hooks pipe JSONL TraceEvent envelopes to scryrs record --stdin via stdin.",
+    "alternateMode": {
+      "flag": "--file <PATH>",
+      "description": "Available alternate ingestion mode for reading trace events from a file instead of stdin. Hooks currently use --stdin."
+    },
+    "outputContract": {
+      "stdout": "Summary envelope (JSON) with total_event_count and any warnings.",
+      "stderr": "Rejection diagnostics — one JSON line per rejected event with reason field.",
+      "exitCodes": {
+        "0": "All events accepted.",
+        "1": "One or more events rejected (partial acceptance).",
+        "2": "Fatal error — no events processed."
+      }
+    }
+  },
+
+  "supported_harnesses": [
+    {
+      "harness": "claude-code",
+      "referenceSource": "hooks/claude-code/scryrs-hook.mjs",
+      "interceptedTools": [
+        "read",
+        "bash",
+        "grep",
+        "glob",
+        "edit",
+        "write",
+        "notebookedit",
+        "web_search",
+        "web_fetch"
+      ],
+      "_interceptedToolsNote": "Observational metadata — these are tool names observed by the hook, not a callable surface.",
+      "capturedEventFamilies": [
+        "FileOpened",
+        "CommandExecuted",
+        "SearchRun",
+        "EditMade",
+        "DocRetrieved"
+      ],
+      "lifecycle": "none",
+      "capturedLifecycleEvents": [],
+      "limitations": "PreToolUse-only hook. Returns { continue: true } unconditionally (Success outcome). No SessionStart, SessionEnd, PostToolUse, or notification-level events are captured."
+    },
+    {
+      "harness": "pi",
+      "referenceSource": "hooks/pi/index.ts",
+      "interceptedTools": [
+        "read",
+        "bash",
+        "ast_grep_search",
+        "lsp_navigation",
+        "edit",
+        "write"
+      ],
+      "_interceptedToolsNote": "Observational metadata — these are tool names observed by the hook, not a callable surface.",
+      "capturedEventFamilies": [
+        "FileOpened",
+        "CommandExecuted",
+        "SearchRun",
+        "EditMade",
+        "SymbolInspected",
+        "FailedLookup"
+      ],
+      "lifecycle": "session_start_only",
+      "capturedLifecycleEvents": [
+        "SessionStart"
+      ],
+      "limitations": "SessionEnd is deferred. Pi's session_shutdown event fires after the hook runtime has already torn down, so SessionEnd events cannot be captured at this time."
+    }
+  ]
+}
