@@ -45,6 +45,6 @@ OPTIONS
 -hj, --help-json Print machine-readable CLI surface description and exit
 
 EXIT CODES
-0    Success (all events accepted for record; output written for all commands)
-1    Record: one or more events rejected; I/O error (output could not be written)
-2    Usage error (invalid arguments) or fatal I/O error (unreadable file)
+0    Success (hotspots: JSON written; record: all events accepted)
+1    Hotspots: I/O error writing output. Record: rejected events or I/O error
+2    Usage error (invalid arguments); record: also fatal I/O error (unreadable file)

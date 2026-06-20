@@ -236,9 +236,9 @@ OPTIONS\n\
   -V, --version    Print version and exit\n\
   -hj, --help-json Print machine-readable CLI surface description and exit\n\n\
 EXIT CODES\n\
-  0    Success (all events accepted for record; output written for all commands)\n\
-  1    Record: one or more events rejected; I/O error (output could not be written)\n\
-  2    Usage error (invalid arguments) or fatal I/O error (unreadable file)",
+  0    Success (hotspots: JSON written; record: all events accepted)\n\
+  1    Hotspots: I/O error writing output. Record: rejected events or I/O error\n\
+  2    Usage error (invalid arguments); record: also fatal I/O error (unreadable file)",
         SCHEMA_VERSION, SCHEMA_VERSION
     )
 }
@@ -408,70 +408,70 @@ fn execute_record<R: Read>(
 }
 
 fn cli_surface_doc() -> String {
-    format!(
-        concat!(
-            "{{",
-            "\"surfaceVersion\":\"{sv}\",",
-            "\"binary\":\"scryrs\",",
-            "\"commands\":[",
-            "{{",
-            "\"name\":\"hotspots\",",
-            "\"description\":\"Discover and analyze knowledge hotspots in a repository\",",
-            "\"arguments\":[",
-            "{{",
-            "\"name\":\"PATH\",",
-            "\"type\":\"string\",",
-            "\"required\":true,",
-            "\"description\":\"Path to the repository root directory\"",
-            "}}",
-            "],",
-            "\"output\":{{",
-            "\"mimeType\":\"application/json\",",
-            "\"fields\":[",
-            "{{\"name\":\"schemaVersion\",\"type\":\"string\",\"description\":\"Version of the output envelope format\",\"optional\":false}},",
-            "{{\"name\":\"command\",\"type\":\"string\",\"description\":\"Name of the executed command\",\"optional\":false}},",
-            "{{\"name\":\"status\",\"type\":\"string\",\"description\":\"Execution status indicator\",\"optional\":false}}",
-            "]",
-            "}}",
-            "}},",
-            "{{",
-            "\"name\":\"record\",",
-            "\"description\":\"Ingest JSONL trace events from stdin or file\",",
-            "\"modes\":[",
-            "{{\"name\":\"stdin\",\"flag\":\"--stdin\",\"description\":\"Read JSONL events from stdin\"}},",
-            "{{\"name\":\"file\",\"flag\":\"--file\",\"value\":\"PATH\",\"description\":\"Read JSONL events from PATH\"}}",
-            "],",
-            "\"output\":{{",
-            "\"mimeType\":\"application/json\",",
-            "\"fields\":[",
-            "{{\"name\":\"command\",\"type\":\"string\",\"description\":\"Name of the executed command (always \\\"record\\\")\",\"optional\":false}},",
-            "{{\"name\":\"schemaVersion\",\"type\":\"string\",\"description\":\"Version of the output envelope format\",\"optional\":false}},",
-            "{{\"name\":\"accepted\",\"type\":\"number\",\"description\":\"Count of accepted events\",\"optional\":false}},",
-            "{{\"name\":\"rejected\",\"type\":\"number\",\"description\":\"Count of rejected non-empty lines\",\"optional\":false}}",
-            "]",
-            "}},",
-            "\"stderr\":{{",
-            "\"mimeType\":\"application/jsonl\",",
-            "\"description\":\"One JSON object per rejected non-empty line\",",
-            "\"fields\":[",
-            "{{\"name\":\"line\",\"type\":\"number\",\"description\":\"1‑based physical line number\"}},",
-            "{{\"name\":\"field\",\"type\":\"string|null\",\"description\":\"Failing field/path when available\"}},",
-            "{{\"name\":\"reason\",\"type\":\"string\",\"description\":\"Human-readable rejection reason\"}}",
-            "]",
-            "}}",
-            "}}",
-            "],",
-            "\"globalFlags\":[",
-            "{{\"name\":\"help\",\"short\":\"-h\",\"long\":\"--help\",\"description\":\"Print help message and exit\",\"action\":\"help\"}},",
-            "{{\"name\":\"version\",\"short\":\"-V\",\"long\":\"--version\",\"description\":\"Print version and exit\",\"action\":\"version\"}},",
-            "{{\"name\":\"help-json\",\"short\":\"-hj\",\"long\":\"--help-json\",\"description\":\"Print machine-readable CLI surface description and exit\",\"action\":\"helpJson\"}}",
-            "],",
-            "\"rootBehavior\":{{\"action\":\"help\",\"exitCode\":0}},",
-            "\"exitCodes\":{{\"0\":\"Success (hotspots: JSON written; record: all events accepted)\",\"1\":\"Output error (hotspots); rejected events or output error (record)\",\"2\":\"Usage error (both commands) or fatal I/O error (record)\"}}",
-            "}}"
-        ),
-        sv = SURFACE_VERSION,
-    )
+    let doc = serde_json::json!({
+        "surfaceVersion": SURFACE_VERSION,
+        "binary": "scryrs",
+        "commands": [
+            {
+                "name": "hotspots",
+                "description": "Discover and analyze knowledge hotspots in a repository",
+                "arguments": [
+                    {
+                        "name": "PATH",
+                        "type": "string",
+                        "required": true,
+                        "description": "Path to the repository root directory"
+                    }
+                ],
+                "output": {
+                    "mimeType": "application/json",
+                    "fields": [
+                        {"name": "schemaVersion", "type": "string", "description": "Version of the output envelope format", "optional": false},
+                        {"name": "command", "type": "string", "description": "Name of the executed command", "optional": false},
+                        {"name": "status", "type": "string", "description": "Execution status indicator", "optional": false}
+                    ]
+                }
+            },
+            {
+                "name": "record",
+                "description": "Ingest JSONL trace events from stdin or file",
+                "modes": [
+                    {"name": "stdin", "flag": "--stdin", "description": "Read JSONL events from stdin"},
+                    {"name": "file", "flag": "--file", "value": "PATH", "description": "Read JSONL events from PATH"}
+                ],
+                "output": {
+                    "mimeType": "application/json",
+                    "fields": [
+                        {"name": "command", "type": "string", "description": "Name of the executed command (always \"record\")", "optional": false},
+                        {"name": "schemaVersion", "type": "string", "description": "Version of the output envelope format", "optional": false},
+                        {"name": "accepted", "type": "number", "description": "Count of accepted events", "optional": false},
+                        {"name": "rejected", "type": "number", "description": "Count of rejected non-empty lines", "optional": false}
+                    ]
+                },
+                "stderr": {
+                    "mimeType": "application/jsonl",
+                    "description": "One JSON object per rejected non-empty line",
+                    "fields": [
+                        {"name": "line", "type": "number", "description": "1‑based physical line number", "optional": false},
+                        {"name": "field", "type": "string|null", "description": "Failing field/path when available", "optional": true},
+                        {"name": "reason", "type": "string", "description": "Human-readable rejection reason", "optional": false}
+                    ]
+                }
+            }
+        ],
+        "globalFlags": [
+            {"name": "help", "short": "-h", "long": "--help", "description": "Print help message and exit", "action": "help"},
+            {"name": "version", "short": "-V", "long": "--version", "description": "Print version and exit", "action": "version"},
+            {"name": "help-json", "short": "-hj", "long": "--help-json", "description": "Print machine-readable CLI surface description and exit", "action": "helpJson"}
+        ],
+        "rootBehavior": {"action": "help", "exitCode": 0},
+        "exitCodes": {
+            "0": "Success (hotspots: JSON written; record: all events accepted)",
+            "1": "Hotspots: I/O error writing output. Record: one or more events rejected, or I/O error writing output",
+            "2": "Usage error (invalid arguments); record: also fatal I/O error (unreadable file or store failure)"
+        }
+    });
+    serde_json::to_string(&doc).unwrap_or_else(|_| "{}".into())
 }
 
 fn write_cli_surface(out: &mut impl Write) -> io::Result<()> {

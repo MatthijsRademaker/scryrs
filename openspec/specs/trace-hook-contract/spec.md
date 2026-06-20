@@ -1,8 +1,11 @@
 # trace-hook-contract Specification
 
 ## Purpose
-TBD - created by archiving change task-eab8b93c-f563-4925-bd88-48bf90e5fd6c. Update Purpose after archive.
+
+Defines requirements for the trace hook contract document — the canonical harness integration reference covering non-interference rules, TraceEvent schema mapping, session demarcation, scryrs.json manifest shape, and integration tiers.
+
 ## Requirements
+
 ### Requirement: Canonical hook-contract documentation exists and is discoverable
 
 The system SHALL publish a single canonical hook-contract document at `.devagent/docs/docs/trace-hook-contract.md` that serves as the source of truth for harness integrators. The document SHALL be registered in `.devagent/docs/docs/_nav.json` under the Technical section and SHALL clearly identify itself as the canonical integration contract.
@@ -210,4 +213,3 @@ This change SHALL NOT expand beyond project documentation and the roadmap.mdx fi
 - **WHEN** this change is implemented
 - **THEN** the `openspec/specs/scryrs-record-endpoint/spec.md` file is unchanged
 - **AND** the `openspec/specs/trace-event-schema/spec.md` file is unchanged
-
