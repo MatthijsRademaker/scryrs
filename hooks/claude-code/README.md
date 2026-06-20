@@ -100,6 +100,7 @@ The hook **fails open**: scryrs failures never block tool execution.
 |---|---|
 | `scryrs` binary not on `PATH` | Warning logged; tool executes normally |
 | `scryrs record` exits non-zero | Warning logged; tool executes normally |
+| `scryrs record` times out (5s) | Warning logged; scryrs killed; tool executes normally |
 | `scryrs record` crashes (signal) | Warning logged; tool executes normally |
 | Subprocess stdin write fails | Warning logged; tool executes normally |
 

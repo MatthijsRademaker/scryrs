@@ -457,7 +457,88 @@ async function testFailOpenNonZeroExit() {
 }
 
 // -----------------------------------------------------------------------
-// 3.6 Transparency — no stdout/stderr alteration
+// 3.6 Fail-open: timeout
+// -----------------------------------------------------------------------
+async function testFailOpenTimeout() {
+	header("Fail-open (timeout) — hook returns success when scryrs hangs");
+
+	const tmpDir = join(tmpdir(), `scryrs-hook-test-timeout-${Date.now()}`);
+	mkdirSync(tmpDir, { recursive: true });
+	const fakeScryrs = join(tmpDir, "scryrs");
+
+	// Fake scryrs that sleeps long enough to exceed the hook's 5s timeout.
+	writeFileSync(fakeScryrs, `#!/usr/bin/env bash\nsleep 10\nexit 0\n`);
+	chmodSync(fakeScryrs, 0o755);
+
+	const start = Date.now();
+	const { result, stderr } = invokeHook(
+		"read",
+		{ file_path: "/x.txt" },
+		tmpDir,
+	);
+	const elapsed = Date.now() - start;
+
+	if (!result || !result.continue) {
+		fail(
+			"fail-open timeout",
+			"hook did not return {continue:true} when scryrs timed out",
+		);
+		cleanup(tmpDir);
+		return;
+	}
+
+	pass(`fail-open timeout: hook returned {continue:true} after ${elapsed}ms`);
+
+	// The hook should return well before the 10s scryrs sleep.
+	if (elapsed > 9000) {
+		fail(
+			"fail-open timeout",
+			`hook took ${elapsed}ms — expected return within ~5s timeout`,
+		);
+	} else {
+		pass(
+			`fail-open timeout: hook returned within timeout window (${elapsed}ms)`,
+		);
+	}
+
+	if (stderr && stderr.trim()) {
+		fail(
+			"fail-open timeout: stderr",
+			`hook wrote to stderr: ${stderr.slice(0, 100)}`,
+		);
+	} else {
+		pass("fail-open timeout: no stderr output");
+	}
+
+	// Verify warning log was written for timeout
+	const warningLog = join(
+		process.cwd(),
+		".scryrs/hooks/claude-code-warnings.log",
+	);
+	if (existsSync(warningLog)) {
+		const logContent = readFileSync(warningLog, "utf-8");
+		if (
+			logContent.includes("timed out after") ||
+			logContent.includes("timed out")
+		) {
+			pass("fail-open timeout: warning logged to claude-code-warnings.log");
+		} else if (logContent.trim().length > 0) {
+			pass("fail-open timeout: warning logged to claude-code-warnings.log");
+		} else {
+			fail("fail-open timeout: warning log", "log exists but is empty");
+		}
+	} else {
+		fail("fail-open timeout: warning log", "no warning log created");
+	}
+
+	cleanup(tmpDir);
+	try {
+		unlinkSync(warningLog);
+	} catch {}
+}
+
+// -----------------------------------------------------------------------
+// 3.7 Transparency — no stdout/stderr alteration
 // -----------------------------------------------------------------------
 async function testTransparency() {
 	header("Transparency — hook does not alter simulated tool output");
@@ -576,6 +657,7 @@ async function main() {
 		case "fail-open":
 			await testFailOpenMissingBinary();
 			await testFailOpenNonZeroExit();
+			await testFailOpenTimeout();
 			break;
 		case "--transparency":
 		case "transparency":
@@ -586,6 +668,7 @@ async function main() {
 			await testHappyPath();
 			await testFailOpenMissingBinary();
 			await testFailOpenNonZeroExit();
+			await testFailOpenTimeout();
 			await testTransparency();
 			await testPassthrough();
 	}

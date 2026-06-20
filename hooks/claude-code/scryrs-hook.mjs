@@ -23,6 +23,9 @@ import { dirname, resolve } from "node:path";
 
 const SCHEMA_VERSION = "0.1.0";
 
+/** Maximum wall-clock time (ms) allowed for a single `scryrs record` invocation. */
+const SCRYRS_TIMEOUT_MS = 5000;
+
 /** Claude Code tools the hook intercepts. */
 const WHITELIST = new Set([
 	"read",
@@ -236,13 +239,14 @@ function buildTraceEvent(toolName, toolInput) {
  * Pipe a newline-delimited JSON TraceEvent to `scryrs record --stdin`.
  *
  * Returns a Promise that resolves with `true` on success or `false` when
- * scryrs is unavailable, exits non-zero, or crashes. The caller (the hook
- * entry point) always returns success to Claude Code regardless.
+ * scryrs is unavailable, exits non-zero, times out, or crashes. The caller
+ * (the hook entry point) always returns success to Claude Code regardless.
  *
  * Fail-open contract:
  *   - scryrs binary missing      → log warning, return false
  *   - subprocess spawn error     → log warning, return false
  *   - scryrs exits non-zero      → log warning, return false
+ *   - scryrs times out           → log warning, kill child, return false
  *   - stdin write error          → log warning, return false
  */
 function forwardToScryrs(eventJson) {
@@ -251,6 +255,7 @@ function forwardToScryrs(eventJson) {
 		const done = (success, reason) => {
 			if (settled) return;
 			settled = true;
+			clearTimeout(timer);
 			if (!success && reason) logWarning(reason);
 			resolve(success);
 		};
@@ -264,6 +269,12 @@ function forwardToScryrs(eventJson) {
 			done(false, `scryrs spawn error: ${err.message}`);
 			return;
 		}
+
+		// Timeout: kill the child if scryrs doesn't exit within the limit.
+		const timer = setTimeout(() => {
+			child.kill("SIGTERM");
+			done(false, `scryrs record timed out after ${SCRYRS_TIMEOUT_MS}ms`);
+		}, SCRYRS_TIMEOUT_MS);
 
 		child.on("error", (err) => {
 			const reason =
