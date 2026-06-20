@@ -1,0 +1,177 @@
+/**
+ * scryrs reference trace hook for Pi
+ *
+ * Transport-only observer that maps Pi tool_result events onto canonical
+ * TraceEvent JSONL and delegates ingestion to `scryrs record --stdin`.
+ *
+ * Install: copy this directory into ~/.pi/agent/extensions/ or .pi/extensions/
+ *
+ * This hook never registers scryrs as an agent-callable tool, never modifies
+ * agent-visible tool results, and fails open when scryrs is unavailable.
+ */
+
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+// — session-scoped identifier, generated once on extension load —
+const SESSION_ID: string = crypto.randomUUID();
+
+// — canonical schema version, kept in sync with scryrs-types SCHEMA_VERSION —
+const SCHEMA_VERSION = "0.1.0";
+
+// — the six Pi tools this hook tracks —
+const TRACKED_TOOLS = new Set([
+	"read",
+	"bash",
+	"ast_grep_search",
+	"lsp_navigation",
+	"edit",
+	"write",
+]);
+
+// —— internals ——
+
+interface TraceEventEnvelope {
+	schema_version: string;
+	timestamp: string;
+	session_id: string;
+	event_type: string;
+	tool_name?: string;
+	payload: Record<string, unknown>;
+	outcome: Record<string, unknown>;
+}
+
+/**
+ * Pipe a pre-built TraceEvent envelope to scryrs record --stdin.
+ * Fail-open: any error is logged via console.error and the caller continues
+ * normally.  The subprocess is given a 5 s timeout to prevent hung‑trace stalls.
+ */
+async function recordEvent(
+	pi: ExtensionAPI,
+	envelope: TraceEventEnvelope,
+): Promise<void> {
+	const line = JSON.stringify(envelope) + "\n";
+
+	try {
+		await pi.exec("scryrs", ["record", "--stdin"], {
+			input: line,
+			timeout: 5000,
+		});
+	} catch (err: unknown) {
+		console.error(
+			"scryrs trace hook: failed to record event — scryrs may be missing, " +
+				"timed-out, or rejected the event line.",
+			err,
+		);
+	}
+}
+
+// —— public extension factory ——
+
+export default function (pi: ExtensionAPI) {
+	// SessionStart — emitted once per loaded session.
+	pi.on("session_start", (_event, _ctx) => {
+		const envelope: TraceEventEnvelope = {
+			schema_version: SCHEMA_VERSION,
+			timestamp: new Date().toISOString(),
+			session_id: SESSION_ID,
+			event_type: "SessionStart",
+			payload: { type: "SessionStart" },
+			outcome: { result: "Success" },
+		};
+
+		// Fire-and-forget; never block session startup.
+		recordEvent(pi, envelope);
+	});
+
+	// tool_result — post-execution observer for the six tracked tools.
+	pi.on("tool_result", async (event) => {
+		const toolName: string = event.toolName;
+
+		if (!TRACKED_TOOLS.has(toolName)) {
+			return undefined;
+		}
+
+		let eventType: string;
+		let payload: Record<string, unknown>;
+
+		// —— tool → TraceEvent mapping (design §D2-D4) ——
+
+		switch (toolName) {
+			case "read":
+				eventType = "FileOpened";
+				payload = { type: "FileOpened", path: event.input.path };
+				break;
+
+			case "bash":
+				eventType = "CommandExecuted";
+				payload = { type: "CommandExecuted", command: event.input.command };
+				break;
+
+			case "ast_grep_search": {
+				eventType = "SearchRun";
+				const query: string | undefined = event.input?.query;
+				if (query === undefined) {
+					console.warn(
+						"scryrs trace hook: ast_grep_search input missing 'query' field — using 'unknown'",
+					);
+				}
+				payload = { type: "SearchRun", query: query ?? "unknown" };
+				break;
+			}
+
+			case "edit":
+				eventType = "EditMade";
+				payload = { type: "EditMade", target: event.input.path };
+				break;
+
+			case "write":
+				eventType = "EditMade";
+				payload = { type: "EditMade", target: event.input.path };
+				break;
+
+			case "lsp_navigation": {
+				const symbol: string | undefined = event.input?.symbol;
+				if (symbol === undefined) {
+					console.warn(
+						"scryrs trace hook: lsp_navigation input missing 'symbol' field — using 'unknown'",
+					);
+				}
+				const navTarget = symbol ?? "unknown";
+
+				if (event.isError) {
+					eventType = "FailedLookup";
+					payload = { type: "FailedLookup", subject: navTarget };
+				} else {
+					eventType = "SymbolInspected";
+					payload = { type: "SymbolInspected", name: navTarget };
+				}
+				break;
+			}
+
+			default:
+				// Unreachable — TRACKED_TOOLS guards above — but safe fallback.
+				return undefined;
+		}
+
+		// —— outcome ——
+		const outcome: Record<string, unknown> = event.isError
+			? { result: "Failure", reason: "Tool execution error" }
+			: { result: "Success" };
+
+		// —— envelope ——
+		const envelope: TraceEventEnvelope = {
+			schema_version: SCHEMA_VERSION,
+			timestamp: new Date().toISOString(),
+			session_id: SESSION_ID,
+			event_type: eventType,
+			tool_name: toolName,
+			payload,
+			outcome,
+		};
+
+		await recordEvent(pi, envelope);
+
+		// Never modify the agent-visible tool result.
+		return undefined;
+	});
+}
