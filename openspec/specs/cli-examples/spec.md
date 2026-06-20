@@ -1,8 +1,11 @@
 # cli-examples Specification
 
 ## Purpose
-TBD - created by archiving change task-663cd375-fc97-4cee-82dd-1387e5dce7ed. Update Purpose after archive.
+
+Specifies requirements for CLI surface command examples in the Quickstart documentation, ensuring they are copy-paste runnable, comprehensive, output-verified, and non-speculative.
+
 ## Requirements
+
 ### Requirement: Examples are copy-paste runnable
 
 The Quickstart section SHALL include shell command examples that a user can copy and paste directly into a terminal without modification.
@@ -34,7 +37,7 @@ Each example in the Quickstart section SHALL show the expected output after the 
 #### Scenario: Expected output shown for each example
 
 - **WHEN** a user reads an example in the Quickstart section
-- **THEN** the expected output is shown below the command in a separate code block
+- **THEN** the expected output is shown with the command (either inline using a shell prompt prefix or in a separate code block)
 - **AND** the output matches the shape and content of the actual CLI output (verified against snapshot tests)
 
 ### Requirement: Examples align with tested CLI behavior
@@ -58,4 +61,3 @@ Examples SHALL NOT reference commands, flags, output fields, or behavior that do
 - **THEN** every command shown is a valid v0 CLI command that produces a documented exit code
 - **AND** no example references commands listed in the v0 contract as "out of scope"
 - **AND** no example shows output containing fields not present in the current JSON envelope
-

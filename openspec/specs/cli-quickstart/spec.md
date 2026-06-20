@@ -1,8 +1,11 @@
 # cli-quickstart Specification
 
 ## Purpose
-TBD - created by archiving change task-663cd375-fc97-4cee-82dd-1387e5dce7ed. Update Purpose after archive.
+
+Specifies requirements for the Quickstart section in README.md, ensuring first-time users can build, run, and understand the scryrs CLI from a freshly cloned repository.
+
 ## Requirements
+
 ### Requirement: Quickstart section exists in README
 
 The repository README SHALL include a Quickstart section that enables a first-time user to build, run, and understand the scryrs CLI without reading source code or developer-internal documentation.
@@ -61,4 +64,3 @@ The Quickstart section SHALL include a subsection that honestly documents the cu
 - **AND** the limitations state that the command output is a placeholder envelope, not real data
 - **AND** the limitations state that no engine behavior is implemented
 - **AND** the limitations do not speculate about future commands or features
-

@@ -8,7 +8,7 @@ Now is the right time because the CLI surface is stable, snapshot tests lock the
 
 1. **Add a Quickstart section to `README.md`** that walks a first-time user from clone to first command: prerequisites, build from source, run `--help`, run `hotspots`, expected output, and troubleshooting.
 
-2. **Create example files in `examples/`** that are copy-paste runnable shell commands covering the full CLI surface (help, version, help-json, hotspots placeholder, error paths).
+2. **Add copy-paste runnable shell command examples covering the full CLI surface** (help, version, help-json, hotspots placeholder, error paths). Examples are inline code blocks within the Quickstart section of README.md per Design D2 — no standalone shell scripts were added to `examples/`.
 
 3. **Add a "current limitations" section** in the quickstart that honestly documents: only one command exists, output is a placeholder, no engine behavior is wired, and which future features are out of scope.
 
@@ -27,6 +27,6 @@ Now is the right time because the CLI surface is stable, snapshot tests lock the
 ## Impact
 
 - **Code changes**: None. No Rust code, argument parsing, CLI contract, or test behavior changes.
-- **Documentation changes**: `README.md` updated with Quickstart and Current Limitations sections. New example files at `examples/` directory.
+- **Documentation changes**: `README.md` updated with Quickstart and Current Limitations sections. Examples are inline code blocks in the Quickstart — no files added to `examples/` per Design D2.
 - **No contract changes**: CLI output, exit codes, error messages, and help text remain unchanged. Snapshot tests continue to pass as-is.
 - **Examples align with test behavior**: Every command shown in the quickstart and examples has corresponding snapshot tests verifying its exact output.

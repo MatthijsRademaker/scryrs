@@ -69,8 +69,9 @@ Get from a freshly cloned repo to your first command in under two minutes.
 ### Build from source
 
 ```bash
-# Clone and enter the repo
-git clone <repo-url> && cd scryrs
+# Clone the repository
+git clone <repo-url>  # replace <repo-url> with the actual clone URL
+cd scryrs
 
 # Build the CLI crate
 cargo build -p scryrs-cli
