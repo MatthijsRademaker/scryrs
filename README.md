@@ -49,7 +49,7 @@ xtask
 
 ## Feature split
 
-The CLI ships two commands:
+The CLI ships three commands:
 
 ```bash
 # Hotspot analysis placeholder (v0)
@@ -58,6 +58,10 @@ cargo run -p scryrs-cli -- hotspots /path/to/repo
 # JSONL trace event ingestion
 cargo run -p scryrs-cli -- record --stdin < events.jsonl
 cargo run -p scryrs-cli -- record --file session.jsonl
+
+# Hook installation for supported harnesses
+cargo run -p scryrs-cli -- init --agent claude-code
+cargo run -p scryrs-cli -- init --agent pi
 ```
 
 Default features include the standalone suite, Markdown adapter, runtime, and deterministic guardrail support. `full` adds the optional LLM boundary and Rspress adapter.
@@ -180,7 +184,7 @@ See `scryrs --help`
 
 ### Current limitations
 
-- **Two commands:** `hotspots` and `record` are the supported commands. Everything else (`trace`, `propose`, `graph`, `route`, `adapters`, `report`, `suggest-docs`) produces an "unknown command" error.
+- **Three commands:** `hotspots`, `record`, and `init` are the supported commands. Everything else (`trace`, `propose`, `graph`, `route`, `adapters`, `report`, `suggest-docs`) produces an "unknown command" error.
 - **Placeholder output:** `hotspots` always returns `{"status":"placeholder"}` regardless of the path argument. No analysis engine is wired yet.
 - **Record is ingestion-only:** `scryrs record` validates and persists trace events. It does not trigger hotspot analysis, graph building, or other downstream processing.
 - **No engine behavior:** The CLI is a contract shell — argument parsing, help text, error messages, and output formatting are frozen, but the analysis internals are not implemented.

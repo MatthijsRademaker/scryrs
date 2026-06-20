@@ -1,5 +1,6 @@
 ---
 source: crates/scryrs-cli/src/lib.rs
+assertion_line: 574
 expression: "String::from_utf8_lossy(&out)"
 ---
 scryrs — context intelligence for AI-assisted codebases
@@ -13,6 +14,9 @@ scryrs record --stdin
 Ingest JSONL trace events from stdin.
 scryrs record --file <PATH>
 Ingest JSONL trace events from a file.
+scryrs init --agent <NAME>
+Install the scryrs trace hook for a supported agent harness.
+Supported harnesses: claude-code, pi
 
 RECORD OUTPUT
 A single-line JSON summary on stdout:
@@ -38,6 +42,8 @@ scryrs hotspots /path/to/repo
 scryrs hotspots .
 scryrs record --stdin < events.jsonl
 scryrs record --file session.jsonl
+scryrs init --agent claude-code
+scryrs init --agent pi
 
 OPTIONS
 -h, --help       Print this help message and exit

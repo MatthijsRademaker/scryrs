@@ -275,25 +275,28 @@ This tier exists as a lowest-common-denominator fallback for harnesses with no h
 
 ## Install and Setup
 
-Hook installation is currently a **manual process** pending the `scryrs init --agent` installer (planned for Phase 1 of the [Product Roadmap](./roadmap.mdx)).
+Hook installation is automated via `scryrs init --agent <name>`. Run the installer from the target project directory:
 
-### Manual setup steps (current state)
+```bash
+scryrs init --agent claude-code  # install Claude Code hook
+scryrs init --agent pi           # install Pi hook
+```
 
-1. **Ensure scryrs is on `$PATH`** — the hook subprocess must be able to invoke `scryrs record`.
-2. **Configure harness hook** — create or edit the harness's hook configuration to invoke scryrs after tool execution:
-   - **Full hook tier:** Configure the harness's native hook system (e.g., Pi `.pi/hooks/` scripts, Claude Code hook configuration).
-   - **Plugin tier:** Install and configure the harness-specific scryrs plugin.
-   - **Rules-file fallback:** Add agent instruction rules describing trace-event emission.
-3. **Create `scryrs.json`** at the repository root (optional, recommended). Describes which event families the hook captures and how `scryrs record` is invoked.
-4. **Verify fail-open behavior** — confirm that scryrs failures do not block tool execution.
+The installer writes hook files to project-local directories, refuses to overwrite existing files, and provides deterministic next-step instructions on success.
 
-Once `scryrs init --agent <name>` is implemented, these steps will be automated to a single command.
+### Manual setup (alternative)
+
+1. **Install hook files:** Copy the reference hook source into the harness-specific location (see Reference Hooks below).
+2. **Ensure scryrs is on `$PATH`** — the hook subprocess must be able to invoke `scryrs record`.
+3. **Configure harness hook** — create or edit the harness's hook configuration to invoke scryrs after tool execution.
+4. **Create `scryrs.json`** at the repository root (optional, recommended).
+5. **Verify fail-open behavior** — confirm that scryrs failures do not block tool execution.
 
 ## Reference Hooks
 
 Reference hook implementations for Pi and Claude Code live under `hooks/`.
 
-- **Pi hook** — forthcoming Phase 1 deliverable. Will live under `hooks/pi/` and leverage Pi's `.pi/hooks/` subprocess hook system.
+- **Pi hook** — exists at `hooks/pi/`. A Pi extension (`index.ts`) that observes tool_result events for read, bash, ast_grep_search, lsp_navigation, edit, and write tools and forwards canonical TraceEvent JSONL to `scryrs record --stdin`. Session demarcation is automatic via session_start event. See `hooks/pi/README.md` for details.
 - **Claude Code hook** — exists at [`hooks/claude-code/`](https://github.com/scryrs-project/scryrs/blob/main/hooks/claude-code/scryrs-hook.mjs). A PreToolUse JavaScript hook that intercepts Read, Bash, Grep, Glob, Edit, Write, NotebookEdit, WebSearch, and WebFetch events and forwards canonical TraceEvent JSONL to `scryrs record --stdin`. See `hooks/claude-code/README.md` for installation and usage instructions.
 
 ### Claude Code Hook Limitations

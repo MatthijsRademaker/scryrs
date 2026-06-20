@@ -1,6 +1,6 @@
 # CLI v0 Contract
 
-The v0 CLI surface for `scryrs` provides two commands: the `hotspots` placeholder and the `record` ingestion endpoint. This contract serves agent integrators and follow-up feature developers.
+The v0 CLI surface for `scryrs` provides three commands: the `hotspots` placeholder, the `record` ingestion endpoint, and the `init` hook installer. This contract serves agent integrators and follow-up feature developers.
 
 ## Binary
 
@@ -157,11 +157,37 @@ All error messages and human-facing diagnostics are written to stderr.
 
 **Fail-fast paths:** The following always exit 2 and write an error to stderr:
 
-- Any command other than `hotspots` or `record` (including `components`, `trace`, `propose`, `graph`, `route`, `adapters`, `report`, `suggest-docs`)
+- Any command other than `hotspots`, `record`, or `init` (including `components`, `trace`, `propose`, `graph`, `route`, `adapters`, `report`, `suggest-docs`)
 - `scryrs hotspots` without a PATH argument
 - `scryrs record` with neither or both input modes (mutually exclusive)
 - `scryrs record --file` with an unreadable path
 - `scryrs hotspots <FLAG>` / `scryrs record <FLAG>` — flags after a command fall through to the positional argument parser and are rejected as invalid arguments (no per-command introspection in v0)
+
+### Init command
+
+**When to call:** An agent should call `scryrs init --agent <NAME>` to install the scryrs trace hook for a supported agent harness into the current working directory.
+
+**Input:** A required `--agent <NAME>` argument. Supported harness names: `claude-code`, `pi`.
+
+**Output:**
+
+- Stdout: Deterministic next-step instructions (plain text).
+- Stderr: Error diagnostics on failure.
+
+**Exit codes:**
+
+- 0: Hook installed successfully.
+- 1: I/O error (cannot create directory or write file).
+- 2: Usage error (unsupported harness, target file collision, self-install refusal, missing `--agent`).
+
+**Installation targets:**
+
+- `claude-code`: Writes `.claude/hooks/scryrs-hook.mjs` relative to CWD.
+- `pi`: Writes `.pi/extensions/pi-trace/index.ts` relative to CWD.
+
+**Collision behavior:** If the target file or `.claude/settings.json` (for Claude Code) already exists, the installer exits 2 with remediation instructions. It never overwrites existing files.
+
+**Self-install guard:** The installer refuses to run inside the scryrs source repository (detected via dual-marker heuristic).
 
 ## Out of scope for v0
 
