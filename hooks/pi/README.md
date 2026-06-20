@@ -86,7 +86,34 @@ is better understood.
 Each downstream event still carries a consistent `session_id`, so consumers
 can attribute all events to a session even without an explicit end marker.
 
-## Manual verification
+## Automated verification
+
+Run the cross-harness verification entrypoint to exercise the Pi hook against
+the real `scryrs record --stdin` binary in a Docker-backed environment:
+
+```bash
+scripts/verify-trace-capture --pi-only
+```
+
+This builds the real `scryrs` binary and verifies:
+
+- SessionStart lifecycle event emission and persistence
+- Tool event capture for all six tracked Pi tools with canonical
+  `TraceEvent` envelope shape
+- Handler returns `undefined` for all events (non-interference)
+- Failure propagation: failing `lsp_navigation` produces `FailedLookup`
+  with `outcome.result: 'Failure'` while original error payload is unchanged
+- Fail-open: handler returns `undefined` when scryrs is missing;
+  `console.error` reports the failure
+- Unlisted tools are silently ignored
+
+Run the full cross-harness suite (Claude Code + Pi) with:
+
+```bash
+scripts/verify-trace-capture
+```
+
+## Manual verification (deprecated)
 
 After installation, verify the hook works:
 

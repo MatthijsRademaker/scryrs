@@ -47,14 +47,29 @@ Add the hook to your `.claude/settings.json` (or `.claude/settings.local.json`):
 
 ### 3. Verify the hook is working
 
-Run a simple Claude Code session and check for trace events:
+Run the automated cross-harness verification entrypoint:
 
 ```bash
-# After a session where you used Read or Bash:
-ls .scryrs/events.jsonl
+scripts/verify-trace-capture --claude-only
 ```
 
-If the hook is working, `.scryrs/events.jsonl` will contain your session's trace events.
+This builds the real `scryrs` binary and exercises the hook against it in a
+Docker-backed environment (no host Node.js required). It verifies:
+
+- JSON shaping for all nine whitelisted tools
+- Event persistence to `.scryrs/events.jsonl` with canonical `TraceEvent` envelope shape
+- Non-interference: hook produces zero stdout/stderr
+- Fail-open: hook returns `{continue: true}` when scryrs is missing
+- Pass-through: unlisted tools produce no events
+
+For rapid development feedback, run the fast-path test instead:
+
+```bash
+scripts/hook-test
+```
+
+This uses a fake shell-script scryrs and validates JSON shaping and fail-open
+logic without building the Rust binary.
 
 ## Tool-to-Event Mapping
 
