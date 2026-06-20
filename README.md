@@ -75,7 +75,50 @@ Get from a freshly cloned repo to your first command in under two minutes.
 - **Rust 1.85+** (install via [rustup](https://rustup.rs)) — or —
 - **Docker** (the workspace ships a dev container with all tooling pre-installed)
 
-### Build from source
+### Install from source (recommended)
+
+The `scripts/install` script builds and installs the `scryrs` binary to `$HOME/.local/bin`
+by default. It works on macOS and Linux.
+
+```bash
+# Clone the repository
+git clone <repo-url>  # replace <repo-url> with the actual clone URL
+cd scryrs
+
+# Install the scryrs CLI binary
+./scripts/install
+```
+
+The installer builds `scryrs-cli` in release mode with default features, copies the
+`scryrs` binary into the target directory, and verifies the install with `--version`.
+
+To install to a custom directory:
+
+```bash
+SCRYRS_INSTALL_DIR=/usr/local/bin ./scripts/install
+# or
+./scripts/install --bin-dir /usr/local/bin
+```
+
+After install, if the target directory is not already on your `PATH`, the installer
+prints exact instructions to add it to your shell profile.
+
+### Install agent hooks (after the CLI binary is on PATH)
+
+Once `scryrs` is installed and reachable on `PATH`, install trace hooks for your
+agent harness:
+
+```bash
+scryrs init --agent claude-code
+scryrs init --agent pi
+```
+
+**Note:** `scripts/install` only installs the CLI binary. It does not create or modify
+`.claude/`, `.pi/`, `.scryrs/`, `scryrs.json`, git hooks, or shell profile files.
+Hook installation is a separate step performed by `scryrs init --agent <NAME>`
+after the `scryrs` binary is on your `PATH`.
+
+### Build from source (manual)
 
 ```bash
 # Clone the repository

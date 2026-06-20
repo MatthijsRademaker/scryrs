@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# Install the scryrs CLI binary from a source checkout.
+# Builds scryrs-cli in release mode with default features, copies the scryrs
+# binary into a configurable bin directory, and verifies the installed binary.
+#
+# Usage:
+#   scripts/install                  # install to $HOME/.local/bin
+#   scripts/install --bin-dir /path  # install to custom directory
+#   SCRYRS_INSTALL_DIR=/path scripts/install  # install via environment
+#
+# Supported platforms: Linux (uname Linux), macOS (uname Darwin).
+# Unsupported platforms exit non-zero without modifying anything.
+set -euo pipefail
+
+# ── Platform detection ────────────────────────────────────────────────────────
+
+OS="$(uname)"
+if [[ "$OS" != "Linux" && "$OS" != "Darwin" ]]; then
+    echo "[scryrs-install] ERROR: unsupported platform '$OS'." >&2
+    echo "[scryrs-install] The scryrs source installer supports only Linux and macOS." >&2
+    exit 1
+fi
+
+# ── Install directory resolution ──────────────────────────────────────────────
+
+BIN_DIR=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --bin-dir)
+            if [[ -z "${2:-}" ]]; then
+                echo "[scryrs-install] ERROR: --bin-dir requires a path argument." >&2
+                exit 2
+            fi
+            BIN_DIR="$2"
+            shift 2
+            ;;
+        --help|-h)
+            echo "Usage: scripts/install [--bin-dir <PATH>]"
+            echo ""
+            echo "Install the scryrs CLI binary from a source checkout."
+            echo ""
+            echo "Options:"
+            echo "  --bin-dir <PATH>  Install target directory (default: \$HOME/.local/bin)"
+            echo ""
+            echo "Environment:"
+            echo "  SCRYRS_INSTALL_DIR  Install target directory (overridden by --bin-dir)"
+            echo ""
+            echo "Supported platforms: Linux, macOS (Darwin)."
+            exit 0
+            ;;
+        *)
+            echo "[scryrs-install] ERROR: unknown argument '$1'." >&2
+            echo "[scryrs-install] Run with --help for usage." >&2
+            exit 2
+            ;;
+    esac
+done
+
+if [[ -z "$BIN_DIR" ]]; then
+    if [[ -n "${SCRYRS_INSTALL_DIR:-}" ]]; then
+        BIN_DIR="$SCRYRS_INSTALL_DIR"
+    else
+        BIN_DIR="$HOME/.local/bin"
+    fi
+fi
+
+# ── Pre-flight checks ─────────────────────────────────────────────────────────
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Check we are in the repository root (Cargo.toml must exist).
+if [[ ! -f "$REPO_ROOT/Cargo.toml" ]]; then
+    echo "[scryrs-install] ERROR: Cargo.toml not found at '$REPO_ROOT'." >&2
+    echo "[scryrs-install] This script must be run from the repository root." >&2
+    exit 1
+fi
+
+# Check cargo is available.
+if ! command -v cargo &>/dev/null; then
+    echo "[scryrs-install] ERROR: 'cargo' not found on PATH." >&2
+    echo "[scryrs-install] Install Rust via https://rustup.rs (Rust 1.85+ required)." >&2
+    exit 1
+fi
+
+# ── Build ─────────────────────────────────────────────────────────────────────
+
+echo "[scryrs-install] Building scryrs-cli (release, default features) ..."
+cd "$REPO_ROOT"
+cargo build -p scryrs-cli --release --locked
+
+BUILT_BIN="$REPO_ROOT/target/release/scryrs"
+if [[ ! -f "$BUILT_BIN" ]]; then
+    echo "[scryrs-install] ERROR: build succeeded but binary not found at '$BUILT_BIN'." >&2
+    exit 1
+fi
+
+# ── Install ───────────────────────────────────────────────────────────────────
+
+echo "[scryrs-install] Installing scryrs to $BIN_DIR ..."
+
+mkdir -p "$BIN_DIR"
+cp "$BUILT_BIN" "$BIN_DIR/scryrs"
+chmod +x "$BIN_DIR/scryrs"
+
+# ── Verify ────────────────────────────────────────────────────────────────────
+
+echo "[scryrs-install] Verifying installed binary ..."
+VERSION_OUTPUT="$("$BIN_DIR/scryrs" --version 2>&1)" || {
+    echo "[scryrs-install] ERROR: installed binary failed '--version' check." >&2
+    echo "[scryrs-install] Output: $VERSION_OUTPUT" >&2
+    exit 1
+}
+echo "[scryrs-install] $VERSION_OUTPUT"
+
+# ── PATH guidance ─────────────────────────────────────────────────────────────
+
+INSTALLED_PATH="$(command -v scryrs 2>/dev/null || true)"
+if [[ "$INSTALLED_PATH" == "$BIN_DIR/scryrs" ]]; then
+    echo "[scryrs-install] ✓ scryrs installed and available on PATH"
+else
+    echo "[scryrs-install] ✓ scryrs installed to $BIN_DIR/scryrs"
+    echo ""
+    echo "The install directory is NOT on your current PATH."
+    echo "Add it to your shell profile to use 'scryrs' directly:"
+    echo ""
+    if [[ "$OS" == "Darwin" ]]; then
+        echo "  echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> ~/.zshrc"
+        echo "  source ~/.zshrc"
+    else
+        echo "  echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> ~/.bashrc"
+        echo "  source ~/.bashrc"
+    fi
+    echo ""
+    echo "Or run the binary directly:"
+    echo "  $BIN_DIR/scryrs --help"
+fi
+
+echo ""
+echo "[scryrs-install] Done."
+echo "[scryrs-install] Next: run 'scryrs init --agent <NAME>' to install agent hooks."
