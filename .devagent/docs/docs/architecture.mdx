@@ -1,62 +1,26 @@
+import ClientOnly from '../theme/ClientOnly';
+
 # Architecture
 
 scryrs is a Rust workspace split by product capability: the CLI composes feature-gated crates, the deterministic core owns trace and hotspot logic, guardrail crates bound risky behavior, and adapters publish knowledge to documentation systems without making any single docs framework mandatory.
 
 ## Workspace Topology
 
-```text
-+--------------------------------------------------------------+
-| User / CI / Agent                                             |
-+------------------------------+-------------------------------+
-                               | `scryrs` binary
-+------------------------------v-------------------------------+
-| crates/scryrs-cli                                             |
-| Feature-gated command surface and machine-readable output     |
-+------+-------------+-------------+------------+--------------+
-       |             |             |            |
-+------v------+ +----v-----+ +-----v-----+ +----v--------------+
-| core suite  | | graph    | | curator   | | runtime           |
-| crates/     | | crates/  | | crates/   | | crates/           |
-| scryrs-core | | scryrs-  | | scryrs-   | | scryrs-runtime    |
-|             | | graph    | | curator   | |                  |
-+------+------+ +----+-----+ +-----+-----+ +----+--------------+
-       |             |             |            |
-       +-------------+-------------+------------+
-                         |
-               +---------v---------+
-               | crates/scryrs-    |
-               | types             |
-               | Shared contracts  |
-               +-------------------+
-
-+--------------------------------------------------------------+
-| Optional boundaries                                           |
-+----------------------+---------------------+-----------------+
-| adapters             | guardrails           | llm             |
-| markdown / rspress   | policy/sandbox/      | bounded model   |
-| publishing surfaces  | telemetry crates     | transport       |
-+----------------------+---------------------+-----------------+
-```
+<ClientOnly>
+  <div style={{ margin: '1.5rem 0', minHeight: '34rem' }}>
+    <likec4-view view-id="workspace-topology" browser="false"></likec4-view>
+  </div>
+</ClientOnly>
 
 The key architectural separation: **suite crates own product capabilities**, **guardrail crates bound unsafe or privacy-sensitive behavior**, and **adapters are publishing surfaces**. `crates/scryrs-cli` composes those pieces through Cargo features; `crates/scryrs-types` keeps cross-crate contracts small and explicit.
 
 ## Runtime Flow
 
-```text
-Agent session
-    ↓
-scryrs trace collection       (crates/scryrs-core)
-    ↓
-deterministic hotspot scoring (crates/scryrs-core)
-    ↓
-knowledge graph update        (crates/scryrs-graph)
-    ↓
-reviewable proposal creation  (crates/scryrs-curator)
-    ↓
-publishing adapter            (crates/scryrs-adapter-markdown / rspress)
-    ↓
-agent routing hint            (crates/scryrs-runtime)
-```
+<ClientOnly>
+  <div style={{ margin: '1.5rem 0', minHeight: '26rem' }}>
+    <likec4-view view-id="runtime-flow" browser="false"></likec4-view>
+  </div>
+</ClientOnly>
 
 The LLM layer is not in the policy path. `crates/scryrs-llm` is an optional transport boundary for explanation, suggestion ranking, or patch drafting. Deterministic crates produce evidence first; model-backed features can interpret that evidence later.
 
@@ -96,34 +60,18 @@ full
 This lets users keep the CLI lean for standalone hotspot analysis while enabling richer suite behavior when needed:
 
 ```bash
-cargo run -p scryrs-cli -- components
-cargo run -p scryrs-cli --no-default-features --features core -- components
-cargo run -p scryrs-cli --features full -- components --format json
+cargo run -p scryrs-cli -- hotspots .
+cargo run -p scryrs-cli --no-default-features --features core -- hotspots .
+cargo run -p scryrs-cli --features full -- hotspots .
 ```
 
 ## Guardrail Boundary
 
-```text
-+----------------------+
-| CLI command           |
-+----------+-----------+
-           |
-+----------v-----------+
-| deterministic policy  |  crates/scryrs-policy
-+----------+-----------+
-           | allow / deny
-+----------v-----------+
-| capability boundary   |  crates/scryrs-sandbox
-+----------+-----------+
-           | events, redacted logs
-+----------v-----------+
-| telemetry boundary    |  crates/scryrs-telemetry
-+----------+-----------+
-           | optional explanation or draft
-+----------v-----------+
-| bounded LLM adapter   |  crates/scryrs-llm
-+----------------------+
-```
+<ClientOnly>
+  <div style={{ margin: '1.5rem 0', minHeight: '24rem' }}>
+    <likec4-view view-id="guardrail-boundary" browser="false"></likec4-view>
+  </div>
+</ClientOnly>
 
 Policy comes before model use. Sandbox and telemetry crates exist even before full implementations so future features have obvious homes and do not smuggle shell access, write access, or remote logging into product crates.
 
@@ -131,17 +79,11 @@ Policy comes before model use. Sandbox and telemetry crates exist even before fu
 
 scryrs does not replace a documentation system. It tells the docs system what it should know.
 
-```text
-hotspots / proposals / graph
-          ↓
-+---------------------------+
-| adapter crates            |
-+---------------------------+
-| scryrs-adapter-markdown   | -> /docs, /memory-inbox, /adr
-| scryrs-adapter-rspress    | -> Rspress routes, llms.txt integration
-| future adapters           | -> Docusaurus, VitePress, internal docs repos
-+---------------------------+
-```
+<ClientOnly>
+  <div style={{ margin: '1.5rem 0', minHeight: '24rem' }}>
+    <likec4-view view-id="publishing-surfaces" browser="false"></likec4-view>
+  </div>
+</ClientOnly>
 
 Adapters depend on shared contracts and suite outputs. Core detection should never depend on Rspress, Markdown layout, or a published docs site.
 
@@ -150,6 +92,7 @@ Adapters depend on shared contracts and suite outputs. Core detection should nev
 - `Cargo.toml` defines workspace membership, shared dependency aliases, and workspace lint policy.
 - `crates/scryrs-cli/Cargo.toml` defines the product feature matrix.
 - `crates/scryrs-types/src/lib.rs` owns shared contracts used across suite crates.
+- `.devagent/architecture/` owns LikeC4 source for embedded architecture diagrams on this page.
 - `scripts/check`, `scripts/test`, and `scripts/security` are local guardrail entry points.
 - `.github/workflows/ci.yml` mirrors fast-lane checks for pull requests and `main`.
 - `deny.toml`, `clippy.toml`, `rustfmt.toml`, and `rust-toolchain.toml` capture tool policy.
@@ -157,7 +100,7 @@ Adapters depend on shared contracts and suite outputs. Core detection should nev
 ## Current Limitations
 
 - Behavior is scaffold-level: commands print placeholders and crates expose minimal public contracts.
-- No LikeC4 architecture model exists yet, so this page uses text diagrams instead of embedded generated diagrams.
+- LikeC4 views on this page are high-level architecture projections, not exhaustive Cargo dependency graphs.
 - Rust toolchain is not installed in the current local environment, so cargo-backed verification is blocked until `rust-toolchain.toml` can be installed.
 
 ## Related Pages

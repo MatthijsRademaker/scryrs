@@ -6,7 +6,7 @@
   "scripts": {
     "codegen": "sh -c 'if [ -d ../architecture ] && find ../architecture -type f \\( -name \"*.c4\" -o -name \"*.likec4\" \\) | grep -q .; then npx likec4 gen webcomponent -o docs/public/likec4-webcomponent.js ../architecture; else echo \"No LikeC4 sources found; skipping architecture webcomponent generation\"; fi'",
     "build": "bun run codegen && rspress build",
-    "dev": "rspress dev",
+    "dev": "bun run codegen && rspress dev",
     "preview": "rspress preview"
   },
   "dependencies": {

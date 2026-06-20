@@ -1,0 +1,97 @@
+views {
+  view workspace-topology {
+    title "Workspace Topology"
+
+    include user_ci_agent
+    include repo.cli
+    include repo.core, repo.graph, repo.curator, repo.runtime
+    include repo.types
+    include repo.policy, repo.sandbox, repo.telemetry
+    include repo.adapter_markdown, repo.adapter_rspress
+    include repo.llm
+
+    group "Core suite" {
+      include repo.core, repo.graph, repo.curator, repo.runtime
+    }
+
+    group "Shared contracts" {
+      include repo.types
+    }
+
+    group "Guardrails" {
+      include repo.policy, repo.sandbox, repo.telemetry
+    }
+
+    group "Adapters" {
+      include repo.adapter_markdown, repo.adapter_rspress
+    }
+
+    group "Optional model boundary" {
+      include repo.llm
+    }
+
+    style repo.cli { color primary }
+    style repo.types { color secondary }
+    style repo.core, repo.graph, repo.curator, repo.runtime { color blue }
+    style repo.policy, repo.sandbox, repo.telemetry { color amber }
+    style repo.adapter_markdown, repo.adapter_rspress { color green }
+    style repo.llm { color muted; border dashed }
+
+    autoLayout TopBottom
+  }
+
+  dynamic view runtime-flow {
+    title "Runtime Flow"
+
+    user_ci_agent -> repo.core.trace_collection "agent session"
+    repo.core.trace_collection -> repo.core.hotspot_scoring "collect trace"
+    repo.core.hotspot_scoring -> repo.graph "score hotspots"
+    repo.graph -> repo.curator.proposal_creation "update knowledge graph"
+    repo.curator.proposal_creation -> repo.adapter_rspress "publish docs route"
+    repo.adapter_rspress -> repo.runtime.routing_hint "emit routing hint"
+
+    style repo.core.trace_collection, repo.core.hotspot_scoring { color primary }
+    style repo.graph, repo.curator.proposal_creation { color secondary }
+    style repo.adapter_rspress, repo.runtime.routing_hint { color green }
+  }
+
+  view guardrail-boundary {
+    title "Guardrail Boundary"
+
+    include repo.cli, repo.policy, repo.sandbox, repo.telemetry, repo.llm
+
+    style repo.cli { color primary }
+    style repo.policy { color red }
+    style repo.sandbox { color amber }
+    style repo.telemetry { color secondary }
+    style repo.llm { color muted; border dashed }
+
+    autoLayout LeftRight
+  }
+
+  view publishing-surfaces {
+    title "Publishing Surfaces"
+
+    include repo.core, repo.graph, repo.curator
+    include repo.adapter_markdown, repo.adapter_rspress
+    include markdown_docs, project_docs, llms_index
+
+    group "Suite outputs" {
+      include repo.core, repo.graph, repo.curator
+    }
+
+    group "Adapter crates" {
+      include repo.adapter_markdown, repo.adapter_rspress
+    }
+
+    group "Published surfaces" {
+      include markdown_docs, project_docs, llms_index
+    }
+
+    style repo.core, repo.graph, repo.curator { color blue }
+    style repo.adapter_markdown, repo.adapter_rspress { color green }
+    style markdown_docs, project_docs, llms_index { color secondary }
+
+    autoLayout LeftRight
+  }
+}

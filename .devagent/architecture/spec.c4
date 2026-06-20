@@ -1,0 +1,48 @@
+specification {
+  tag optional
+
+  element actor {
+    notation "Actor"
+    style {
+      shape person
+      color primary
+    }
+  }
+
+  element workspace {
+    notation "Workspace"
+  }
+
+  element crate {
+    notation "Crate"
+    style {
+      shape component
+    }
+  }
+
+  element contract {
+    notation "Shared Contract"
+    style {
+      shape storage
+    }
+  }
+
+  element docs {
+    notation "Docs Surface"
+    style {
+      shape browser
+    }
+  }
+
+  element flowstep {
+    notation "Flow Step"
+    style {
+      shape component
+    }
+  }
+
+  relationship optional {
+    color muted
+    line dashed
+  }
+}

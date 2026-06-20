@@ -50,6 +50,12 @@ The change is done only when it is correct, simple, localized, verified, consist
 
 The go ecosystem lends itself well for error propagation, i want a full stack trace with relevant errors. Not swallow them and have a different error somehwere down the line.
 
+## 12. File scope and naming
+
+Prefer small files with one clear responsibility.
+Split files before they grow past ~1000 lines unless there is strong reason not to.
+Use feature-descriptive file names; avoid generic buckets like `utils`, `helpers`, or `misc`.
+
 ## General guidance
 
 - Prefer delegating to subagents
