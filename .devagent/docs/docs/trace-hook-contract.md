@@ -275,7 +275,7 @@ This tier exists as a lowest-common-denominator fallback for harnesses with no h
 
 ## Install and Setup
 
-Hook installation is currently a **manual process** pending the `scryrs init --agent` installer (planned for Phase 1 of the [Product Roadmap](./roadmap.md)).
+Hook installation is currently a **manual process** pending the `scryrs init --agent` installer (planned for Phase 1 of the [Product Roadmap](./roadmap.mdx)).
 
 ### Manual setup steps (current state)
 
@@ -293,13 +293,13 @@ Once `scryrs init --agent <name>` is implemented, these steps will be automated 
 
 Reference hook implementations for Pi and Claude Code are **forthcoming Phase 1 deliverables**. They do not exist in the repository yet.
 
-- **Pi hook** — will live under `hooks/pi/` and leverage Pi's `.pi/hooks/` subprocess hook system. Marked as forthcoming in the [Product Roadmap](./roadmap.md) Phase 1.
-- **Claude Code hook** — will live under `hooks/claude-code/` and leverage Claude Code's hook/interception system. Marked as forthcoming in the [Product Roadmap](./roadmap.md) Phase 1.
+- **Pi hook** — will live under `hooks/pi/` and leverage Pi's `.pi/hooks/` subprocess hook system. Marked as forthcoming in the [Product Roadmap](./roadmap.mdx) Phase 1.
+- **Claude Code hook** — will live under `hooks/claude-code/` and leverage Claude Code's hook/interception system. Marked as forthcoming in the [Product Roadmap](./roadmap.mdx) Phase 1.
 
 No reference hooks for other harnesses are planned at this time. Harness authors targeting other platforms should follow the integration-tier matrix above and use the Pi/Claude Code hooks as reference patterns once available.
 
 ## Related Pages
 
 - [CLI v0 Contract](./cli-v0-contract.md) — deterministic output and exit-code contract for `scryrs record` and `scryrs hotspots`.
-- [Product Roadmap](./roadmap.md) — delivery sequence including Phase 1 proxy capture and reference hook work.
-- [Architecture](./architecture.md) — crate topology and runtime flow.
+- [Product Roadmap](./roadmap.mdx) — delivery sequence including Phase 1 proxy capture and reference hook work.
+- [Architecture](./architecture.mdx) — crate topology and runtime flow.
