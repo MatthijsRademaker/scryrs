@@ -116,7 +116,7 @@ Agents should check `surfaceVersion` before parsing to detect format changes. Th
 | Code | Meaning |
 |------|---------|
 | 0 | Hotspots: JSON placeholder written successfully. Record: all processed non-empty lines were accepted. Help/version/surface display. |
-| 1 | Record: one or more events rejected, or I/O error writing output. Hotspots: I/O error writing output. |
+| 1 | Hotspots: I/O error writing output. Record: one or more events rejected, or I/O error writing output. |
 | 2 | Unknown commands, missing required arguments, invalid arguments, unsupported paths (usage errors). Record: fatal I/O error (unreadable file or store failure). |
 
 All error messages and human-facing diagnostics are written to stderr.

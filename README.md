@@ -100,32 +100,37 @@ scryrs — context intelligence for AI-assisted codebases
 
 Discover, analyze, and navigate hotspots in your codebase.
 
-USAGE
-scryrs hotspots <PATH>
+COMMANDS
+  scryrs hotspots <PATH>
+      Emit a versioned JSON placeholder for repository hotspots.
+  scryrs record --stdin
+      Ingest JSONL trace events from stdin.
+  scryrs record --file <PATH>
+      Ingest JSONL trace events from a file.
 
-ARGUMENTS
-<PATH>    Path to the repository root directory (required)
+RECORD OUTPUT
+  A single-line JSON summary on stdout.
+  Rejection diagnostics are written as JSON objects to stderr,
+  one per rejected non-empty line.
 
-OUTPUT
-A single-line JSON object with the following envelope:
-{
-"schemaVersion": "0.1.0",
-"command": "hotspots",
-"status": "placeholder"
-}
+HOTSPOTS OUTPUT
+  A single-line JSON placeholder on stdout.
 
 EXAMPLES
-scryrs hotspots /path/to/repo
-scryrs hotspots .
+  scryrs hotspots /path/to/repo
+  scryrs hotspots .
+  scryrs record --stdin < events.jsonl
+  scryrs record --file session.jsonl
 
 OPTIONS
--h, --help       Print this help message and exit
--V, --version    Print version and exit
+  -h, --help       Print this help message and exit
+  -V, --version    Print version and exit
+  -hj, --help-json Print machine-readable CLI surface description and exit
 
 EXIT CODES
-0    Success (output written to stdout)
-1    I/O error (output could not be written)
-2    Usage error (invalid arguments)
+  0    Success (hotspots: JSON written; record: all events accepted)
+  1    Hotspots: I/O error writing output. Record: rejected events or I/O error
+  2    Usage error (invalid arguments); record: also fatal I/O error (unreadable file)
 ```
 
 **`--version`** prints the binary version:
@@ -139,10 +144,10 @@ scryrs 0.1.0
 
 ```bash
 $ cargo run -p scryrs-cli -- --help-json
-{"surfaceVersion":"0.1.0","binary":"scryrs","commands":[{"name":"hotspots","description":"Discover and analyze knowledge hotspots in a repository","arguments":[{"name":"PATH","type":"string","required":true,"description":"Path to the repository root directory"}],"output":{"mimeType":"application/json","fields":[{"name":"schemaVersion","type":"string","description":"Version of the output envelope format","optional":false},{"name":"command","type":"string","description":"Name of the executed command","optional":false},{"name":"status","type":"string","description":"Execution status indicator","optional":false}]}}],"globalFlags":[{"name":"help","short":"-h","long":"--help","description":"Print help message and exit","action":"help"},{"name":"version","short":"-V","long":"--version","description":"Print version and exit","action":"version"},{"name":"help-json","short":"-hj","long":"--help-json","description":"Print machine-readable CLI surface description and exit","action":"helpJson"}],"rootBehavior":{"action":"help","exitCode":0},"exitCodes":{"0":"Success","1":"I/O error","2":"Usage error"}}
+{"surfaceVersion":"0.2.0","binary":"scryrs","commands":[{"name":"hotspots",...},{"name":"record",...}]}
 ```
 
-The JSON document describes every command, argument, flag, output field, and exit code — suitable for parsing by tooling or agents.
+The JSON document describes every command, argument, flag, output field, and exit code — suitable for parsing by tooling or agents. Use `scryrs --help-json` directly for the full surface document.
 
 ### Run the placeholder command
 
@@ -155,13 +160,13 @@ This emits a single-line JSON envelope. The `status: "placeholder"` field means 
 
 ### Error paths
 
-The CLI follows a three-code exit convention:
+The CLI follows a three-code exit convention with command-specific semantics:
 
 | Exit code | Meaning     |
 |-----------|-------------|
-| 0         | Success     |
-| 1         | I/O error   |
-| 2         | Usage error |
+| 0         | Success (hotspots: JSON written; record: all events accepted) |
+| 1         | Hotspots: I/O error. Record: rejected events or I/O error |
+| 2         | Usage error; record: also fatal I/O error |
 
 **Missing required argument** — exit 2:
 
@@ -175,8 +180,9 @@ See `scryrs --help`
 
 ### Current limitations
 
-- **One command only:** `hotspots` is the only command. Everything else (`trace`, `propose`, `graph`, `route`, `adapters`, `report`, `suggest-docs`) produces an "unknown command" error.
+- **Two commands:** `hotspots` and `record` are the supported commands. Everything else (`trace`, `propose`, `graph`, `route`, `adapters`, `report`, `suggest-docs`) produces an "unknown command" error.
 - **Placeholder output:** `hotspots` always returns `{"status":"placeholder"}` regardless of the path argument. No analysis engine is wired yet.
+- **Record is ingestion-only:** `scryrs record` validates and persists trace events. It does not trigger hotspot analysis, graph building, or other downstream processing.
 - **No engine behavior:** The CLI is a contract shell — argument parsing, help text, error messages, and output formatting are frozen, but the analysis internals are not implemented.
 - **What's not listed:** No speculative future commands or features appear here. The quickstart documents exactly what exists today.
 
