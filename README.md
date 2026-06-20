@@ -134,7 +134,7 @@ scryrs 0.1.0
 
 ```bash
 $ cargo run -p scryrs-cli -- --help-json
-{"surfaceVersion":"0.1.0","binary":"scryrs","commands":[...],...}
+{"surfaceVersion":"0.1.0","binary":"scryrs","commands":[{"name":"hotspots","description":"Discover and analyze knowledge hotspots in a repository","arguments":[{"name":"PATH","type":"string","required":true,"description":"Path to the repository root directory"}],"output":{"mimeType":"application/json","fields":[{"name":"schemaVersion","type":"string","description":"Version of the output envelope format","optional":false},{"name":"command","type":"string","description":"Name of the executed command","optional":false},{"name":"status","type":"string","description":"Execution status indicator","optional":false}]}}],"globalFlags":[{"name":"help","short":"-h","long":"--help","description":"Print help message and exit","action":"help"},{"name":"version","short":"-V","long":"--version","description":"Print version and exit","action":"version"},{"name":"help-json","short":"-hj","long":"--help-json","description":"Print machine-readable CLI surface description and exit","action":"helpJson"}],"rootBehavior":{"action":"help","exitCode":0},"exitCodes":{"0":"Success","1":"I/O error","2":"Usage error"}}
 ```
 
 The JSON document describes every command, argument, flag, output field, and exit code — suitable for parsing by tooling or agents.

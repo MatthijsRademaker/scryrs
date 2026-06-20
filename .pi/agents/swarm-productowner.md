@@ -4,14 +4,13 @@ description: Product strategy and requirements definition
 model: deepseek/deepseek-v4-flash
 thinking: high
 tools:
-    refinement: [report_refinement_outcome]
+  refinement: [report_refinement_outcome]
 skills: swarm-board, project-docs, openspec-explore, openspec-propose
 systemPromptMode: append
 swarm:
-    enabled: true
-    runtime: task_reactive
+  enabled: true
+  runtime: task_reactive
 modelModerate: openai-codex/gpt-5.4
-modelComplex: openai-codex/gpt-5.5
 ---
 
 # Product Owner — Product Strategy Specialist

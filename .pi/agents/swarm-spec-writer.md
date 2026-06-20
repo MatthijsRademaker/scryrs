@@ -4,15 +4,14 @@ description: Task specification and formulation specialist
 model: deepseek/deepseek-v4-flash
 thinking: high
 tools:
-    refinement: [report_refinement_outcome]
+  refinement: [report_refinement_outcome]
 skills: swarm-board, project-docs
 systemPromptMode: append
 swarm:
-    enabled: true
-    runtime: task_reactive
+  enabled: true
+  runtime: task_reactive
 modelEasy: deepseek/deepseek-v4-flash
 modelModerate: deepseek/deepseek-v4-pro
-modelComplex: openai-codex/gpt-5.4
 ---
 
 # Spec-Writer — Task Specification Specialist

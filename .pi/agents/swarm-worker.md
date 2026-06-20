@@ -4,14 +4,14 @@ description: Generalist software engineer
 model: deepseek/deepseek-v4-pro
 thinking: high
 tools:
-    dev: [run_development_verification, report_work_outcome]
+  dev: [run_development_verification, report_work_outcome]
 skills: ccc, tdd, github-cli, swarm-board, openspec-apply-change, openspec-archive-change
 systemPromptMode: append
 swarm:
-    enabled: true
-    runtime: task_reactive
+  enabled: true
+  runtime: task_reactive
 modelModerate: deepseek/deepseek-v4-pro
-modelComplex: deepseek/deepseek-v4-pro
+modelComplex: openai-codex/gpt-5.4
 ---
 
 # Worker — Generalist Software Engineer
