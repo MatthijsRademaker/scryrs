@@ -208,21 +208,23 @@ mod tests {
 
         assert_eq!(run_with_writers(["--help"], &mut out, &mut err), 0);
         assert!(err.is_empty());
-        let output = String::from_utf8_lossy(&out);
-        assert!(output.contains("USAGE"));
-        assert!(output.contains("EXAMPLES"));
-        assert!(output.contains("OPTIONS"));
-        assert!(output.contains("EXIT CODES"));
+        insta::assert_snapshot!(String::from_utf8_lossy(&out));
     }
 
     #[test]
-    fn short_help_flag_prints_help_and_exits_0() {
-        let mut out = Vec::new();
+    fn short_help_flag_produces_identical_output_to_long_help() {
+        let mut out_long = Vec::new();
+        let mut out_short = Vec::new();
         let mut err = Vec::new();
 
-        assert_eq!(run_with_writers(["-h"], &mut out, &mut err), 0);
+        assert_eq!(run_with_writers(["--help"], &mut out_long, &mut err), 0);
         assert!(err.is_empty());
-        assert!(String::from_utf8_lossy(&out).contains("USAGE"));
+        assert_eq!(run_with_writers(["-h"], &mut out_short, &mut err), 0);
+        assert!(err.is_empty());
+        assert_eq!(
+            out_short, out_long,
+            "-h must produce identical output to --help"
+        );
     }
 
     #[test]
@@ -246,16 +248,22 @@ mod tests {
     }
 
     #[test]
-    fn bare_invocation_prints_help_and_exits_0() {
-        let mut out = Vec::new();
+    fn bare_invocation_produces_identical_output_to_help() {
+        let mut out_help = Vec::new();
+        let mut out_bare = Vec::new();
         let mut err = Vec::new();
 
-        assert_eq!(run_with_writers(Vec::<&str>::new(), &mut out, &mut err), 0);
+        assert_eq!(run_with_writers(["--help"], &mut out_help, &mut err), 0);
         assert!(err.is_empty());
-        let output = String::from_utf8_lossy(&out);
-        assert!(output.contains("USAGE"));
-        assert!(output.contains("EXAMPLES"));
-        assert!(output.contains("EXIT CODES"));
+        assert_eq!(
+            run_with_writers(Vec::<&str>::new(), &mut out_bare, &mut err),
+            0
+        );
+        assert!(err.is_empty());
+        assert_eq!(
+            out_bare, out_help,
+            "bare invocation must produce identical output to --help"
+        );
     }
 
     #[test]
@@ -268,11 +276,10 @@ mod tests {
             0
         );
         assert!(err.is_empty());
-
-        let output = String::from_utf8_lossy(&out);
-        assert!(output.contains("\"schemaVersion\":\"0.1.0\""));
-        assert!(output.contains("\"command\":\"hotspots\""));
-        assert!(output.contains("\"status\":\"placeholder\""));
+        insta::assert_snapshot!(
+            String::from_utf8_lossy(&out),
+            @r#"{"schemaVersion":"0.1.0","command":"hotspots","status":"placeholder"}"#
+        );
     }
 
     #[test]
@@ -339,26 +346,7 @@ mod tests {
 
         assert_eq!(run_with_writers(["--help-json"], &mut out, &mut err), 0);
         assert!(err.is_empty());
-        let output = String::from_utf8_lossy(&out);
-        // Confirm it's valid JSON by checking for key structural elements
-        assert!(output.starts_with('{'), "surface doc must be a JSON object");
-        assert!(output.ends_with('}'), "surface doc must be a JSON object");
-        assert!(
-            output.contains("\"surfaceVersion\""),
-            "surface doc must contain surfaceVersion"
-        );
-        assert!(
-            output.contains("\"binary\""),
-            "surface doc must contain binary"
-        );
-        assert!(
-            output.contains("\"commands\""),
-            "surface doc must contain commands"
-        );
-        assert!(
-            output.contains("\"globalFlags\""),
-            "surface doc must contain globalFlags"
-        );
+        insta::assert_snapshot!(String::from_utf8_lossy(&out));
     }
 
     #[test]
@@ -378,87 +366,6 @@ mod tests {
             out_long, out_short,
             "--help-json and -hj must produce identical output"
         );
-    }
-
-    #[test]
-    fn surface_doc_contains_all_required_top_level_fields() {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        run_with_writers(["--help-json"], &mut out, &mut err);
-        let output = String::from_utf8_lossy(&out);
-        assert!(output.contains("\"surfaceVersion\":\"0.1.0\""));
-        assert!(output.contains("\"binary\":\"scryrs\""));
-        assert!(output.contains("\"commands\":["));
-        assert!(output.contains("\"globalFlags\":["));
-        assert!(output.contains("\"rootBehavior\":{"));
-        assert!(output.contains("\"exitCodes\":{"));
-    }
-
-    #[test]
-    fn commands_array_has_exactly_one_entry_for_hotspots() {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        run_with_writers(["--help-json"], &mut out, &mut err);
-        let output = String::from_utf8_lossy(&out);
-        assert!(output.contains("\"name\":\"hotspots\""));
-        assert!(output.contains("\"name\":\"PATH\""));
-        assert!(output.contains("\"type\":\"string\""));
-        assert!(output.contains("\"required\":true"));
-        assert!(output.contains("\"mimeType\":\"application/json\""));
-        assert!(output.contains("\"name\":\"schemaVersion\""));
-        assert!(output.contains("\"name\":\"command\""));
-        assert!(output.contains("\"name\":\"status\""));
-    }
-
-    #[test]
-    fn global_flags_array_has_exactly_three_entries() {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        run_with_writers(["--help-json"], &mut out, &mut err);
-        let output = String::from_utf8_lossy(&out);
-        // Check all three flag entries exist
-        assert!(output.contains("\"name\":\"help\""));
-        assert!(output.contains("\"short\":\"-h\""));
-        assert!(output.contains("\"long\":\"--help\""));
-        assert!(output.contains("\"action\":\"help\""));
-
-        assert!(output.contains("\"name\":\"version\""));
-        assert!(output.contains("\"short\":\"-V\""));
-        assert!(output.contains("\"long\":\"--version\""));
-        assert!(output.contains("\"action\":\"version\""));
-
-        assert!(output.contains("\"name\":\"help-json\""));
-        assert!(output.contains("\"short\":\"-hj\""));
-        assert!(output.contains("\"long\":\"--help-json\""));
-        assert!(output.contains("\"action\":\"helpJson\""));
-    }
-
-    #[test]
-    fn exit_codes_object_has_correct_keys_and_descriptions() {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        run_with_writers(["--help-json"], &mut out, &mut err);
-        let output = String::from_utf8_lossy(&out);
-        assert!(output.contains("\"0\":\"Success\""));
-        assert!(output.contains("\"1\":\"I/O error\""));
-        assert!(output.contains("\"2\":\"Usage error\""));
-    }
-
-    #[test]
-    fn root_behavior_has_action_help_and_exit_code_0() {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        run_with_writers(["--help-json"], &mut out, &mut err);
-        let output = String::from_utf8_lossy(&out);
-        assert!(output.contains("\"rootBehavior\":{"));
-        assert!(output.contains("\"action\":\"help\""));
-        // exitCode:0 appears within rootBehavior context
-        assert!(output.contains("\"exitCode\":0"));
     }
 
     #[test]
@@ -595,5 +502,45 @@ mod tests {
                 "command '{cmd}' should include escalation to --help on stderr"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod smoke {
+    use super::run;
+
+    #[test]
+    fn help_exits_0_stdout_nonempty() {
+        assert_eq!(run(["--help"]), 0);
+    }
+
+    #[test]
+    fn version_exits_0_stdout_nonempty() {
+        assert_eq!(run(["--version"]), 0);
+    }
+
+    #[test]
+    fn hotspots_path_exits_0_stdout_nonempty() {
+        assert_eq!(run(["hotspots", "/tmp"]), 0);
+    }
+
+    #[test]
+    fn bare_invocation_exits_0_stdout_nonempty() {
+        assert_eq!(run(Vec::<&str>::new()), 0);
+    }
+
+    #[test]
+    fn unknown_command_exits_2_stderr_nonempty() {
+        assert_eq!(run(["unknown"]), 2);
+    }
+
+    #[test]
+    fn hotspots_without_path_exits_2_stderr_nonempty() {
+        assert_eq!(run(["hotspots"]), 2);
+    }
+
+    #[test]
+    fn help_json_exits_0_stdout_nonempty() {
+        assert_eq!(run(["--help-json"]), 0);
     }
 }

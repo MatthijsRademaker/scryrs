@@ -117,3 +117,42 @@ The following commands are **not** defined in the v0 contract and will exit 2 wi
 - `suggest-docs`
 
 These names align with the vision document's future command vocabulary but are not part of the v0 surface.
+
+## Local Development Testing
+
+### Running tests
+
+```bash
+cargo test -p scryrs-cli
+```
+
+All tests for the `scryrs-cli` crate run through Cargo's built-in test runner. The crate includes:
+
+- **Snapshot tests** (via `insta`) for `--help`, `--help-json`, and `hotspots` output — these verify exact output byte-for-byte against committed `.snap` files.
+- **Identity tests** — verify `-h` produces identical output to `--help`, `-hj` to `--help-json`, and bare invocation to `--help`.
+- **Error-path tests** — verify exit codes and error messages for unknown commands, missing arguments, and extra arguments.
+- **Smoke tests** — exercise the public `run()` entrypoint to verify arg-collection wiring from the environment args iterator to the writer-based logic.
+
+### Viewing snapshot diffs
+
+When a snapshot test fails, Cargo prints a diff showing what changed between the expected (`.snap`) and actual output. The diff is human-readable and pinpoints every divergence — whitespace, wording, ordering, field presence.
+
+### Updating snapshots
+
+After an intentional change to the CLI contract (help text, `--help-json` surface document, or `hotspots` JSON envelope), update the committed snapshots:
+
+```bash
+# Batch-accept all new or changed snapshots:
+cargo insta test --accept -p scryrs-cli
+
+# Or review interactively (requires cargo-insta):
+cargo insta review
+```
+
+### Installing cargo-insta
+
+`cargo-insta` is optional — tests run and diff output works without it. It is only needed for the snapshot review/accept workflow:
+
+```bash
+cargo install cargo-insta
+```

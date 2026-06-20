@@ -39,6 +39,9 @@ scryrs-sandbox = { workspace = true, optional = true }
 scryrs-telemetry = { workspace = true, optional = true }
 scryrs-types.workspace = true
 
+[dev-dependencies]
+insta = { version = "1", features = ["json"] }
+
 [lib]
 path = "src/lib.rs"
 
