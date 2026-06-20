@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# scryrs hook-test — integration tests for the Claude Code reference hook.
+#
+# Exercises `hooks/claude-code/scryrs-hook.js` without requiring the Rust
+# toolchain. Tests JSON shaping for all nine tool types, happy-path forwarding
+# to `scryrs record --stdin`, fail-open behavior when scryrs is missing or
+# exits non-zero, and transparency (no stdout/stderr alteration).
+#
+# Usage:
+#   scripts/hook-test          # run all tests
+#   scripts/hook-test --json   # run focused JSON-shaping check only
+#   scripts/hook-test --help   # print help
+# ---------------------------------------------------------------------------
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+HOOK_FILE="$ROOT/hooks/claude-code/scryrs-hook.js"
+RUNNER="$SCRIPT_DIR/hook-test-runner.mjs"
+
+check_node() {
+  if ! command -v node &>/dev/null; then
+    echo "Node.js is required for hook-test. Install Node.js (>=18) and re-run."
+    exit 1
+  fi
+}
+
+main() {
+  check_node
+
+  if [[ ! -f "$RUNNER" ]]; then
+    echo "Test runner not found at $RUNNER"
+    exit 1
+  fi
+
+  local mode="${1:-all}"
+
+  echo "scryrs hook-test — Claude Code reference hook integration tests"
+  echo "Hook file: $HOOK_FILE"
+  echo "Node:      $(node --version)"
+
+  node "$RUNNER" "$mode"
+}
+
+main "$@"

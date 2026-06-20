@@ -11,7 +11,7 @@ Current repo state is still foundation-only:
 - `crates/scryrs-types/src/lib.rs` defines `TraceEvent` and related payload types.
 - `crates/scryrs-core/src/lib.rs` contains only in-memory hotspot scoring over supplied events.
 - `crates/scryrs-cli/src/lib.rs` exposes `scryrs record` for JSONL trace event ingestion and `scryrs hotspots <PATH>` (currently placeholder).
-- Event store exists at `.scryrs/events.jsonl`; reference hooks, installer, and route manifests remain forthcoming.
+- Event store exists at `.scryrs/events.jsonl`; `hooks/claude-code/` provides a Claude Code reference hook; the Pi hook, installer, and route manifests remain forthcoming.
 
 That means scryrs does **not** yet qualify as a proxy CLI. It has schema and scoring primitives, but not ingestion, persistence, or deterministic harness integration.
 
