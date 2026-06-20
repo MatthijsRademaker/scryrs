@@ -70,6 +70,16 @@ run_rust() {
 	ensure_volume "$CACHE_VOLUME_INSTALLED"
 	_pull_image_if_missing "$image"
 
+	# Ensure volume roots are writable by the non-root container user.
+	# Volumes are initialized empty + root-owned; cargo needs to create
+	# subdirectories (cache/, git/db/, etc.) under them.
+	# This is a no-op after first run.
+	docker_cmd run --rm -u root \
+		-v "${CACHE_VOLUME_REGISTRY}:/usr/local/cargo/registry" \
+		-v "${CACHE_VOLUME_GIT}:/usr/local/cargo/git" \
+		"$image" \
+		chown "${uid}:${gid}" /usr/local/cargo/registry /usr/local/cargo/git >/dev/null 2>&1 || true
+
 	docker_cmd run --rm \
 		-u "${uid}:${gid}" \
 		-v "$ROOT:/workspace" \
