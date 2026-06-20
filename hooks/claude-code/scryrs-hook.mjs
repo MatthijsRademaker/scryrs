@@ -284,6 +284,16 @@ function forwardToScryrs(eventJson) {
 			child.stdin.end();
 		}
 
+		// Safety net: if the child exits before drain fires (extremely
+		// unlikely with single-event writes < 1KB), ensure stdin is ended
+		// so the child doesn't hang waiting for EOF. The settled guard in
+		// done() prevents double-resolution regardless.
+		child.on("close", () => {
+			if (!child.stdin.destroyed) {
+				child.stdin.end();
+			}
+		});
+
 		child.stdin.on("error", (err) => {
 			done(false, `scryrs stdin write error: ${err.message}`);
 		});

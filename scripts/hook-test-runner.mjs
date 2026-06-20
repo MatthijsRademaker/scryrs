@@ -179,6 +179,13 @@ async function testJsonShaping() {
 			payloadVal: "rust serde",
 		},
 		{
+			name: "web_search",
+			input: { query: "tokio runtime" },
+			expectedType: "SearchRun",
+			payloadKey: "query",
+			payloadVal: "tokio runtime",
+		},
+		{
 			name: "web_fetch",
 			input: { url: "https://example.com" },
 			expectedType: "DocRetrieved",
