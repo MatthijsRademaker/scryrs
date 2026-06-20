@@ -1,5 +1,11 @@
 //! Standalone trace and hotspot foundation for scryrs.
 
+pub mod ingestion;
+pub mod store;
+
+pub use ingestion::{IngestionOutcome, Rejection, ingest_jsonl};
+pub use store::EventStore;
+
 use scryrs_types::{FeatureDescriptor, Hotspot, TraceEvent};
 
 pub fn descriptor() -> FeatureDescriptor {

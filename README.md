@@ -49,10 +49,15 @@ xtask
 
 ## Feature split
 
-The CLI ships a single v0 placeholder command:
+The CLI ships two commands:
 
 ```bash
+# Hotspot analysis placeholder (v0)
 cargo run -p scryrs-cli -- hotspots /path/to/repo
+
+# JSONL trace event ingestion
+cargo run -p scryrs-cli -- record --stdin < events.jsonl
+cargo run -p scryrs-cli -- record --file session.jsonl
 ```
 
 Default features include the standalone suite, Markdown adapter, runtime, and deterministic guardrail support. `full` adds the optional LLM boundary and Rspress adapter.
@@ -186,7 +191,7 @@ See `scryrs --help`
 
 ## Current status
 
-v0 CLI contract frozen. Single placeholder command `scryrs hotspots <PATH>` emits versioned JSON. Engine behavior comes next.
+v0 CLI contract. `scryrs record` ingests JSONL trace events via `--stdin` or `--file <PATH>`, validates against the shared `TraceEvent` schema, persists accepted events to `.scryrs/events.jsonl`, and returns deterministic summary counts and rejection diagnostics. `scryrs hotspots <PATH>` emits a versioned JSON placeholder. Engine behavior comes next.
 
 ## Local checks
 

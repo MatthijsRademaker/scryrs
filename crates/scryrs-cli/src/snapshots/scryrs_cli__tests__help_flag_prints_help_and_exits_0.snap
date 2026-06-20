@@ -6,14 +6,27 @@ scryrs — context intelligence for AI-assisted codebases
 
 Discover, analyze, and navigate hotspots in your codebase.
 
-USAGE
+COMMANDS
 scryrs hotspots <PATH>
+Emit a versioned JSON placeholder for repository hotspots.
+scryrs record --stdin
+Ingest JSONL trace events from stdin.
+scryrs record --file <PATH>
+Ingest JSONL trace events from a file.
 
-ARGUMENTS
-<PATH>    Path to the repository root directory (required)
+RECORD OUTPUT
+A single-line JSON summary on stdout:
+{
+"command": "record",
+"schemaVersion": "0.1.0",
+"accepted": <count>,
+"rejected": <count>
+}
+Rejection diagnostics are written as JSON objects to stderr,
+one per rejected non-empty line.
 
-OUTPUT
-A single-line JSON object with the following envelope:
+HOTSPOTS OUTPUT
+A single-line JSON placeholder on stdout:
 {
 "schemaVersion": "0.1.0",
 "command": "hotspots",
@@ -23,12 +36,15 @@ A single-line JSON object with the following envelope:
 EXAMPLES
 scryrs hotspots /path/to/repo
 scryrs hotspots .
+scryrs record --stdin < events.jsonl
+scryrs record --file session.jsonl
 
 OPTIONS
 -h, --help       Print this help message and exit
 -V, --version    Print version and exit
+-hj, --help-json Print machine-readable CLI surface description and exit
 
 EXIT CODES
-0    Success (output written to stdout)
-1    I/O error (output could not be written)
-2    Usage error (invalid arguments)
+0    Success (all events accepted for record; output written for all commands)
+1    Record: one or more events rejected; I/O error (output could not be written)
+2    Usage error (invalid arguments) or fatal I/O error (unreadable file)
