@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Verify the scryrs CLI binary installer.
+# Covers: shell syntax check on scripts/install, Linux temp-directory install
+# through the existing Docker-backed Rust verification container.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$SCRIPT_DIR/lib/docker-verification.sh"
+
+# ── 2.2 Shell syntax check ───────────────────────────────────────────────────
+step "bash -n scripts/install"
+bash -n "$ROOT/scripts/install"
+
+# ── 2.3–2.4 Linux temp-directory installer verification ─────────────────────
+step "Linux temp-directory install via run_rust"
+
+# Create a temp directory under the repo root so it is accessible
+# both from the host and from inside the /workspace mount.
+TEMP_INSTALL_DIR="$ROOT/.tmp-scryrs-verify-install"
+rm -rf "$TEMP_INSTALL_DIR"
+mkdir -p "$TEMP_INSTALL_DIR"
+
+cleanup() {
+    rm -rf "$TEMP_INSTALL_DIR"
+}
+trap cleanup EXIT
+
+# Run the installer inside the Rust container, targeting the temp directory.
+# Inside the container the repo root is /workspace.
+run_rust -- \
+    bash -c "
+        set -euo pipefail
+        SCRYRS_INSTALL_DIR='/workspace/.tmp-scryrs-verify-install' /workspace/scripts/install
+    "
+
+# Verify the installed binary works.
+step "Verify <temp-install-dir>/scryrs --version"
+if [[ ! -x "$TEMP_INSTALL_DIR/scryrs" ]]; then
+    echo "[verify-install] FAIL: installed binary not found or not executable at $TEMP_INSTALL_DIR/scryrs" >&2
+    exit 1
+fi
+
+VERSION_OUTPUT="$("$TEMP_INSTALL_DIR/scryrs" --version 2>&1)" || {
+    echo "[verify-install] FAIL: installed binary --version failed" >&2
+    echo "[verify-install] Output: $VERSION_OUTPUT" >&2
+    exit 1
+}
+
+echo "[verify-install] Installed binary version: $VERSION_OUTPUT"
+echo "[verify-install] ✓ Installer verification passed"
