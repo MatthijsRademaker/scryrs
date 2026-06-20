@@ -55,6 +55,25 @@ views {
     style repo.adapter_rspress, repo.runtime.routing_hint { color green }
   }
 
+  dynamic view roadmap-phases {
+    title "Roadmap Phases"
+
+    user_ci_agent -> repo.cli "Phase 1: deterministic proxy CLI"
+    repo.cli -> repo.core.record_ingest "record raw trace events"
+    repo.core.record_ingest -> repo.core.event_store "persist event stream"
+    repo.core.event_store -> repo.core.hotspot_scoring "Phase 2: score hotspots"
+    repo.core.hotspot_scoring -> repo.core.hotspots_report "emit stable hotspot outputs"
+    repo.core.hotspots_report -> repo.graph.graph_build "Phase 3: build graph inputs"
+    repo.graph.graph_build -> repo.runtime.routing_hint "Phase 4: route manifests"
+    repo.graph.graph_build -> repo.curator.proposal_creation "Phase 5: proposal inputs"
+    repo.curator.proposal_creation -> repo.adapter_rspress "Phase 6: publish reviewable knowledge"
+
+    style repo.cli, repo.core.record_ingest, repo.core.event_store { color primary }
+    style repo.core.hotspot_scoring, repo.core.hotspots_report { color blue }
+    style repo.graph.graph_build, repo.runtime.routing_hint { color secondary }
+    style repo.curator.proposal_creation, repo.adapter_rspress { color green }
+  }
+
   view guardrail-boundary {
     title "Guardrail Boundary"
 

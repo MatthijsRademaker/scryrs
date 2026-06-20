@@ -1,0 +1,191 @@
+import ClientOnly from '../theme/ClientOnly';
+
+# Product Roadmap
+
+scryrs should ship in strict order: first become a deterministic trace-capture CLI that never interferes with tool results, then turn captured evidence into hotspot outputs, then expand into graph, proposal, adapter, and runtime products.
+
+## Current Starting Point
+
+Current repo state is still foundation-only:
+
+- `crates/scryrs-types/src/lib.rs` defines `TraceEvent` and related payload types.
+- `crates/scryrs-core/src/lib.rs` contains only in-memory hotspot scoring over supplied events.
+- `crates/scryrs-cli/src/lib.rs` still exposes only placeholder `scryrs hotspots <PATH>` behavior.
+- No `record` command, event store, reference hooks, installer, or route manifests exist yet.
+
+That means scryrs does **not** yet qualify as a proxy CLI. It has schema and scoring primitives, but not ingestion, persistence, or deterministic harness integration.
+
+## Phase Order
+
+<ClientOnly>
+  <div style={{ margin: '1.5rem 0', minHeight: '24rem' }}>
+    <likec4-view view-id="roadmap-phases" browser="false"></likec4-view>
+  </div>
+</ClientOnly>
+
+Key scope rule: **do not build later-suite features on placeholder ingest paths**. Every later phase depends on deterministic evidence collected by earlier phases.
+
+## First Usable Product Boundary
+
+First honest product cut is not “scryrs can publish docs.” First honest cut is:
+
+1. agent hook forwards raw events to scryrs,
+2. `scryrs record` persists them,
+3. `scryrs hotspots` materializes stable hotspot outputs,
+4. scryrs proves it never rewrites underlying tool stdout, stderr, exit code, or semantics.
+
+Until that exists, graph, proposal, and adapter work are downstream fiction.
+
+## Delivery Phases
+
+| Phase | Goal | Must exist before phase is done | Explicitly defer until later |
+| --- | --- | --- | --- |
+| 1. Deterministic proxy capture | Make scryrs usable as trace collector, not tool executor | `scryrs record`, local event store, `scryrs.json` hook manifest, reference Pi + Claude hooks, `scryrs init --agent`, fail-open verification | Graph building, docs generation, route explanation, LLM summaries |
+| 2. Hotspot materialization | Turn persisted traces into stable CLI outputs and files | Real `scryrs hotspots`, deterministic aggregation rules, stable JSON contract, optional file outputs like `.scryrs/hotspots.json` | Proposal engine, docs adapters, runtime retrieval |
+| 3. Graph and route manifests | Convert hotspots plus docs structure into machine-readable routing data | `scryrs graph build`, graph schema, route manifest schema, evidence links from hotspot output to graph nodes | Human-facing doc proposals, adapter-specific publishing polish |
+| 4. Proposal engine | Produce reviewable docs / ADR / skill / memory proposals from evidence | `scryrs suggest-docs` or `scryrs propose`, proposal storage/inbox format, explicit review workflow | Silent auto-merge, autonomous doc rewrites |
+| 5. Publishing adapters | Publish reviewed knowledge into docs systems without making one mandatory | Markdown adapter first, then Rspress adapter, export paths for `llms.txt` and nested manifests | Framework-specific lock-in, dashboard-first work |
+| 6. Runtime retrieval | Help future agents load right context faster | `scryrs route explain`, route hints, retrieval-friendly exports, explainable reasons | Opaque ranking, hidden memory mutation |
+| 7. Optional LLM layer | Add explanation and drafting help outside deterministic policy path | Bounded `scryrs-llm` usage for ranking, summarization, patch drafting only | Using models for policy, ingest validation, or trace truth |
+
+## Phase 1 — Deterministic Proxy Capture
+
+This phase is immediate priority because it creates executable truth for scryrs’ identity.
+
+Required deliverables:
+
+- Add `record` CLI surface in `crates/scryrs-cli/src/lib.rs`.
+- Add ingest and persistence path in `crates/scryrs-core/src/lib.rs` or adjacent focused files in `crates/scryrs-core/src/`.
+- Define local event-store format before adding any analytics. SQLite or append-only file are both defensible; hidden in-memory only is not.
+- Add `scryrs.json` manifest describing hook interface, intercepted events, and `scryrs record` invocation.
+- Add reference hooks under `hooks/pi/` and `hooks/claude-code/`.
+- Add `scryrs init --agent <name>` installer so hook setup is deterministic, not improvised.
+- Add repeatable verification that hooks fail open and do not alter tool behavior.
+
+Hard non-goals for this phase:
+
+- scryrs must not proxy tool execution itself.
+- scryrs must not become an MCP server or callable business tool.
+- hooks must not contain business logic beyond formatting plus subprocess delegation.
+
+## Phase 2 — Hotspot Materialization
+
+This phase turns raw event capture into first real product value.
+
+Required deliverables:
+
+- Replace placeholder `scryrs hotspots <PATH>` output with real hotspot analysis over persisted events.
+- Define ranking dimensions explicitly: files, symbols, searches, commands, docs, failures.
+- Emit stable machine-readable outputs suitable for later graph and proposal work.
+- Keep standalone workflow strong: user should get value without docs adapter, graph, or hosted service.
+
+Recommended release boundary:
+
+```text
+scryrs record --stdin
+scryrs hotspots <PATH>
+/.scryrs/hotspots.json
+```
+
+If phase 2 is strong, scryrs already has credible standalone utility.
+
+## Phase 3 — Graph and Route Manifests
+
+Only start this after hotspot outputs stabilize. Otherwise graph schema will chase unstable evidence shapes.
+
+Required deliverables:
+
+- Build graph nodes and relationships from docs structure plus hotspot evidence.
+- Emit stable graph and route artifacts such as `/.scryrs/graph.json` and `/.scryrs/routes.json`.
+- Preserve explainability: every routing hint should cite hotspot or document evidence.
+
+This phase is where scryrs stops being only a recorder and starts becoming routing infrastructure.
+
+## Phase 4 — Proposal Engine
+
+This phase turns evidence into reviewable change suggestions.
+
+Required deliverables:
+
+- Proposal types for docs notes, ADRs, debugging playbooks, skills, and memory patches.
+- Review queue or inbox semantics instead of silent writes.
+- Deterministic templates that cite graph and hotspot evidence.
+
+Do not skip straight to automatic doc mutation. That would destroy trust.
+
+## Phase 5 — Publishing Adapters
+
+Adapters come after proposals because scryrs should publish approved knowledge, not invent source-of-truth content on its own.
+
+Recommended order:
+
+1. `crates/scryrs-adapter-markdown`
+2. `crates/scryrs-adapter-rspress`
+3. Additional framework adapters only after generic surfaces work
+
+Why: Markdown keeps product core honest. If adapter logic only works when tied to one docs framework, architecture has already drifted.
+
+## Phase 6 — Runtime Retrieval
+
+Runtime work should consume prior artifacts, not bypass them.
+
+Required deliverables:
+
+- Explainable `scryrs route explain ...` behavior.
+- Retrieval-friendly route manifests.
+- Stable reason strings pointing back to graph links, hotspot evidence, and approved docs outputs.
+
+This phase is when future agents should start reading less junk and loading more relevant context.
+
+## Phase 7 — Optional LLM Layer
+
+Model-backed features belong last because they are interpretation features, not truth-producing features.
+
+Valid later uses:
+
+- rank competing proposal drafts,
+- summarize hotspot clusters,
+- draft prose around already-determined evidence,
+- explain route decisions in better human language.
+
+Invalid uses:
+
+- deciding what events mean during ingest,
+- replacing deterministic hotspot scoring,
+- making guardrail or policy decisions,
+- silently mutating approved knowledge.
+
+## Scope Guardrails
+
+If roadmap starts to sprawl, cut work using these rules:
+
+1. **No adapter-first work before real hotspots exist.**
+2. **No graph-first work before persisted event evidence exists.**
+3. **No runtime routing before graph outputs are stable.**
+4. **No LLM dependency in ingestion, policy, or scoring path.**
+5. **No dashboard or hosted analytics product before standalone CLI is useful.**
+6. **No hook implementation that rewrites tool outputs or agent semantics.**
+
+## Suggested Near-Term Milestones
+
+| Milestone | What user can honestly do afterward |
+| --- | --- |
+| M1 — Proxy capture alpha | Install reference hook, record traces, verify fail-open non-interference |
+| M2 — Standalone hotspots beta | Record traces across sessions and produce real hotspot output from CLI |
+| M3 — Routing data beta | Export graph and route manifests for downstream consumers |
+| M4 — Proposal loop beta | Generate reviewable docs and memory proposals from evidence |
+| M5 — Adapter suite beta | Publish approved knowledge into Markdown and Rspress surfaces |
+
+## Source-of-Truth Rules
+
+- `crates/scryrs-cli/src/lib.rs` is current truth for existing CLI surface.
+- `crates/scryrs-types/src/lib.rs` is current truth for trace event contracts.
+- `crates/scryrs-core/src/lib.rs` is current truth for present hotspot scoring behavior.
+- `.devagent/architecture/*.c4` is source of truth for LikeC4 diagrams embedded in docs.
+- `docs/vision.md` states destination; this page states delivery order.
+
+## Related Pages
+
+- [Vision & Goals](./vision.md) — product destination, principles, and anti-goals.
+- [Architecture](./architecture.md) — current crate topology and runtime flow.
+- [CLI v0 Contract](./cli-v0-contract.md) — current public CLI contract before roadmap phases land.

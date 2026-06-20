@@ -2,7 +2,8 @@
   {
     "text": "Vision & Strategy",
     "items": [
-      { "text": "Vision & Goals", "link": "/vision" }
+      { "text": "Vision & Goals", "link": "/vision" },
+      { "text": "Product Roadmap", "link": "/roadmap" }
     ]
   },
   {
