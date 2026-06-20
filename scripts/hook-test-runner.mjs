@@ -504,7 +504,10 @@ async function testTransparency() {
 		if (!stderr.trim()) {
 			pass("transparency: hook produces no stderr");
 		} else {
-			pass("transparency: hook produces no stderr");
+			fail(
+				"transparency: stderr",
+				`unexpected stderr: ${stderr.slice(0, 200)}`,
+			);
 		}
 	}
 
