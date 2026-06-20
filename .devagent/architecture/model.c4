@@ -1,0 +1,102 @@
+model {
+  user_ci_agent = actor "User / CI / Agent"
+
+  markdown_docs = docs "Markdown docs repos"
+  project_docs = docs "Rspress project docs"
+  llms_index = docs "llms.txt outputs"
+
+  repo = workspace "scryrs workspace" {
+    cli = crate "scryrs-cli" {
+      technology "Feature-gated Rust CLI"
+    }
+
+    core = crate "scryrs-core" {
+      technology "Trace and hotspot foundation"
+
+      trace_collection = flowstep "trace collection"
+      hotspot_scoring = flowstep "hotspot scoring"
+    }
+
+    graph = crate "scryrs-graph" {
+      technology "Knowledge graph foundation"
+    }
+
+    curator = crate "scryrs-curator" {
+      technology "Proposal foundation"
+
+      proposal_creation = flowstep "proposal creation"
+    }
+
+    runtime = crate "scryrs-runtime" {
+      technology "Routing helper foundation"
+
+      routing_hint = flowstep "routing hint"
+    }
+
+    types = contract "scryrs-types" {
+      technology "Shared contracts"
+    }
+
+    policy = crate "scryrs-policy" {
+      technology "Deterministic guardrails"
+    }
+
+    sandbox = crate "scryrs-sandbox" {
+      technology "Capability boundary"
+    }
+
+    telemetry = crate "scryrs-telemetry" {
+      technology "Privacy and telemetry defaults"
+    }
+
+    llm = crate "scryrs-llm" {
+      #optional
+      technology "Optional model boundary"
+    }
+
+    adapter_markdown = crate "scryrs-adapter-markdown" {
+      technology "Markdown publishing surface"
+    }
+
+    adapter_rspress = crate "scryrs-adapter-rspress" {
+      #optional
+      technology "Rspress publishing surface"
+    }
+  }
+
+  user_ci_agent -> repo.cli
+
+  repo.cli -> repo.core
+  repo.cli -> repo.graph
+  repo.cli -> repo.curator
+  repo.cli -> repo.runtime
+  repo.cli -> repo.adapter_markdown
+  repo.cli -> repo.policy
+  repo.cli -> repo.sandbox
+  repo.cli -> repo.telemetry
+  repo.cli -[optional]-> repo.llm
+  repo.cli -[optional]-> repo.adapter_rspress
+
+  repo.core -> repo.types
+  repo.graph -> repo.types
+  repo.curator -> repo.types
+  repo.runtime -> repo.types
+
+  repo.policy -> repo.sandbox "allow / deny"
+  repo.sandbox -> repo.telemetry "redacted events"
+  repo.telemetry -[optional]-> repo.llm "optional explanation"
+
+  repo.core -> repo.adapter_markdown "hotspots"
+  repo.curator -> repo.adapter_markdown "proposals"
+  repo.graph -> repo.adapter_rspress "routing metadata"
+  repo.curator -> repo.adapter_rspress "docs routes"
+  repo.adapter_markdown -> markdown_docs "publishes Markdown"
+  repo.adapter_rspress -> project_docs "publishes docs site"
+  repo.adapter_rspress -> llms_index "integrates llms.txt"
+
+  repo.core.trace_collection -> repo.core.hotspot_scoring "collect trace"
+  repo.core.hotspot_scoring -> repo.graph "score hotspots"
+  repo.graph -> repo.curator.proposal_creation "update graph"
+  repo.curator.proposal_creation -> repo.adapter_rspress "publish docs route"
+  repo.adapter_rspress -> repo.runtime.routing_hint "emit routing hint"
+}
