@@ -27,6 +27,7 @@ telemetry = ["dep:scryrs-telemetry"]
 
 [dependencies]
 clap = { workspace = true }
+serde_json.workspace = true
 scryrs-adapter-markdown = { workspace = true, optional = true }
 scryrs-adapter-rspress = { workspace = true, optional = true }
 scryrs-core = { workspace = true, optional = true }
@@ -41,6 +42,7 @@ scryrs-types.workspace = true
 
 [dev-dependencies]
 insta = { version = "1", features = ["json"] }
+tempfile = "3"
 
 [lib]
 path = "src/lib.rs"

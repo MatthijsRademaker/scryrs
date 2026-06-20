@@ -1,6 +1,6 @@
 # CLI v0 Contract
 
-The v0 CLI surface for `scryrs` is frozen to exactly one placeholder command. This contract serves agent integrators and follow-up feature developers.
+The v0 CLI surface for `scryrs` provides two commands: the `hotspots` placeholder and the `record` ingestion endpoint. This contract serves agent integrators and follow-up feature developers.
 
 ## Binary
 
@@ -8,9 +8,45 @@ The v0 CLI surface for `scryrs` is frozen to exactly one placeholder command. Th
 
 ## Commands
 
+### `scryrs record --stdin | --file <PATH>`
+
+Ingest JSONL trace events from stdin or a file. `--stdin` and `--file` are mutually exclusive; providing both or neither exits 2.
+
+| Field | Value |
+|-------|-------|
+| Input | `--stdin` reads newline-delimited `TraceEvent` JSON from stdin; `--file <PATH>` reads from a JSONL file |
+| Output | Single-line JSON summary on stdout; one JSON rejection diagnostic per rejected non-empty line on stderr |
+| Exit 0 | All processed non-empty lines were accepted |
+| Exit 1 | Ingestion completed but one or more non-empty lines were rejected; or I/O error writing output |
+| Exit 2 | Fatal usage error (invalid mode, unreadable file, store failure) |
+
+**Stdout summary envelope:**
+
+```json
+{"command":"record","schemaVersion":"0.1.0","accepted":5,"rejected":2}
+```
+
+- `command` is always `"record"`.
+- `schemaVersion` matches `scryrs-types::SCHEMA_VERSION`.
+- `accepted` and `rejected` are counts of processed non-empty lines.
+
+**Stderr rejection diagnostics (one per rejected non-empty line):**
+
+```json
+{"line":3,"field":null,"reason":"expected value at line 1 column 1"}
+```
+
+- `line` is the 1‑based physical line number.
+- `field` is `null` when the deserializer cannot determine a failing field, or a quoted field/path string.
+- `reason` is a human-readable string describing the rejection.
+
+**Ingestion behavior:** Blank or whitespace-only lines are skipped without incrementing accepted or rejected counts. Malformed JSON and schema-invalid `TraceEvent` lines are rejected with diagnostics, and ingestion continues with later lines.
+
+**Persistence:** Accepted events are appended to `.scryrs/events.jsonl` (one JSON event per line) in the current working directory. This store is append-only and ingestion-only; no query, delete, or analysis APIs are provided.
+
 ### `scryrs hotspots <PATH>` (v0 placeholder)
 
-The sole v0 command. Emits a versioned JSON envelope to stdout.
+The v0 placeholder command. Emits a versioned JSON envelope to stdout.
 
 | Field | Value |
 |-------|-------|
@@ -79,13 +115,15 @@ Agents should check `surfaceVersion` before parsing to detect format changes. Th
 
 | Code | Meaning |
 |------|---------|
-| 0 | Successful command, help display, version display, surface document display |
-| 2 | Unknown commands, missing required arguments, invalid arguments, unsupported paths (usage errors) |
-| 1 | Unexpected runtime failures (I/O errors, internal panics) |
+| 0 | Hotspots: JSON placeholder written successfully. Record: all processed non-empty lines were accepted. Help/version/surface display. |
+| 1 | Record: one or more events rejected, or I/O error writing output. Hotspots: I/O error writing output. |
+| 2 | Unknown commands, missing required arguments, invalid arguments, unsupported paths (usage errors). Record: fatal I/O error (unreadable file or store failure). |
 
 All error messages and human-facing diagnostics are written to stderr.
 
 ## Agent-facing contract
+
+### Hotspots command
 
 **When to call:** An agent should call `scryrs hotspots <PATH>` when the agent needs scryrs' repository hotspot summary for a given local directory path.
 
@@ -97,11 +135,33 @@ All error messages and human-facing diagnostics are written to stderr.
 - Exit 2: Contract violation (missing PATH, unknown command, invalid args). Do not retry without fixing input.
 - Exit 1: Transient runtime failure. May retry.
 
+### Record command
+
+**When to call:** An agent should call `scryrs record --stdin` to pipe JSONL `TraceEvent` data produced by hooks, or `scryrs record --file <PATH>` to ingest pre-recorded trace files.
+
+**Input modes (mutually exclusive):**
+
+- `--stdin`: Read newline-delimited `TraceEvent` JSON from stdin.
+- `--file <PATH>`: Read JSONL from a file.
+
+**Output:**
+
+- Stdout: One JSON summary `{"command":"record","schemaVersion":"...","accepted":N,"rejected":M}`.
+- Stderr: One JSON rejection diagnostic per rejected non-empty line (empty on 0 accept + 0 reject or when no rejections occur).
+
+**Exit codes:**
+
+- 0: All processed non-empty lines were accepted.
+- 1: One or more rejected lines (ingestion continued).
+- 2: Usage error (both/neither mode specified, unknown flags) or fatal I/O error (unreadable file, unwritable store).
+
 **Fail-fast paths:** The following always exit 2 and write an error to stderr:
 
-- Any command other than `hotspots` (including `components`, `trace`, `propose`, `graph`, `route`, `adapters`, `report`, `suggest-docs`)
+- Any command other than `hotspots` or `record` (including `components`, `trace`, `propose`, `graph`, `route`, `adapters`, `report`, `suggest-docs`)
 - `scryrs hotspots` without a PATH argument
-- `scryrs hotspots <FLAG>` — flags after a command fall through to the positional argument parser and are rejected as invalid arguments (no per-command introspection in v0)
+- `scryrs record` with neither or both input modes (mutually exclusive)
+- `scryrs record --file` with an unreadable path
+- `scryrs hotspots <FLAG>` / `scryrs record <FLAG>` — flags after a command fall through to the positional argument parser and are rejected as invalid arguments (no per-command introspection in v0)
 
 ## Out of scope for v0
 

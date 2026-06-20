@@ -22,3 +22,6 @@ target
 
 # Docker-based cargo build cache (vendored crates, registry index)
 .cargo-docker/
+
+# scryrs runtime data
+.scryrs/

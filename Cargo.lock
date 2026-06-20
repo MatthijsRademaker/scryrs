@@ -264,6 +264,8 @@ dependencies = [
  "scryrs-sandbox",
  "scryrs-telemetry",
  "scryrs-types",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -271,6 +273,8 @@ name = "scryrs-core"
 version = "0.1.0"
 dependencies = [
  "scryrs-types",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
