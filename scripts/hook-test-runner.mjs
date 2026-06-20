@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import {
 	writeFileSync,
 	readFileSync,
@@ -10,13 +9,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { execSync, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const ROOT = join(__dirname, "..");
-const HOOK_FILE = join(ROOT, "hooks", "claude-code", "scryrs-hook.js");
+const HOOK_FILE = join(ROOT, "hooks", "claude-code", "scryrs-hook.mjs");
 
 let PASSED = 0;
 let FAILED = 0;
@@ -353,8 +352,11 @@ async function testFailOpenMissingBinary() {
 		pass("fail-open missing: no stderr output");
 	}
 
-	// Verify warning log was created (relative to CWD, which is the project root)
-	const warningLog = ".scryrs/hooks/claude-code-warnings.log";
+	// Verify warning log was created (hook resolves against process.cwd())
+	const warningLog = join(
+		process.cwd(),
+		".scryrs/hooks/claude-code-warnings.log",
+	);
 	if (existsSync(warningLog)) {
 		const logContent = readFileSync(warningLog, "utf-8");
 		if (
@@ -420,8 +422,28 @@ async function testFailOpenNonZeroExit() {
 		pass("fail-open nonzero: no stderr output");
 	}
 
+	// Verify warning log was written for non-zero exit
+	const warningLog = join(
+		process.cwd(),
+		".scryrs/hooks/claude-code-warnings.log",
+	);
+	if (existsSync(warningLog)) {
+		const logContent = readFileSync(warningLog, "utf-8");
+		if (
+			logContent.includes("scryrs record exited with code") ||
+			logContent.includes("exited with code 1")
+		) {
+			pass("fail-open nonzero: warning logged to claude-code-warnings.log");
+		} else if (logContent.trim().length > 0) {
+			pass("fail-open nonzero: warning logged to claude-code-warnings.log");
+		} else {
+			fail("fail-open nonzero: warning log", "log exists but is empty");
+		}
+	} else {
+		fail("fail-open nonzero: warning log", "no warning log created");
+	}
+
 	cleanup(tmpDir);
-	const warningLog = ".scryrs/hooks/claude-code-warnings.log";
 	try {
 		unlinkSync(warningLog);
 	} catch {}

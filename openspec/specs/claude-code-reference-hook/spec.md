@@ -5,12 +5,12 @@ TBD - created by archiving change task-72f2387e-4233-4295-b113-eac7b839485d. Upd
 ## Requirements
 ### Requirement: Reference hook source lives under hooks/claude-code/
 
-The system SHALL provide a reference hook implementation under `hooks/claude-code/` containing a JavaScript hook module (`scryrs-hook.js`), a consumer-facing README, and no committed consumer-side `.claude/` configuration files.
+The system SHALL provide a reference hook implementation under `hooks/claude-code/` containing a JavaScript hook module (`scryrs-hook.mjs`), a consumer-facing README, and no committed consumer-side `.claude/` configuration files.
 
 #### Scenario: Hook source is discoverable
 
 - **WHEN** a Claude Code integrator navigates the repository
-- **THEN** they find `hooks/claude-code/scryrs-hook.js` as the reference hook module
+- **THEN** they find `hooks/claude-code/scryrs-hook.mjs` as the reference hook module
 - **AND** they find `hooks/claude-code/README.md` with installation and usage instructions
 
 #### Scenario: No consumer config is committed

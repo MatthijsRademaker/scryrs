@@ -2,7 +2,7 @@
 # ---------------------------------------------------------------------------
 # scryrs hook-test — integration tests for the Claude Code reference hook.
 #
-# Exercises `hooks/claude-code/scryrs-hook.js` without requiring the Rust
+# Exercises `hooks/claude-code/scryrs-hook.mjs` without requiring the Rust
 # toolchain. Tests JSON shaping for all nine tool types, happy-path forwarding
 # to `scryrs record --stdin`, fail-open behavior when scryrs is missing or
 # exits non-zero, and transparency (no stdout/stderr alteration).
@@ -16,7 +16,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-HOOK_FILE="$ROOT/hooks/claude-code/scryrs-hook.js"
+HOOK_FILE="$ROOT/hooks/claude-code/scryrs-hook.mjs"
 RUNNER="$SCRIPT_DIR/hook-test-runner.mjs"
 
 check_node() {

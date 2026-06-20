@@ -4,7 +4,7 @@ This directory contains the scryrs reference hook for Claude Code — a thin Jav
 
 ## How It Works
 
-The hook (`scryrs-hook.js`) is a Claude Code PreToolUse hook module. It:
+The hook (`scryrs-hook.mjs`) is a Claude Code PreToolUse hook module. It:
 
 1. **Intercepts** nine Claude Code tools: Read, Bash, Grep, Glob, Edit, Write, NotebookEdit, WebSearch, WebFetch.
 2. **Maps** each tool invocation to a scryrs `TraceEvent` with the canonical schema.
@@ -20,10 +20,10 @@ The hook (`scryrs-hook.js`) is a Claude Code PreToolUse hook module. It:
 
 ### 1. Copy the hook file
 
-Copy `scryrs-hook.js` from this directory into your project (or reference it by path in your Claude Code hook configuration):
+Copy `scryrs-hook.mjs` from this directory into your project (or reference it by path in your Claude Code hook configuration):
 
 ```bash
-cp hooks/claude-code/scryrs-hook.js /path/to/your/project/.claude/hooks/scryrs-hook.js
+cp hooks/claude-code/scryrs-hook.mjs /path/to/your/project/.claude/hooks/scryrs-hook.mjs
 ```
 
 ### 2. Configure Claude Code to use the hook
@@ -36,7 +36,7 @@ Add the hook to your `.claude/settings.json` (or `.claude/settings.local.json`):
     "PreToolUse": [
       {
         "matcher": "",
-        "hook": "node .claude/hooks/scryrs-hook.js"
+        "hook": "node .claude/hooks/scryrs-hook.mjs"
       }
     ]
   }

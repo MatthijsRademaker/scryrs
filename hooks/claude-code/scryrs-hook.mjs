@@ -15,7 +15,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -72,39 +72,8 @@ function resolveSessionId() {
 	if (fromEnv && fromEnv.length > 0) {
 		return fromEnv;
 	}
-	try {
-		// `randomUUID` is available in Node ≥ 19 (and all Claude Code runtimes).
-		return randomUUID();
-	} catch {
-		// crypto.randomUUID is universally available; this fallback exists for
-		// theoretical environments where the global might be missing.
-		const bytes = new Uint8Array(16);
-		crypto.getRandomValues(bytes);
-		bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
-		bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 1
-		return [
-			bytes[0].toString(16).padStart(2, "0"),
-			bytes[1].toString(16).padStart(2, "0"),
-			bytes[2].toString(16).padStart(2, "0"),
-			bytes[3].toString(16).padStart(2, "0"),
-			"-",
-			bytes[4].toString(16).padStart(2, "0"),
-			bytes[5].toString(16).padStart(2, "0"),
-			"-",
-			bytes[6].toString(16).padStart(2, "0"),
-			bytes[7].toString(16).padStart(2, "0"),
-			"-",
-			bytes[8].toString(16).padStart(2, "0"),
-			bytes[9].toString(16).padStart(2, "0"),
-			"-",
-			bytes[10].toString(16).padStart(2, "0"),
-			bytes[11].toString(16).padStart(2, "0"),
-			bytes[12].toString(16).padStart(2, "0"),
-			bytes[13].toString(16).padStart(2, "0"),
-			bytes[14].toString(16).padStart(2, "0"),
-			bytes[15].toString(16).padStart(2, "0"),
-		].join("");
-	}
+	// `randomUUID` is available in all Node.js versions that support ESM (≥ 14.17).
+	return randomUUID();
 }
 
 const SESSION_ID = resolveSessionId();
@@ -113,7 +82,10 @@ const SESSION_ID = resolveSessionId();
 // Warning log
 // ---------------------------------------------------------------------------
 
-const WARNING_LOG = ".scryrs/hooks/claude-code-warnings.log";
+const WARNING_LOG = resolve(
+	process.cwd(),
+	".scryrs/hooks/claude-code-warnings.log",
+);
 
 /**
  * Append a timestamped warning to the dedicated fail-open log file.
@@ -275,45 +247,54 @@ function buildTraceEvent(toolName, toolInput) {
  */
 function forwardToScryrs(eventJson) {
 	return new Promise((resolve) => {
+		let settled = false;
+		const done = (success, reason) => {
+			if (settled) return;
+			settled = true;
+			if (!success && reason) logWarning(reason);
+			resolve(success);
+		};
+
 		let child;
 		try {
 			child = spawn("scryrs", ["record", "--stdin"], {
 				stdio: ["pipe", "ignore", "ignore"],
 			});
 		} catch (err) {
-			logWarning(`scryrs spawn error: ${err.message}`);
-			resolve(false);
+			done(false, `scryrs spawn error: ${err.message}`);
 			return;
 		}
 
 		child.on("error", (err) => {
-			// `ENOENT` means the binary is not on PATH.
 			const reason =
 				err.code === "ENOENT"
 					? "scryrs binary not found on PATH"
 					: `scryrs process error: ${err.message}`;
-			logWarning(reason);
-			resolve(false);
+			done(false, reason);
+		});
+
+		// Write the event as a single JSON line to scryrs stdin.
+		// Wait for drain before ending to avoid truncation.
+		const writeOk = child.stdin.write(eventJson + "\n");
+		if (!writeOk) {
+			child.stdin.once("drain", () => {
+				child.stdin.end();
+			});
+		} else {
+			child.stdin.end();
+		}
+
+		child.stdin.on("error", (err) => {
+			done(false, `scryrs stdin write error: ${err.message}`);
 		});
 
 		child.on("exit", (code) => {
 			if (code === 0) {
-				resolve(true);
+				done(true);
 			} else {
-				logWarning(`scryrs record exited with code ${code}`);
-				resolve(false);
+				done(false, `scryrs record exited with code ${code}`);
 			}
 		});
-
-		// Write the event as a single JSON line to scryrs stdin.
-		try {
-			child.stdin.write(eventJson + "\n");
-			child.stdin.end();
-		} catch (err) {
-			logWarning(`scryrs stdin write error: ${err.message}`);
-			// The child may still exit; we already flagged the issue.
-			resolve(false);
-		}
 	});
 }
 

@@ -294,7 +294,7 @@ Once `scryrs init --agent <name>` is implemented, these steps will be automated 
 Reference hook implementations for Pi and Claude Code live under `hooks/`.
 
 - **Pi hook** — forthcoming Phase 1 deliverable. Will live under `hooks/pi/` and leverage Pi's `.pi/hooks/` subprocess hook system.
-- **Claude Code hook** — exists at [`hooks/claude-code/`](https://github.com/scryrs-project/scryrs/blob/main/hooks/claude-code/scryrs-hook.js). A PreToolUse JavaScript hook that intercepts Read, Bash, Grep, Glob, Edit, Write, NotebookEdit, WebSearch, and WebFetch events and forwards canonical TraceEvent JSONL to `scryrs record --stdin`. See `hooks/claude-code/README.md` for installation and usage instructions.
+- **Claude Code hook** — exists at [`hooks/claude-code/`](https://github.com/scryrs-project/scryrs/blob/main/hooks/claude-code/scryrs-hook.mjs). A PreToolUse JavaScript hook that intercepts Read, Bash, Grep, Glob, Edit, Write, NotebookEdit, WebSearch, and WebFetch events and forwards canonical TraceEvent JSONL to `scryrs record --stdin`. See `hooks/claude-code/README.md` for installation and usage instructions.
 
 ### Claude Code Hook Limitations
 
@@ -308,7 +308,7 @@ The Claude Code hook is a **PreToolUse-only** hook. This creates specific limita
 
 The Claude Code hook writes fail-open warnings to a dedicated log file outside agent context:
 
-- **Log file:** `.scryrs/hooks/claude-code-warnings.log` (relative to the consumer's project root).
+- **Log file:** `.scryrs/hooks/claude-code-warnings.log` (resolved to an absolute path from the hook process working directory).
 - **Format:** ISO-8601 timestamp followed by a human-readable reason.
 - **Warnings are never written to stdout or stderr** — the agent-visible tool output is unchanged.
 - **Scenarios that produce warnings:** `scryrs` binary not found on PATH, `scryrs record` exits non-zero, subprocess spawn error, stdin write failure.
