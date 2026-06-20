@@ -170,11 +170,11 @@ Hook authors must ensure that `scryrs record` failure never blocks the harness t
 
 ### Intended location
 
-`scryrs.json` lives at the repository root, alongside `Cargo.toml`, `package.json`, or equivalent project root marker.
+`scryrs.json` lives at the repository root, alongside `Cargo.toml`, `package.json`, or equivalent project root marker. A checked-in `scryrs.json` exists in the scryrs repository root defining the Phase 1 hook-interface and record-invocation contract.
 
-### Provisional shape (v0.1)
+### Current shape (v0.1)
 
-The manifest schema is **provisional v0.1**. Field names, file location, and schema may change before Phase 1 stabilization. No checked-in `scryrs.json` file is created by this document.
+The manifest schema is **v0.1**, stable for Phase 1. The checked-in `scryrs.json` at the repository root is the source of truth for the hook-interface and record-invocation contract.
 
 **Example minimal skeleton:**
 
@@ -243,10 +243,10 @@ Three integration tiers exist, offering different levels of coverage and requiri
 - Full event coverage across all nine event families.
 - Fail-open by construction: hook runs as a subprocess *after* the tool, not as a proxy.
 
-**Planned harness coverage:**
+**Implemented harness coverage:**
 
-- **Pi** — planned. Pi's `.pi/hooks/` directory provides native subprocess hook support.
-- **Claude Code** — planned. Claude Code's hook system provides tool-execution interception.
+- **Pi** — implemented at `hooks/pi/index.ts`. Pi's `.pi/extensions/` directory provides native hook support. Captures `SessionStart` and six tool-result events.
+- **Claude Code** — implemented at `hooks/claude-code/scryrs-hook.mjs`. Claude Code's PreToolUse hook system provides tool-execution interception. PreToolUse-only; no lifecycle events.
 
 ### Tier 2: Plugin
 

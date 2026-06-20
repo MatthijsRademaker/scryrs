@@ -21,12 +21,12 @@
       "description": "Available alternate ingestion mode for reading trace events from a file instead of stdin. Hooks currently use --stdin."
     },
     "outputContract": {
-      "stdout": "Summary envelope (JSON) with total_event_count and any warnings.",
-      "stderr": "Rejection diagnostics — one JSON line per rejected event with reason field.",
+      "stdout": "Single-line JSON summary: {\"command\":\"record\",\"schemaVersion\":\"…\",\"accepted\":<count>,\"rejected\":<count>}.",
+      "stderr": "Rejection diagnostics — one JSON object per rejected non-empty line, with line, field, and reason fields.",
       "exitCodes": {
         "0": "All events accepted.",
-        "1": "One or more events rejected (partial acceptance).",
-        "2": "Fatal error — no events processed."
+        "1": "One or more events rejected (partial acceptance), or I/O error.",
+        "2": "Fatal usage or I/O error (mutually exclusive modes, unreadable file, store failure)."
       }
     }
   },

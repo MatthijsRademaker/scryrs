@@ -42,8 +42,9 @@ interface TraceEventEnvelope {
 
 /**
  * Pipe a pre-built TraceEvent envelope to scryrs record --stdin.
- * Fail-open: any error is logged via console.error and the caller continues
- * normally.  The subprocess is given a 5 s timeout to prevent hung‑trace stalls.
+ * Fail-open: thrown errors and resolved non-zero exit codes are logged via
+ * console.error, and the caller continues normally.  The subprocess is given
+ * a 5 s timeout to prevent hung‑trace stalls.
  */
 async function recordEvent(
 	pi: ExtensionAPI,
@@ -52,10 +53,16 @@ async function recordEvent(
 	const line = JSON.stringify(envelope) + "\n";
 
 	try {
-		await pi.exec("scryrs", ["record", "--stdin"], {
+		const result = await pi.exec("scryrs", ["record", "--stdin"], {
 			input: line,
 			timeout: 5000,
 		});
+		if (result?.code != null && result.code !== 0) {
+			console.error(
+				"scryrs trace hook: scryrs record exited non-zero " +
+					`(code ${result.code}) — trace gap for this event.`,
+			);
+		}
 	} catch (err: unknown) {
 		console.error(
 			"scryrs trace hook: failed to record event — scryrs may be missing, " +

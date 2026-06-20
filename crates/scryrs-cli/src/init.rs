@@ -145,7 +145,7 @@ pub fn execute_init(out: &mut impl Write, err: &mut impl Write, agent_name: &str
             let _ = writeln!(err, "scryrs init: .claude/settings.json already exists");
             let _ = writeln!(
                 err,
-                "The hook source has been installed, but the hook configuration must be added manually:"
+                "The hook source will not be installed — add the hook configuration manually:"
             );
             let _ = writeln!(err, r#"Insert into .claude/settings.json under "hooks": "#,);
             let _ = writeln!(

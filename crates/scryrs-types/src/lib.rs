@@ -42,6 +42,31 @@ impl TraceEvent {
             TraceEventPayload::FailedLookup(p) => Some(p.subject.as_str()),
         }
     }
+
+    /// Validate semantic invariants for an event that has passed
+    /// structural deserialization. Returns `Ok(())` when both
+    /// `schema_version` equals `SCHEMA_VERSION` and `event_type`
+    /// matches the concrete `payload.type` tag.
+    ///
+    /// The caller should treat an `Err(reason)` as a rejection.
+    #[must_use = "callers must check semantic invariants; discarded Result hides invalid events"]
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema_version != SCHEMA_VERSION {
+            return Err(format!(
+                "schema_version mismatch: got '{}', expected '{}'",
+                self.schema_version, SCHEMA_VERSION,
+            ));
+        }
+        let expected_type = self.event_type.payload_type_str();
+        let actual_type = self.payload.payload_type_str();
+        if expected_type != actual_type {
+            return Err(format!(
+                "event_type/payload.type mismatch: event_type='{}', payload.type='{}'",
+                expected_type, actual_type,
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Kind of trace event, mirroring the payload variant in use.
@@ -56,6 +81,24 @@ pub enum TraceEventType {
     DocRetrieved,
     EditMade,
     FailedLookup,
+}
+
+impl TraceEventType {
+    /// Return the expected `payload.type` string tag for this event type.
+    #[must_use]
+    pub fn payload_type_str(self) -> &'static str {
+        match self {
+            TraceEventType::SessionStart => "SessionStart",
+            TraceEventType::SessionEnd => "SessionEnd",
+            TraceEventType::FileOpened => "FileOpened",
+            TraceEventType::SearchRun => "SearchRun",
+            TraceEventType::SymbolInspected => "SymbolInspected",
+            TraceEventType::CommandExecuted => "CommandExecuted",
+            TraceEventType::DocRetrieved => "DocRetrieved",
+            TraceEventType::EditMade => "EditMade",
+            TraceEventType::FailedLookup => "FailedLookup",
+        }
+    }
 }
 
 /// Success or failure outcome carried on every trace event.
@@ -83,6 +126,24 @@ pub enum TraceEventPayload {
     DocRetrieved(DocRetrievedPayload),
     EditMade(EditMadePayload),
     FailedLookup(FailedLookupPayload),
+}
+
+impl TraceEventPayload {
+    /// Return the `type` tag string for this payload variant.
+    #[must_use]
+    pub fn payload_type_str(&self) -> &'static str {
+        match self {
+            TraceEventPayload::SessionStart(_) => "SessionStart",
+            TraceEventPayload::SessionEnd(_) => "SessionEnd",
+            TraceEventPayload::FileOpened(_) => "FileOpened",
+            TraceEventPayload::SearchRun(_) => "SearchRun",
+            TraceEventPayload::SymbolInspected(_) => "SymbolInspected",
+            TraceEventPayload::CommandExecuted(_) => "CommandExecuted",
+            TraceEventPayload::DocRetrieved(_) => "DocRetrieved",
+            TraceEventPayload::EditMade(_) => "EditMade",
+            TraceEventPayload::FailedLookup(_) => "FailedLookup",
+        }
+    }
 }
 
 // --- Per-family payload types ---
@@ -541,6 +602,89 @@ mod tests {
             json.contains("\"type\":\"FileOpened\""),
             "payload must include self-describing type tag"
         );
+    }
+
+    // --- TraceEvent::validate() semantic invariant tests ---
+
+    #[test]
+    fn validate_accepts_semantically_correct_event() {
+        let event = make_event(
+            TraceEventType::FileOpened,
+            Some("read"),
+            TraceEventPayload::FileOpened(FileOpenedPayload {
+                path: "x.rs".into(),
+            }),
+            Outcome::Success,
+        );
+        assert!(event.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_wrong_schema_version() {
+        let mut event = make_event(
+            TraceEventType::DocRetrieved,
+            Some("read"),
+            TraceEventPayload::DocRetrieved(DocRetrievedPayload {
+                doc_ref: "d.md".into(),
+            }),
+            Outcome::Success,
+        );
+        event.schema_version = "0.9.9".into();
+        let validate_result = event.validate();
+        assert!(
+            validate_result.is_err(),
+            "version mismatch should be rejected"
+        );
+        let err = match validate_result {
+            Err(e) => e,
+            Ok(_) => String::new(),
+        };
+        assert!(err.contains("schema_version mismatch"));
+        assert!(err.contains("0.9.9"));
+        assert!(err.contains(SCHEMA_VERSION));
+    }
+
+    #[test]
+    fn validate_rejects_event_type_payload_mismatch() {
+        let mut event = make_event(
+            TraceEventType::FileOpened,
+            Some("read"),
+            // payload type is FileOpened, but we'll swap event_type
+            TraceEventPayload::FileOpened(FileOpenedPayload {
+                path: "x.rs".into(),
+            }),
+            Outcome::Success,
+        );
+        event.event_type = TraceEventType::DocRetrieved;
+        let validate_result = event.validate();
+        assert!(validate_result.is_err(), "type mismatch should be rejected");
+        let err = match validate_result {
+            Err(e) => e,
+            Ok(_) => String::new(),
+        };
+        assert!(err.contains("event_type/payload.type mismatch"));
+        assert!(err.contains("DocRetrieved"));
+        assert!(err.contains("FileOpened"));
+    }
+
+    #[test]
+    fn validate_all_lifecycle_events_are_accepted() {
+        for (event_type, payload) in [
+            (
+                TraceEventType::SessionStart,
+                TraceEventPayload::SessionStart(SessionStartPayload),
+            ),
+            (
+                TraceEventType::SessionEnd,
+                TraceEventPayload::SessionEnd(SessionEndPayload),
+            ),
+        ] {
+            let event = make_event(event_type, None, payload, Outcome::Success);
+            assert!(
+                event.validate().is_ok(),
+                "validate failed for {event_type:?}"
+            );
+        }
     }
 
     #[test]
