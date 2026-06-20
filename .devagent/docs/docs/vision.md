@@ -236,3 +236,4 @@ Publishes graph output into Rspress, Markdown, llms.txt, nested manifests, or cu
 ## Related Pages
 
 - [Architecture](./architecture.md) — system diagrams and architecture notes as implementation matures.
+- [Product Roadmap](./roadmap.md) — delivery sequence from proxy capture to routing and proposal features.

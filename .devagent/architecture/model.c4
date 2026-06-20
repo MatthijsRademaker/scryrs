@@ -13,12 +13,17 @@ model {
     core = crate "scryrs-core" {
       technology "Trace and hotspot foundation"
 
+      record_ingest = flowstep "record ingest"
+      event_store = flowstep "event store"
       trace_collection = flowstep "trace collection"
       hotspot_scoring = flowstep "hotspot scoring"
+      hotspots_report = flowstep "hotspots report"
     }
 
     graph = crate "scryrs-graph" {
       technology "Knowledge graph foundation"
+
+      graph_build = flowstep "graph build"
     }
 
     curator = crate "scryrs-curator" {
@@ -94,9 +99,16 @@ model {
   repo.adapter_rspress -> project_docs "publishes docs site"
   repo.adapter_rspress -> llms_index "integrates llms.txt"
 
+  repo.cli -> repo.core.record_ingest "record command"
+  repo.core.record_ingest -> repo.core.event_store "persist trace"
   repo.core.trace_collection -> repo.core.hotspot_scoring "collect trace"
+  repo.core.event_store -> repo.core.hotspot_scoring "load persisted events"
   repo.core.hotspot_scoring -> repo.graph "score hotspots"
+  repo.core.hotspot_scoring -> repo.core.hotspots_report "materialize hotspot report"
+  repo.core.hotspots_report -> repo.graph.graph_build "publish evidence"
   repo.graph -> repo.curator.proposal_creation "update graph"
+  repo.graph.graph_build -> repo.runtime.routing_hint "emit route manifests"
+  repo.graph.graph_build -> repo.curator.proposal_creation "derive proposals"
   repo.curator.proposal_creation -> repo.adapter_rspress "publish docs route"
   repo.adapter_rspress -> repo.runtime.routing_hint "emit routing hint"
 }
