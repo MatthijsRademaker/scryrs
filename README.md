@@ -111,6 +111,9 @@ COMMANDS
       Ingest JSONL trace events from stdin.
   scryrs record --file <PATH>
       Ingest JSONL trace events from a file.
+  scryrs init --agent <NAME>
+      Install the scryrs trace hook for a supported agent harness.
+      Supported harnesses: claude-code, pi
 
 RECORD OUTPUT
   A single-line JSON summary on stdout.
@@ -125,6 +128,8 @@ EXAMPLES
   scryrs hotspots .
   scryrs record --stdin < events.jsonl
   scryrs record --file session.jsonl
+  scryrs init --agent claude-code
+  scryrs init --agent pi
 
 OPTIONS
   -h, --help       Print this help message and exit
@@ -132,9 +137,9 @@ OPTIONS
   -hj, --help-json Print machine-readable CLI surface description and exit
 
 EXIT CODES
-  0    Success (hotspots: JSON written; record: all events accepted)
-  1    Hotspots: I/O error writing output. Record: rejected events or I/O error
-  2    Usage error (invalid arguments); record: also fatal I/O error (unreadable file)
+  0    Success (hotspots: JSON written; record: all events accepted; init: hook installed)
+  1    Hotspots: I/O error writing output. Record: rejected events or I/O error. Init: I/O error.
+  2    Usage error (invalid arguments); record: also fatal I/O error (unreadable file); init: unsupported harness, collision, or self-install refusal
 ```
 
 **`--version`** prints the binary version:
@@ -148,7 +153,7 @@ scryrs 0.1.0
 
 ```bash
 $ cargo run -p scryrs-cli -- --help-json
-{"surfaceVersion":"0.2.0","binary":"scryrs","commands":[{"name":"hotspots",...},{"name":"record",...}]}
+{"surfaceVersion":"0.3.0","binary":"scryrs","commands":[{"name":"hotspots",...},{"name":"record",...},{"name":"init",...}]}
 ```
 
 The JSON document describes every command, argument, flag, output field, and exit code — suitable for parsing by tooling or agents. Use `scryrs --help-json` directly for the full surface document.

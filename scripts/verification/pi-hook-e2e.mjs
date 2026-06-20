@@ -239,6 +239,86 @@ import(${JSON.stringify(HOOK_SOURCE)}).then((mod) => {
 		},
 
 		/**
+		 * Run fail-open non-zero-exit test: invoke tool_result with a fake
+		 * scryrs that resolves with a non-zero exit code.
+		 */
+		async runFailOpenNonZeroExit(toolName, input) {
+			const scriptFile = join(dir, "invoke-nonzero.mjs");
+			writeFileSync(
+				scriptFile,
+				`
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const { spawnSync } = require("node:child_process");
+
+const errors = [];
+const origError = console.error;
+console.error = (...args) => { errors.push(args.join(" ")); };
+
+const fakeApi = {
+  handlers: {},
+  on(event, handler) {
+    this.handlers[event] = handler;
+  },
+  async exec(command, args, options) {
+    // Simulate a resolved non-zero exit (e.g., scryrs rejected the line)
+    return { stdout: "", stderr: "", code: 1, killed: false };
+  },
+};
+
+import(${JSON.stringify(HOOK_SOURCE)}).then((mod) => {
+  mod.default(fakeApi);
+
+  const handler = fakeApi.handlers["tool_result"];
+  if (!handler) { process.exit(0); }
+
+  const event = {
+    toolName: ${JSON.stringify(toolName)},
+    toolCallId: "call-test-456",
+    input: ${JSON.stringify(input)},
+    content: null,
+    details: null,
+    isError: false,
+  };
+
+  const preSnapshot = JSON.stringify(event);
+
+  handler(event, {}).then((result) => {
+    console.log("RESULT:" + JSON.stringify(result));
+    console.log("PRESNAPSHOT:" + preSnapshot);
+    console.log("POSTSNAPSHOT:" + JSON.stringify(event));
+    console.log("ERRORS:" + JSON.stringify(errors));
+    setTimeout(() => process.exit(0), 500);
+  }).catch((err) => {
+    console.error("UNEXPECTED_CRASH:", err.message);
+    process.exit(1);
+  });
+}).catch((err) => {
+  console.error("IMPORT_ERROR:", err.message);
+  process.exit(1);
+});
+`,
+			);
+
+			const npx = join(dir, "node_modules", ".bin", "tsx");
+			try {
+				const stdout = execFileSync(npx, [scriptFile], {
+					cwd: dir,
+					timeout: 15000,
+					encoding: "utf-8",
+					stdio: ["ignore", "pipe", "pipe"],
+				});
+				return { ok: true, stdout: stdout?.toString() || "" };
+			} catch (err) {
+				return {
+					ok: false,
+					stderr: err.stderr?.toString() || "",
+					stdout: err.stdout?.toString() || "",
+				};
+			}
+		},
+
+		/**
 		 * Run fail-open test: invoke tool_result with scryrs not on PATH.
 		 */
 		async runFailOpen(toolName, input) {
@@ -656,6 +736,75 @@ async function testFailurePropagation() {
 }
 
 // -----------------------------------------------------------------------
+// Test: Fail-open — scryrs resolve non-zero exit
+// -----------------------------------------------------------------------
+async function testFailOpenNonZeroExit() {
+	console.log(`\n\x1b[33m--- Pi: Fail-open (non-zero exit) ---\x1b[0m`);
+
+	const dir = tempDir();
+	const scryrsPath = join(ROOT, "target", "release", "scryrs");
+	const runner = createHookRunner(dir, scryrsPath);
+
+	const foResult = await runner.runFailOpenNonZeroExit("read", {
+		path: "/test.txt",
+	});
+
+	if (!foResult.ok) {
+		fail(
+			"Pi fail-open nonzero",
+			`subprocess crash: ${foResult.stderr?.slice(0, 200)}`,
+		);
+		rmSync(dir, { recursive: true, force: true });
+		return;
+	}
+
+	const parsed = parseFixtureOutput(foResult.stdout);
+
+	// Handler should return undefined
+	if (parsed.result !== undefined) {
+		fail(
+			"Pi fail-open nonzero: handler return",
+			`expected undefined, got ${JSON.stringify(parsed.result)}`,
+		);
+	} else {
+		pass("Pi fail-open nonzero: handler returned undefined (non-interference)");
+	}
+
+	// Original event should be unchanged
+	if (parsed.preSnapshot && parsed.postSnapshot) {
+		if (
+			JSON.stringify(parsed.preSnapshot) === JSON.stringify(parsed.postSnapshot)
+		) {
+			pass("Pi fail-open nonzero: original payload unchanged");
+		} else {
+			fail("Pi fail-open nonzero: payload mutated");
+		}
+	}
+
+	// console.error should have been called with a trace gap message
+	if (parsed.errors && parsed.errors.length > 0) {
+		const hasTraceGap = parsed.errors.some(
+			(e) => e.includes("exited non-zero") || e.includes("trace gap"),
+		);
+		if (hasTraceGap) {
+			pass("Pi fail-open nonzero: console.error called with trace gap message");
+		} else {
+			fail(
+				"Pi fail-open nonzero: console.error",
+				`no trace-gap message found in: ${JSON.stringify(parsed.errors)}`,
+			);
+		}
+	} else {
+		fail(
+			"Pi fail-open nonzero: console.error",
+			"no console.error output — non-zero exit may not be logged",
+		);
+	}
+
+	rmSync(dir, { recursive: true, force: true });
+}
+
+// -----------------------------------------------------------------------
 // Test: Fail-open — scryrs missing
 // -----------------------------------------------------------------------
 async function testFailOpen() {
@@ -778,6 +927,7 @@ async function testUnlistedTools() {
 async function main() {
 	await testSuccessfulCapture();
 	await testFailurePropagation();
+	await testFailOpenNonZeroExit();
 	await testFailOpen();
 	await testUnlistedTools();
 

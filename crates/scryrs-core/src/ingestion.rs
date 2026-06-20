@@ -41,8 +41,15 @@ pub fn ingest_jsonl(reader: impl BufRead) -> io::Result<IngestionOutcome> {
 
         let line_1based = zero_based + 1;
         let mut json_de = serde_json::Deserializer::from_str(&line);
-        match serde_path_to_error::deserialize(&mut json_de) {
-            Ok(event) => accepted.push(event),
+        match serde_path_to_error::deserialize::<_, TraceEvent>(&mut json_de) {
+            Ok(event) => match event.validate() {
+                Ok(()) => accepted.push(event),
+                Err(reason) => rejected.push(Rejection {
+                    line: line_1based,
+                    field: None,
+                    reason,
+                }),
+            },
             Err(e) => {
                 let field_path = e.path().to_string();
                 // A path of "." or empty means the error occurred at the root
@@ -274,6 +281,91 @@ mod tests {
             outcome.rejected[0].field, None,
             "field should be None for malformed (non-JSON) input"
         );
+    }
+
+    // --- Semantic invariant rejection (Tasks 2.1, 2.2) ---
+
+    #[test]
+    fn schema_version_mismatch_rejected() {
+        let input = r#"{"schema_version":"0.9.9","timestamp":"2026-06-20T00:00:00Z","session_id":"s1","event_type":"DocRetrieved","tool_name":"read","payload":{"type":"DocRetrieved","doc_ref":"doc/a.md"},"outcome":{"result":"Success"}}"#.to_string();
+        let outcome = ingest(&input);
+
+        assert_eq!(
+            outcome.accepted.len(),
+            0,
+            "mismatched version must be rejected"
+        );
+        assert_eq!(outcome.rejected.len(), 1);
+        assert_eq!(outcome.rejected[0].line, 1);
+        assert_eq!(outcome.rejected[0].field, None);
+        assert!(
+            outcome.rejected[0]
+                .reason
+                .contains("schema_version mismatch")
+        );
+        assert!(outcome.rejected[0].reason.contains("0.9.9"));
+        assert!(outcome.rejected[0].reason.contains(SCHEMA_VERSION));
+    }
+
+    #[test]
+    fn event_type_payload_type_mismatch_rejected() {
+        // Valid JSON structurally, but event_type=FileOpened while payload.type=DocRetrieved
+        let input = format!(
+            r#"{{"schema_version":"{sv}","timestamp":"2026-06-20T00:00:00Z","session_id":"s1","event_type":"FileOpened","tool_name":"read","payload":{{"type":"DocRetrieved","doc_ref":"doc/a.md"}},"outcome":{{"result":"Success"}}}}"#,
+            sv = SCHEMA_VERSION,
+        );
+        let outcome = ingest(&input);
+
+        assert_eq!(
+            outcome.accepted.len(),
+            0,
+            "mismatched event_type/payload.type must be rejected"
+        );
+        assert_eq!(outcome.rejected.len(), 1);
+        assert_eq!(outcome.rejected[0].line, 1);
+        assert_eq!(outcome.rejected[0].field, None);
+        assert!(
+            outcome.rejected[0]
+                .reason
+                .contains("event_type/payload.type mismatch")
+        );
+        assert!(outcome.rejected[0].reason.contains("FileOpened"));
+        assert!(outcome.rejected[0].reason.contains("DocRetrieved"));
+    }
+
+    #[test]
+    fn semantic_rejection_continues_to_later_lines() {
+        let input = format!(
+            r#"{{"schema_version":"0.9.9","timestamp":"2026-06-20T00:00:00Z","session_id":"s1","event_type":"DocRetrieved","tool_name":"read","payload":{{"type":"DocRetrieved","doc_ref":"doc/a.md"}},"outcome":{{"result":"Success"}}}}
+{}"#,
+            make_valid_event_json("s2", "doc/b.md"),
+        );
+        let outcome = ingest(&input);
+
+        assert_eq!(
+            outcome.accepted.len(),
+            1,
+            "later valid line must be accepted"
+        );
+        assert_eq!(outcome.rejected.len(), 1);
+        assert_eq!(outcome.rejected[0].line, 1);
+        assert_eq!(outcome.accepted[0].session_id, "s2");
+    }
+
+    #[test]
+    fn semantically_valid_events_still_accepted() {
+        // Existing test fixtures must still pass — all valid events accepted.
+        let input = format!(
+            "{}
+{}
+",
+            make_valid_event_json("s1", "doc/a.md"),
+            make_valid_event_json("s2", "doc/b.md"),
+        );
+        let outcome = ingest(&input);
+
+        assert_eq!(outcome.accepted.len(), 2);
+        assert!(outcome.rejected.is_empty());
     }
 
     #[test]

@@ -6,14 +6,16 @@ scryrs should ship in strict order: first become a deterministic trace-capture C
 
 ## Current Starting Point
 
-Current repo state is still foundation-only:
+The Phase 1 deterministic proxy-capture boundary is implemented:
 
 - `crates/scryrs-types/src/lib.rs` defines `TraceEvent` and related payload types.
-- `crates/scryrs-core/src/lib.rs` contains only in-memory hotspot scoring over supplied events.
-- `crates/scryrs-cli/src/lib.rs` exposes `scryrs record` for JSONL trace event ingestion and `scryrs hotspots <PATH>` (currently placeholder).
-- Event store exists at `.scryrs/events.jsonl`; `hooks/claude-code/` provides a Claude Code reference hook; the Pi hook, installer, and route manifests remain forthcoming.
+- `crates/scryrs-core/src/lib.rs` provides JSONL event ingestion with semantic validation, rejection diagnostics, and an append-only `.scryrs/events.jsonl` store.
+- `crates/scryrs-cli/src/lib.rs` exposes three commands: `scryrs record --stdin|--file <PATH>`, `scryrs hotspots <PATH>` (placeholder), and `scryrs init --agent <NAME>` for installing reference hooks.
+- Reference hooks live at `hooks/pi/` (TypeScript extension) and `hooks/claude-code/` (JavaScript PreToolUse hook).
+- `scryrs.json` defines the hook-interface and record-invocation manifest at the repository root.
+- Docker-backed fail-open verification (`scripts/verify-trace-capture`) exercises both hooks end-to-end against the real `scryrs` binary.
 
-That means scryrs does **not** yet qualify as a proxy CLI. It has schema and scoring primitives, but not ingestion, persistence, or deterministic harness integration.
+Phase 2 hotspot materialization and later-suite features are deferred per the delivery-phase ordering below.
 
 ## Phase Order
 
@@ -27,7 +29,7 @@ Key scope rule: **do not build later-suite features on placeholder ingest paths*
 
 ## First Usable Product Boundary
 
-First honest product cut is not “scryrs can publish docs.” First honest cut is:
+First honest product cut is not "scryrs can publish docs." First honest cut is:
 
 1. agent hook forwards raw events to scryrs,
 2. `scryrs record` persists them,
@@ -50,25 +52,30 @@ Until that exists, graph, proposal, and adapter work are downstream fiction.
 
 ## Phase 1 — Deterministic Proxy Capture
 
-This phase is immediate priority because it creates executable truth for scryrs’ identity.
+This phase is the implemented foundation that creates executable truth for scryrs' identity.
 
-Required deliverables:
+Completed deliverables:
 
-- Add `record` CLI surface in `crates/scryrs-cli/src/lib.rs`.
-- Add ingest and persistence path in `crates/scryrs-core/src/lib.rs` or adjacent focused files in `crates/scryrs-core/src/`.
-- Define local event-store format before adding any analytics. SQLite or append-only file are both defensible; hidden in-memory only is not.
-- Add `scryrs.json` manifest describing hook interface, intercepted events, and `scryrs record` invocation.
-- Add reference hooks under `hooks/pi/` and `hooks/claude-code/`.
-- Add `scryrs init --agent <name>` installer so hook setup is deterministic, not improvised.
-- Add repeatable verification that hooks fail open and do not alter tool behavior.
+- `scryrs record` CLI surface in `crates/scryrs-cli/src/lib.rs`.
+- Ingest and persistence path in `crates/scryrs-core/src/ingestion.rs`, `crates/scryrs-core/src/store.rs`.
+- Local append-only event store at `.scryrs/events.jsonl`.
+- `scryrs.json` manifest describing hook interface, intercepted events, and `scryrs record` invocation.
+- Reference hooks under `hooks/pi/` and `hooks/claude-code/`.
+- `scryrs init --agent <name>` installer for deterministic hook setup.
+- Docker-backed fail-open verification via `scripts/verify-trace-capture`.
 
-Hard non-goals for this phase:
+Accepted limitations:
+
+- Claude Code hook is PreToolUse-only (no lifecycle events).
+- Pi hook captures `SessionStart` but not `SessionEnd` (shutdown-hook timing limitation).
+
+Hard non-goals for this phase (still deferred):
 
 - scryrs must not proxy tool execution itself.
 - scryrs must not become an MCP server or callable business tool.
 - hooks must not contain business logic beyond formatting plus subprocess delegation.
 
-## Phase 2 — Hotspot Materialization
+## Phase 2 - Hotspot Materialization
 
 This phase turns raw event capture into first real product value.
 
@@ -89,7 +96,7 @@ scryrs hotspots <PATH>
 
 If phase 2 is strong, scryrs already has credible standalone utility.
 
-## Phase 3 — Graph and Route Manifests
+## Phase 3 - Graph and Route Manifests
 
 Only start this after hotspot outputs stabilize. Otherwise graph schema will chase unstable evidence shapes.
 
@@ -101,7 +108,7 @@ Required deliverables:
 
 This phase is where scryrs stops being only a recorder and starts becoming routing infrastructure.
 
-## Phase 4 — Proposal Engine
+## Phase 4 - Proposal Engine
 
 This phase turns evidence into reviewable change suggestions.
 
@@ -113,7 +120,7 @@ Required deliverables:
 
 Do not skip straight to automatic doc mutation. That would destroy trust.
 
-## Phase 5 — Publishing Adapters
+## Phase 5 - Publishing Adapters
 
 Adapters come after proposals because scryrs should publish approved knowledge, not invent source-of-truth content on its own.
 
@@ -125,7 +132,7 @@ Recommended order:
 
 Why: Markdown keeps product core honest. If adapter logic only works when tied to one docs framework, architecture has already drifted.
 
-## Phase 6 — Runtime Retrieval
+## Phase 6 - Runtime Retrieval
 
 Runtime work should consume prior artifacts, not bypass them.
 
@@ -137,7 +144,7 @@ Required deliverables:
 
 This phase is when future agents should start reading less junk and loading more relevant context.
 
-## Phase 7 — Optional LLM Layer
+## Phase 7 - Optional LLM Layer
 
 Model-backed features belong last because they are interpretation features, not truth-producing features.
 
@@ -170,11 +177,11 @@ If roadmap starts to sprawl, cut work using these rules:
 
 | Milestone | What user can honestly do afterward |
 | --- | --- |
-| M1 — Proxy capture alpha | Install reference hook, record traces, verify fail-open non-interference |
-| M2 — Standalone hotspots beta | Record traces across sessions and produce real hotspot output from CLI |
-| M3 — Routing data beta | Export graph and route manifests for downstream consumers |
-| M4 — Proposal loop beta | Generate reviewable docs and memory proposals from evidence |
-| M5 — Adapter suite beta | Publish approved knowledge into Markdown and Rspress surfaces |
+| M1 - Proxy capture alpha | Install reference hook, record traces, verify fail-open non-interference |
+| M2 - Standalone hotspots beta | Record traces across sessions and produce real hotspot output from CLI |
+| M3 - Routing data beta | Export graph and route manifests for downstream consumers |
+| M4 - Proposal loop beta | Generate reviewable docs and memory proposals from evidence |
+| M5 - Adapter suite beta | Publish approved knowledge into Markdown and Rspress surfaces |
 
 ## Source-of-Truth Rules
 
@@ -186,6 +193,6 @@ If roadmap starts to sprawl, cut work using these rules:
 
 ## Related Pages
 
-- [Vision & Goals](./vision.md) — product destination, principles, and anti-goals.
-- [Architecture](./architecture.md) — current crate topology and runtime flow.
-- [CLI v0 Contract](./cli-v0-contract.md) — current public CLI contract before roadmap phases land.
+- [Vision & Goals](./vision.md) - product destination, principles, and anti-goals.
+- [Architecture](./architecture.md) - current crate topology and runtime flow.
+- [CLI v0 Contract](./cli-v0-contract.md) - current public CLI contract before roadmap phases land.

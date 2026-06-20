@@ -1525,8 +1525,23 @@ mod init_tests {
                 "must report settings.json collision, got: {err_str}"
             );
             assert!(
+                err_str.contains("not be installed"),
+                "must not claim hook source was installed, got: {err_str}"
+            );
+            assert!(
+                !err_str.contains("has been installed"),
+                "must not claim hook source was already installed, got: {err_str}"
+            );
+            assert!(
                 err_str.contains("PreToolUse"),
                 "must include JSON block instructions, got: {err_str}"
+            );
+
+            // Verify no mutation: hook file must NOT exist
+            let hook_path = dir.path().join(".claude/hooks/scryrs-hook.mjs");
+            assert!(
+                !hook_path.exists(),
+                "hook file must not be written on settings.json collision"
             );
         });
     }
