@@ -8,6 +8,28 @@ use scryrs_types::SCHEMA_VERSION;
 #[cfg(feature = "core")]
 use scryrs_core::{EventStore, ingest_jsonl};
 
+#[cfg(feature = "core")]
+mod store_override {
+    use std::cell::RefCell;
+
+    std::thread_local! {
+        static PATH: RefCell<Option<String>> = const { RefCell::new(None) };
+    }
+
+    /// Set an override store path for the current thread (test-only).
+    /// Subsequent calls to `execute_record` on this thread will use this
+    /// path instead of `.scryrs/events.jsonl`.
+    #[allow(dead_code)]
+    pub fn set(path: String) {
+        PATH.with(|p| *p.borrow_mut() = Some(path));
+    }
+
+    /// Get the override path, if set.
+    pub fn get() -> Option<String> {
+        PATH.with(|p| p.borrow().clone())
+    }
+}
+
 /// Version of the `--help-json` surface document format, independent of
 /// `SCHEMA_VERSION` which governs command output envelopes.
 const SURFACE_VERSION: &str = "0.2.0";
@@ -70,6 +92,15 @@ where
             return 2;
         }
     }
+
+    // Capture the attempted subcommand before clap consumes args, so
+    // error handlers can emit subcommand-specific messages.
+    let attempted_command: Option<&str> =
+        if !args.is_empty() && (args[0] == "hotspots" || args[0] == "record") {
+            Some(args[0].as_str())
+        } else {
+            None
+        };
 
     // D2: Clap builder API with try_get_matches_from (never get_matches_from).
     // Help/version flags enabled on root (so clap triggers DisplayHelp/DisplayVersion).
@@ -136,13 +167,28 @@ where
                 }
             }
             clap::error::ErrorKind::TooManyValues | clap::error::ErrorKind::UnknownArgument => {
-                if writeln!(err, "scryrs hotspots: unexpected argument after PATH").is_err()
-                    || writeln!(err, "Usage: scryrs hotspots <PATH>").is_err()
-                    || writeln!(err, "See `scryrs --help`").is_err()
-                {
-                    1
-                } else {
-                    2
+                match attempted_command {
+                    Some("record") => {
+                        if writeln!(err, "scryrs record: unexpected argument").is_err()
+                            || writeln!(err, "Usage: scryrs record --stdin").is_err()
+                            || writeln!(err, "Usage: scryrs record --file <PATH>").is_err()
+                            || writeln!(err, "See `scryrs --help`").is_err()
+                        {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                    _ => {
+                        if writeln!(err, "scryrs hotspots: unexpected argument after PATH").is_err()
+                            || writeln!(err, "Usage: scryrs hotspots <PATH>").is_err()
+                            || writeln!(err, "See `scryrs --help`").is_err()
+                        {
+                            1
+                        } else {
+                            2
+                        }
+                    }
                 }
             }
             // Unrecognized clap error -> exit 1.
@@ -293,12 +339,13 @@ fn execute_record<R: Read>(
     };
 
     // Persist accepted events.
-    let mut store = match EventStore::default_local() {
+    let store_path = store_override::get().unwrap_or_else(|| ".scryrs/events.jsonl".into());
+    let mut store = match EventStore::open(&store_path) {
         Ok(s) => s,
         Err(e) => {
             if writeln!(
                 err,
-                "scryrs record: cannot open event store (.scryrs/events.jsonl): {e}"
+                "scryrs record: cannot open event store ({store_path}): {e}"
             )
             .is_err()
             {
@@ -571,6 +618,46 @@ mod tests {
         assert!(!err_str.contains("unknown command"));
     }
 
+    #[test]
+    fn record_with_help_flag_exits_2() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(["record", "--help"], &mut out, &mut err),
+            2,
+            "record --help must exit 2"
+        );
+        assert!(out.is_empty());
+        let err_str = String::from_utf8_lossy(&err);
+        assert!(
+            err_str.contains("scryrs record:"),
+            "must name record, not hotspots, got: {err_str}"
+        );
+        assert!(
+            err_str.contains("unexpected argument"),
+            "must report unexpected argument, got: {err_str}"
+        );
+    }
+
+    #[test]
+    fn record_with_version_flag_exits_2() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(["record", "--version"], &mut out, &mut err),
+            2,
+            "record --version must exit 2"
+        );
+        assert!(out.is_empty());
+        let err_str = String::from_utf8_lossy(&err);
+        assert!(
+            err_str.contains("scryrs record:"),
+            "must name record, not hotspots, got: {err_str}"
+        );
+    }
+
     // --- --help-json surface tests (CLI Foundation 04) ---
 
     #[test]
@@ -745,6 +832,20 @@ mod record_tests {
 
     use super::run_with_io;
 
+    /// Set a thread-local store path override so tests don't pollute the
+    /// real CWD's .scryrs/events.jsonl. Returns the tempdir guard.
+    fn set_test_store() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        let store_path = dir.path().join("events.jsonl");
+        super::store_override::set(
+            store_path
+                .to_str()
+                .unwrap_or_else(|| panic!("store path not valid UTF-8"))
+                .to_string(),
+        );
+        dir
+    }
+
     fn make_valid_event_json(session_id: &str, doc_ref: &str) -> String {
         format!(
             r#"{{"schema_version":"{}","timestamp":"2026-06-20T00:00:00Z","session_id":"{}","event_type":"DocRetrieved","tool_name":"read","payload":{{"type":"DocRetrieved","doc_ref":"{}"}},"outcome":{{"result":"Success"}}}}"#,
@@ -756,6 +857,7 @@ mod record_tests {
 
     #[test]
     fn record_stdin_all_valid_exits_0() {
+        let _store_dir = set_test_store();
         let input = format!(
             "{}\n{}\n",
             make_valid_event_json("s1", "doc/a.md"),
@@ -778,6 +880,7 @@ mod record_tests {
 
     #[test]
     fn record_stdin_some_invalid_exits_1() {
+        let _store_dir = set_test_store();
         let input = format!(
             "{}\nnot valid json\n{}\n",
             make_valid_event_json("s1", "doc/a.md"),
@@ -802,6 +905,7 @@ mod record_tests {
 
     #[test]
     fn record_stdin_blank_lines_are_skipped() {
+        let _store_dir = set_test_store();
         let input = format!(
             "\n{}\n\n{}\n  \n",
             make_valid_event_json("s1", "doc/a.md"),
@@ -825,6 +929,7 @@ mod record_tests {
 
     #[test]
     fn record_file_all_valid_exits_0() {
+        let _store_dir = set_test_store();
         let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
         let file_path = dir.path().join("events.jsonl");
         let content = format!(
@@ -857,6 +962,7 @@ mod record_tests {
 
     #[test]
     fn record_file_some_invalid_exits_1() {
+        let _store_dir = set_test_store();
         let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
         let file_path = dir.path().join("events.jsonl");
         let content = format!(
@@ -953,6 +1059,7 @@ mod record_tests {
 
     #[test]
     fn record_output_is_valid_json() {
+        let _store_dir = set_test_store();
         let input = make_valid_event_json("s1", "doc/x.md");
         let mut out = Vec::new();
         let mut err = Vec::new();
@@ -971,6 +1078,7 @@ mod record_tests {
 
     #[test]
     fn record_rejection_diagnostics_are_valid_json() {
+        let _store_dir = set_test_store();
         let input = "not valid json\n";
         let mut out = Vec::new();
         let mut err = Vec::new();
@@ -989,6 +1097,7 @@ mod record_tests {
 
     #[test]
     fn record_multiple_rejections_all_on_stderr() {
+        let _store_dir = set_test_store();
         let input = "bad1\nbad2\nbad3\n";
         let mut out = Vec::new();
         let mut err = Vec::new();
@@ -1009,6 +1118,93 @@ mod record_tests {
             };
             assert_eq!(diag["line"], (i + 1) as u64);
         }
+    }
+
+    // --- invalid arguments to record (error handler disambiguates subcommands) ---
+
+    #[test]
+    fn record_help_flag_exits_2() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let stdin = &[] as &[u8];
+
+        assert_eq!(
+            run_with_io(["record", "--help"], &mut out, &mut err, stdin),
+            2,
+            "record --help must exit 2 (help flag disabled on subcommand)"
+        );
+        assert!(out.is_empty());
+        let err_str = String::from_utf8_lossy(&err);
+        assert!(
+            err_str.contains("scryrs record:"),
+            "must name record, not hotspots, got: {err_str}"
+        );
+        assert!(
+            err_str.contains("unexpected argument"),
+            "must report unexpected argument, got: {err_str}"
+        );
+        assert!(
+            err_str.contains("See `scryrs --help`"),
+            "must escalate to --help, got: {err_str}"
+        );
+    }
+
+    #[test]
+    fn record_version_flag_exits_2() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let stdin = &[] as &[u8];
+
+        assert_eq!(
+            run_with_io(["record", "--version"], &mut out, &mut err, stdin),
+            2,
+            "record --version must exit 2 (version flag disabled on subcommand)"
+        );
+        assert!(out.is_empty());
+        let err_str = String::from_utf8_lossy(&err);
+        assert!(
+            err_str.contains("scryrs record:"),
+            "must name record, not hotspots, got: {err_str}"
+        );
+    }
+
+    #[test]
+    fn record_unknown_flag_exits_2() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let stdin = &[] as &[u8];
+
+        assert_eq!(
+            run_with_io(["record", "--unknown-flag"], &mut out, &mut err, stdin),
+            2
+        );
+        assert!(out.is_empty());
+        let err_str = String::from_utf8_lossy(&err);
+        assert!(
+            err_str.contains("scryrs record:"),
+            "must name record, not hotspots, got: {err_str}"
+        );
+        assert!(
+            err_str.contains("unexpected argument"),
+            "must report unexpected argument, got: {err_str}"
+        );
+    }
+
+    #[test]
+    fn record_extra_args_exits_2() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let stdin = &[] as &[u8];
+
+        assert_eq!(
+            run_with_io(["record", "--stdin", "extra"], &mut out, &mut err, stdin,),
+            2
+        );
+        let err_str = String::from_utf8_lossy(&err);
+        assert!(
+            err_str.contains("scryrs record:"),
+            "must name record, not hotspots, got: {err_str}"
+        );
     }
 }
 
