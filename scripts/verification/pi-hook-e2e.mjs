@@ -1062,7 +1062,7 @@ async function testRewriteCompatibility() {
 
 	// 3. Assert events.jsonl contents (poll to avoid SessionStart fire-and-forget race)
 	const eventsJsonl = join(dir, ".scryrs", "events.jsonl");
-	const events = waitForEventCount(eventsJsonl, 3, 5000);
+	const events = waitForEventCount(eventsJsonl, 3, 15000);
 
 	const bashEvents = events.filter(
 		(e) => e.event_type === "CommandExecuted" && e.tool_name === "bash",

@@ -36,6 +36,7 @@ const TRACKED_TOOLS = new Set([
  * reference hook (collapseNewlines in scryrs-hook.mjs).
  */
 function collapseNewlines(value: string): string {
+	if (typeof value !== "string") return String(value ?? "");
 	return value.replace(/\r?\n/g, " ⏎ ");
 }
 
@@ -158,21 +159,35 @@ export default function (pi: ExtensionAPI) {
 				break;
 			}
 
-			case "edit":
+			case "edit": {
 				eventType = "EditMade";
+				const editPath: string | undefined = event.input?.path;
+				if (editPath === undefined) {
+					console.warn(
+						"scryrs trace hook: edit input missing 'path' field — using 'unknown'",
+					);
+				}
 				payload = {
 					type: "EditMade",
-					target: collapseNewlines(event.input.path),
+					target: collapseNewlines(editPath ?? "unknown"),
 				};
 				break;
+			}
 
-			case "write":
+			case "write": {
 				eventType = "EditMade";
+				const writePath: string | undefined = event.input?.path;
+				if (writePath === undefined) {
+					console.warn(
+						"scryrs trace hook: write input missing 'path' field — using 'unknown'",
+					);
+				}
 				payload = {
 					type: "EditMade",
-					target: collapseNewlines(event.input.path),
+					target: collapseNewlines(writePath ?? "unknown"),
 				};
 				break;
+			}
 
 			case "lsp_navigation": {
 				const symbol: string | undefined = event.input?.symbol;

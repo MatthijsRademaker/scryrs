@@ -372,14 +372,20 @@ async function testRewriteCompatibility() {
 				PATH: `${niDir}:${process.env.PATH || ""}`,
 			};
 			try {
-				execFileSync("node", [scriptFile], {
+				const stdoutResult = execFileSync("node", [scriptFile], {
 					env,
 					cwd: niDir,
 					timeout: 15000,
 					encoding: "utf-8",
 					stdio: ["ignore", "pipe", "pipe"],
 				});
-				pass("Claude Code RTK NI: simple command — hook stdout empty");
+				if (!stdoutResult.trim())
+					pass("Claude Code RTK NI: simple command — hook stdout empty");
+				else
+					fail(
+						"Claude Code RTK NI: simple command stdout",
+						`unexpected: ${stdoutResult.slice(0, 200)}`,
+					);
 				pass("Claude Code RTK NI: simple command — hook stderr empty");
 			} catch (err) {
 				const stdout = err.stdout?.toString() || "";
@@ -418,14 +424,20 @@ async function testRewriteCompatibility() {
 				PATH: `${niDir}:${process.env.PATH || ""}`,
 			};
 			try {
-				execFileSync("node", [scriptFile], {
+				const stdoutResult = execFileSync("node", [scriptFile], {
 					env,
 					cwd: niDir,
 					timeout: 15000,
 					encoding: "utf-8",
 					stdio: ["ignore", "pipe", "pipe"],
 				});
-				pass("Claude Code RTK NI: compound command — hook stdout empty");
+				if (!stdoutResult.trim())
+					pass("Claude Code RTK NI: compound command — hook stdout empty");
+				else
+					fail(
+						"Claude Code RTK NI: compound command stdout",
+						`unexpected: ${stdoutResult.slice(0, 200)}`,
+					);
 				pass("Claude Code RTK NI: compound command — hook stderr empty");
 			} catch (err) {
 				const stdout = err.stdout?.toString() || "";
@@ -473,13 +485,20 @@ async function testNonInterference() {
 
 	try {
 		// Capture stdout and stderr separately (hook's own output, not scryrs')
-		execFileSync("node", [scriptFile], {
+		const stdoutResult = execFileSync("node", [scriptFile], {
 			cwd: tmpDir,
 			timeout: 10000,
 			encoding: "utf-8",
 			stdio: ["ignore", "pipe", "pipe"],
 		});
-		pass("Claude Code non-interference: hook stdout empty");
+		if (!stdoutResult.trim()) {
+			pass("Claude Code non-interference: hook stdout empty");
+		} else {
+			fail(
+				"Claude Code non-interference: stdout",
+				`unexpected: ${stdoutResult.slice(0, 200)}`,
+			);
+		}
 		pass("Claude Code non-interference: hook stderr empty");
 	} catch (err) {
 		const stdout = err.stdout?.toString() || "";
