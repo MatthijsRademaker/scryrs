@@ -160,19 +160,23 @@ The read path SHALL exclusively read from `.scryrs/scryrs.db`. The system SHALL 
 - **THEN** no attempt was made to open or parse `.scryrs/events.jsonl`
 - **AND** no JSONL content is read or returned
 
+## REMOVED Requirements
+
 ### Requirement: CLI hotspot command remains placeholder
 
-The `scryrs hotspots <PATH>` command SHALL continue to emit the existing placeholder JSON envelope regardless of whether a readable `.scryrs/scryrs.db` exists. The command SHALL NOT call `TraceQuery`, and its output SHALL NOT depend on persisted trace data in this task.
+~~The `scryrs hotspots <PATH>` command SHALL continue to emit the existing placeholder JSON envelope regardless of whether a readable `.scryrs/scryrs.db` exists. The command SHALL NOT call `TraceQuery`, and its output SHALL NOT depend on persisted trace data in this task.~~
+
+**Reason:** Superseded by `hotspot-report` spec which defines the real `HotspotsReport` output contract with deterministic scoring, evidence-carrying entries, and explicit exit codes. The placeholder is replaced by live analysis over the SQLite store.
 
 #### Scenario: Hotspot command still returns placeholder
 
-- **WHEN** `scryrs hotspots <PATH>` is invoked in a directory with a populated `.scryrs/scryrs.db`
-- **THEN** the output is `{"schemaVersion":"0.1.0","command":"hotspots","status":"placeholder"}`
-- **AND** no events are read from the database
+~~- **WHEN** `scryrs hotspots <PATH>` is invoked in a directory with a populated `.scryrs/scryrs.db`~~
+~~- **THEN** the output is `{"schemaVersion":"0.1.0","command":"hotspots","status":"placeholder"}`~~
+~~- **AND** no events are read from the database~~
 
 #### Scenario: Hotspot output is independent of store state
 
-- **WHEN** `scryrs hotspots <PATH>` is invoked in a directory with no `.scryrs/scryrs.db`
-- **THEN** the output is identical to the populated-store case
-- **AND** the exit code is `0`
+~~- **WHEN** `scryrs hotspots <PATH>` is invoked in a directory with no `.scryrs/scryrs.db`~~
+~~- **THEN** the output is identical to the populated-store case~~
+~~- **AND** the exit code is `0`~~
 
