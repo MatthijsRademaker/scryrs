@@ -1,0 +1,20 @@
+---
+source: crates/scryrs-cli/tests/hotspot_e2e.rs
+assertion_line: 354
+expression: normalized
+---
+{
+  "command": "hotspots",
+  "entries": [],
+  "generatedAt": "<GENERATED_AT>",
+  "repositoryPath": "<REPO>",
+  "runMetadata": {
+    "analyzedEventCount": 0,
+    "analyzedSubjectCount": 0,
+    "firstEventId": 0,
+    "lastEventId": 0,
+    "storeSchemaVersion": 1
+  },
+  "schemaVersion": "1.0.0",
+  "storePath": "<STORE>"
+}
