@@ -1,8 +1,11 @@
 # phase-2-closure Specification
 
 ## Purpose
-TBD - created by archiving change task-56573ced-fdeb-49b2-aea6-41b30f19d2bf. Update Purpose after archive.
+
+Defines the Phase 2 closure reconciliation contract. This spec documents that Phase 2 hotspot materialization is fully implemented in code and tests, maps each roadmap Phase 2 deliverable to concrete repository evidence, supersedes conflicting placeholder-era requirements in three stale OpenSpec specs (phase-1-closure, cli-foundation-closure, cli-golden-tests), and requires that four stale published docs (roadmap.mdx, cli-v0-contract.md, architecture.mdx, trace-hook-contract.md) be updated to describe the real shipped hotspot product boundary.
+
 ## Requirements
+
 ### Requirement: Phase 2 hotspot materialization is verified complete in code and tests
 
 The live CLI (`crates/scryrs-cli/src/lib.rs`), scoring engine (`crates/scryrs-core/src/scoring.rs`), and end-to-end tests (`crates/scryrs-cli/tests/hotspot_e2e.rs`) SHALL serve as the authoritative evidence that Phase 2 is functionally complete. Each roadmap Phase 2 deliverable SHALL be traceable to concrete code paths or test artifacts.
@@ -159,4 +162,3 @@ The Phase 2 closure change SHALL NOT introduce graph, proposal, adapter, runtime
 - **GIVEN** the Phase 2 closure change diff
 - **WHEN** a reviewer inspects `openspec/specs/hotspot-report/spec.md` and `openspec/specs/hotspot-verification/spec.md`
 - **THEN** no changes are present — these specs are already canonical
-

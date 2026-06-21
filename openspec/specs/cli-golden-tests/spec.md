@@ -14,7 +14,7 @@ The Phase 2 hotspot materialization has been fully implemented and delivered. Th
 - `crates/scryrs-cli/tests/` — hotspot integration tests with real SQLite fixtures.
 - [`openspec/specs/hotspot-verification/spec.md`](../hotspot-verification/spec.md) — canonical E2E verification requirements.
 
-**Closure change traceability**: `openspec/changes/task-56573ced-fdeb-49b2-aea6-41b30f19d2bf/specs/phase-2-closure/spec.md` documents the full evidence matrix mapping code/test artifacts to Phase 2 deliverables.
+**Closure change traceability**: `openspec/changes/archive/2026-06-21-task-56573ced-fdeb-49b2-aea6-41b30f19d2bf/specs/phase-2-closure/spec.md` documents the full evidence matrix mapping code/test artifacts to Phase 2 deliverables.
 
 All other requirements in this spec (help, help-json, version, snapshot update workflow) remain valid and are not affected by this reconciliation.
 ## Requirements

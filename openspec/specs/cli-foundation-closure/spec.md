@@ -13,7 +13,7 @@ The Phase 2 hotspot materialization has been fully implemented and delivered. Th
 - [`openspec/specs/hotspot-report/spec.md`](../hotspot-report/spec.md) — `HotspotsReport` schema, scoring dimensions, exit codes, artifact file.
 - Live implementation in `crates/scryrs-cli/src/lib.rs` (function `write_hotspots_json`) and `crates/scryrs-core/src/scoring.rs` (function `score_hotspots`).
 
-**Closure change traceability**: `openspec/changes/task-56573ced-fdeb-49b2-aea6-41b30f19d2bf/specs/phase-2-closure/spec.md` documents the full evidence matrix mapping code/test artifacts to Phase 2 deliverables.
+**Closure change traceability**: `openspec/changes/archive/2026-06-21-task-56573ced-fdeb-49b2-aea6-41b30f19d2bf/specs/phase-2-closure/spec.md` documents the full evidence matrix mapping code/test artifacts to Phase 2 deliverables.
 
 All other requirements in this spec remain valid for CLI foundation closure and are not affected by this reconciliation.
 ## Requirements
