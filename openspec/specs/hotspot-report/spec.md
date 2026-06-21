@@ -3,9 +3,7 @@
 ## Purpose
 
 Defines the deterministic hotspot scoring contract, output schema, and ranking rules over SQLite trace evidence. Every `scryrs hotspots <PATH>` invocation produces a versioned `HotspotsReport` JSON envelope with ranked `HotspotEntry` results, computed exclusively from persisted `trace_events` rows using a documented integer weight table and a six-key tie-break chain.
-
 ## Requirements
-
 ### Requirement: Hotspot report envelope is versioned and self-describing
 
 The system SHALL emit a `HotspotsReport` JSON envelope to stdout for every successful `scryrs hotspots <PATH>` invocation. The envelope SHALL include a `schemaVersion` field set to `HOTSPOT_SCHEMA_VERSION` (`"1.0.0"`), independent of `SCHEMA_VERSION` (`"0.1.0"`) which governs trace event wire format.
@@ -142,57 +140,16 @@ The system SHALL compute a hotspot score for each `(subject_kind, subject)` grou
 
 ### Requirement: Ranking is deterministic with explicit tie-break
 
-The system SHALL sort `HotspotEntry` results deterministically using a six-key tie-break chain. Given the same `trace_events` rows, repeated analysis SHALL produce identical ordering.
+The system SHALL sort `HotspotEntry` results deterministically using a six-key tie-break chain. Given the same `trace_events` rows, repeated analysis SHALL produce identical ordering. The final `firstEventId` tie-break SHALL use the SQLite row id of the chronologically first contributing event for that subject, using the same `timestamp ASC, id ASC` evidence order exposed in `evidence.rowIds`.
 
-#### Scenario: Primary sort is by score descending
+#### Scenario: Final tie-break honors chronological evidence order when row ids are non-monotonic
 
-- **GIVEN** subject A has score 10 and subject B has score 5
+- **GIVEN** subject A and subject B are identical on `score`, `sessionCount`, `lastSeen`, `subjectKind`, and `subject`
+- **AND** subject A's contributing events appear in evidence order as row ids `[5, 3]` because row `5` has the earlier timestamp
+- **AND** subject B's contributing events appear in evidence order as row ids `[4, 6]`
 - **WHEN** entries are sorted
-- **THEN** subject A appears before subject B
-
-#### Scenario: Tie-break by sessionCount descending
-
-- **GIVEN** subject A and subject B both have score 5
-- **AND** subject A has `sessionCount` 3 and subject B has `sessionCount` 1
-- **WHEN** entries are sorted
-- **THEN** subject A appears before subject B
-
-#### Scenario: Tie-break by lastSeen descending
-
-- **GIVEN** subject A and subject B both have score 5 and `sessionCount` 2
-- **AND** subject A has `lastSeen` `"2026-06-21T12:00:00Z"` and subject B has `lastSeen` `"2026-06-21T09:00:00Z"`
-- **WHEN** entries are sorted
-- **THEN** subject A appears before subject B
-
-#### Scenario: Tie-break by subjectKind ascending (lexical)
-
-- **GIVEN** subject A and subject B have identical score, sessionCount, and lastSeen
-- **AND** subject A has `subjectKind` `"command"` and subject B has `subjectKind` `"file"`
-- **WHEN** entries are sorted
-- **THEN** subject A (`"command"`) appears before subject B (`"file"`)
-
-#### Scenario: Tie-break by subject ascending (lexical)
-
-- **GIVEN** subject A and subject B have identical score, sessionCount, lastSeen, and subjectKind
-- **AND** subject A has `subject` `"api.md"` and subject B has `subject` `"src/main.rs"`
-- **WHEN** entries are sorted
-- **THEN** subject A (`"api.md"`) appears before subject B (`"src/main.rs"`)
-
-#### Scenario: Final tie-break by firstEventId ascending
-
-- **GIVEN** subject A and subject B have identical score, sessionCount, lastSeen, subjectKind, and subject
-- **AND** subject A's chronologically first contributing event has SQLite row `id` 7
-- **AND** subject B's chronologically first contributing event has SQLite row `id` 3
-- **WHEN** entries are sorted
-- **THEN** subject B (firstEventId 3) appears before subject A (firstEventId 7)
-
-#### Scenario: Rank field reflects sort position
-
-- **GIVEN** three sorted entries
-- **WHEN** ranks are assigned
-- **THEN** the first entry has `rank` 1
-- **AND** the second entry has `rank` 2
-- **AND** the third entry has `rank` 3
+- **THEN** subject B appears before subject A because `4 < 5`
+- **AND** the comparison uses the first row id in evidence order, not the minimum row id in each subject's evidence set
 
 ### Requirement: Subjects are grouped by subject_kind and subject
 
@@ -263,26 +220,16 @@ The system SHALL handle store-level errors with explicit exit codes and descript
 
 ### Requirement: Artifact file is written to .scryrs/hotspots.json
 
-On successful analysis, the system SHALL write the same `HotspotsReport` JSON to `.scryrs/hotspots.json` at the repository root, in addition to stdout.
+On successful analysis, the system SHALL write the same `HotspotsReport` JSON to `.scryrs/hotspots.json` at the repository root, in addition to stdout. If the report cannot be written to the artifact path, the command SHALL fail instead of reporting success.
 
-#### Scenario: Artifact file is written on success
+#### Scenario: Artifact write failure fails the command
 
-- **GIVEN** a valid `.scryrs/scryrs.db` with subject-bearing events
-- **WHEN** `scryrs hotspots <PATH>` completes successfully (exit 0)
-- **THEN** `.scryrs/hotspots.json` is created or overwritten at `<PATH>/.scryrs/hotspots.json`
-- **AND** its contents match the stdout JSON byte-for-byte
-
-#### Scenario: Artifact file is written for empty store
-
-- **GIVEN** a valid `.scryrs/scryrs.db` with zero subject-bearing events
-- **WHEN** `scryrs hotspots <PATH>` completes with exit 0 and `entries: []`
-- **THEN** `.scryrs/hotspots.json` is created or overwritten with the full envelope including `entries: []`
-
-#### Scenario: Artifact file is not written on error
-
-- **GIVEN** a missing or corrupt `.scryrs/scryrs.db`
-- **WHEN** `scryrs hotspots <PATH>` exits with a non-zero exit code
-- **THEN** `.scryrs/hotspots.json` is not created or modified
+- **GIVEN** a valid `.scryrs/scryrs.db` whose hotspot analysis would otherwise succeed
+- **AND** `<PATH>/.scryrs/hotspots.json` cannot be created or overwritten because of a filesystem I/O error
+- **WHEN** `scryrs hotspots <PATH>` is invoked
+- **THEN** the system exits 1
+- **AND** an error message is written to stderr describing the artifact write failure
+- **AND** the command does not report success
 
 ### Requirement: CLI --help-json surface describes the new output contract
 
@@ -300,3 +247,21 @@ The `scryrs --help-json` output SHALL describe the hotspot output fields matchin
 - **THEN** exit code 0 describes success with data or empty entries
 - **AND** exit code 1 describes I/O or storage errors
 - **AND** exit code 2 describes missing store, unsupported store, or usage errors
+
+### Requirement: Hotspot command surfaces no longer describe placeholder output
+
+User-visible hotspot command surfaces SHALL describe real SQLite-derived hotspot analysis and SHALL NOT describe the command or its output as a placeholder.
+
+#### Scenario: CLI help text describes real hotspot reporting
+
+- **WHEN** `scryrs --help` is invoked
+- **THEN** the hotspots command summary describes emitting a versioned hotspot report
+- **AND** the hotspot help text does not describe the command or stdout output as a placeholder
+
+#### Scenario: README hotspot examples describe recorded-evidence analysis
+
+- **GIVEN** the repository README sections that document `scryrs hotspots`
+- **WHEN** a reader inspects those examples
+- **THEN** they describe analysis of recorded SQLite trace data and versioned hotspot report output
+- **AND** they do not describe placeholder-only behavior
+

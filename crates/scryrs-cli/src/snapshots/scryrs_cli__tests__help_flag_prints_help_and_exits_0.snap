@@ -8,7 +8,7 @@ Discover, analyze, and navigate hotspots in your codebase.
 
 COMMANDS
 scryrs hotspots <PATH>
-Emit a versioned JSON placeholder for repository hotspots.
+Emit a versioned JSON hotspot report from recorded trace events.
 scryrs record --stdin
 Ingest JSONL trace events from stdin.
 scryrs record --file <PATH>
