@@ -4,7 +4,7 @@ The task requires a deterministic read path over the SQLite trace datastore crea
 
 The `trace_events` table already has four indexes covering exactly the query dimensions this task requires: `idx_trace_events_subject` on `(subject_kind, subject)`, `idx_trace_events_event_type` on `(event_type)`, `idx_trace_events_session_ts` on `(session_id, timestamp)`, and `idx_trace_events_outcome_reason` on `(outcome, failure_reason)`. The `id` column is `INTEGER PRIMARY KEY AUTOINCREMENT`, providing the tie-breaker for deterministic timestamp ordering.
 
-The `rusqlite` crate version 0.31 with `bundled` feature is already a dependency, supporting `OpenFlags::SQLITE_OPEN_READ_ONLY` and `OpenFlags::SQLITE_OPEN_NO_CREATE` for guaranteed non-mutating opens.
+The `rusqlite` crate version 0.31 with `bundled` feature is already a dependency, supporting `OpenFlags::SQLITE_OPEN_READ_ONLY` for guaranteed non-mutating opens. Read-only mode implies no-create — the absence of `SQLITE_OPEN_CREATE` means the database file is never created if missing.
 
 ## Goals
 
@@ -31,7 +31,7 @@ Read logic lives in a new `crates/scryrs-core/src/query.rs` module with its own 
 
 ### D2. Open with read-only, no-create flags
 
-`TraceQuery::open()` uses `rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_NO_CREATE`. `READ_ONLY` prevents any write at the SQLite level; `NO_CREATE` prevents file creation if the path does not exist. This is a stronger guarantee than `READ_ONLY` alone and eliminates the TOCTOU risk of separate `Path::exists()` / `open()` calls (acceptable for a non-concurrent local CLI use case).
+`TraceQuery::open()` uses `rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY` alone (without `SQLITE_OPEN_CREATE`). `READ_ONLY` prevents any write at the SQLite level; the absence of `CREATE` prevents file creation if the path does not exist. This is a stronger guarantee than `READ_WRITE` and eliminates the TOCTOU risk of separate `Path::exists()` / `open()` calls (acceptable for a non-concurrent local CLI use case).
 
 ### D3. Schema validation via read-only SELECT
 
@@ -65,7 +65,7 @@ The `scryrs hotspots <PATH>` command continues to return the placeholder envelop
 
 - **Read-only open of WAL-mode database**: SQLite handles this correctly (readers see WAL pages transparently), but the interaction must be explicitly tested with a database written by the existing `EventStore` write path, verifying all rows are visible and no schema/data loss occurs.
 - **Per-row `event_json` deserialization failure**: stored JSON could theoretically corrupt. Each row should fail the entire query if deserialization fails (fail-fast), since all rows are produced by the validated write path.
-- **TOCTOU between check and open**: acceptable for a non-concurrent local CLI tool. The `NO_CREATE` flag provides an atomic open-or-fail, and the read-only flag prevents any write. Document as an explicit limitation.
+- **TOCTOU between check and open**: acceptable for a non-concurrent local CLI tool. Using `SQLITE_OPEN_READ_ONLY` without `SQLITE_OPEN_CREATE` provides an atomic open-or-fail, and the read-only flag prevents any write. Document as an explicit limitation.
 - **Schema migration in future versions**: if `DATASTORE_SCHEMA_VERSION` is bumped, `TraceQuery` will reject existing stores with `QueryError::UnsupportedStore`. A future migration task must handle this.
 
 ## Traceability
@@ -80,6 +80,6 @@ The `scryrs hotspots <PATH>` command continues to return the placeholder envelop
 
 - **Type name**: resolved as `TraceQuery` (architect's recommendation) in a new `query.rs` module, rather than `StoreReader` (lead-dev's recommendation) in `store.rs`. The name `TraceQuery` better conveys the purpose (querying traces, not reading a store), and a separate module avoids bloating `store.rs` and prevents accidental coupling with write-path internals.
 - **Error modeling**: resolved as a single `QueryError` enum (architect's approach) rather than separate `OpenResult` + `ReadError` enums (lead-dev's approach). A single enum eliminates type proliferation while still giving callers distinct branches for `MissingStore`, `EmptyStore`, `UnsupportedStore`, and `StorageError`.
-- **Open flags**: resolved as `SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_NO_CREATE` (lead-dev + reviewer's stronger guarantee) rather than `READ_ONLY` alone (architect). `NO_CREATE` provides an atomic open-or-fail without relying on a separate `Path::exists()` pre-check.
+- **Open flags**: resolved as `SQLITE_OPEN_READ_ONLY` alone (lead-dev + reviewer's preference) rather than relying on an additional `NO_CREATE` flag. `READ_ONLY` mode in SQLite (without `SQLITE_OPEN_CREATE`) inherently provides open-or-fail semantics without the need for a separate path existence pre-check.
 - **Query method surface**: includes `query_by_event_type` (lead-dev's suggestion) alongside the architect's `query_by_subject_kind` and `query_failures`, since the `idx_trace_events_event_type` index already exists and the method costs little to add.
 - **`EmptyStore` return point**: returned from query methods (e.g., `iter_events_ordered` returns `Err(QueryError::EmptyStore)` when `trace_events` has zero rows), not from `open`. This follows the lead-dev's model where the open succeeds but queries report emptiness. The architect's design placed it alongside `MissingStore` at open time; placing it at query time is more natural since the store is valid and openable — it just has no data.

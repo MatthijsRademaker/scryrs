@@ -4,13 +4,13 @@
 
 ### Requirement: TraceQuery opens an existing scryrs datastore without mutation
 
-The system SHALL expose `TraceQuery::open(repo_root)` in `scryrs-core` that resolves `<repo_root>/.scryrs/scryrs.db` via path join without upward-walking heuristics. The open operation SHALL use `rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_NO_CREATE` to guarantee the database is never created, never written to, and never has WAL mode or journal pragma applied. Schema validation SHALL be performed through read-only SQL `SELECT` queries without executing any DDL (`CREATE`, `ALTER`, `INSERT`, `PRAGMA journal_mode`).
+The system SHALL expose `TraceQuery::open(repo_root)` in `scryrs-core` that resolves `<repo_root>/.scryrs/scryrs.db` via path join without upward-walking heuristics. The open operation SHALL use `rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY` (without `SQLITE_OPEN_CREATE`) to guarantee the database is never created, never written to, and never has WAL mode or journal pragma applied. Read-only mode in SQLite implies no-create: the open fails rather than creating the file. Schema validation SHALL be performed through read-only SQL `SELECT` queries without executing any DDL (`CREATE`, `ALTER`, `INSERT`, `PRAGMA journal_mode`).
 
 #### Scenario: Existing valid store is opened successfully
 
 - **GIVEN** `.scryrs/scryrs.db` exists at `<repo_root>/.scryrs/scryrs.db` with `schema_meta.datastore_schema_version = 1` and a valid `trace_events` table
 - **WHEN** `TraceQuery::open(repo_root)` is called
-- **THEN** the database is opened read-only via `OpenFlags::SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_NO_CREATE`
+- **THEN** the database is opened read-only via `OpenFlags::SQLITE_OPEN_READ_ONLY` (without `SQLITE_OPEN_CREATE`)
 - **AND** the schema version is validated via `SELECT value FROM schema_meta WHERE key = 'datastore_schema_version'`
 - **AND** no directories are created
 - **AND** no `PRAGMA journal_mode=WAL` is executed

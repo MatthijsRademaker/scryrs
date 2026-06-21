@@ -15,9 +15,10 @@
 //!
 //! # No mutation guarantee
 //!
-//! `TraceQuery::open` uses `SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_NO_CREATE` and
-//! performs only read-only `SELECT` queries. It never creates directories,
-//! executes DDL, or applies `PRAGMA journal_mode`.
+//! `TraceQuery::open` uses `SQLITE_OPEN_READ_ONLY` (without
+//! `SQLITE_OPEN_CREATE`) — the database file is never created,
+//! and the connection is guaranteed read-only. No directories are
+//! created, no DDL is executed, and `PRAGMA journal_mode` is never applied.
 
 use std::path::Path;
 
@@ -25,6 +26,22 @@ use rusqlite::{Connection, OpenFlags, params};
 use scryrs_types::TraceEvent;
 
 use crate::store::DATASTORE_SCHEMA_VERSION;
+
+// ---------------------------------------------------------------------------
+// Query constants
+// ---------------------------------------------------------------------------
+
+const SQL_SELECT_ALL_ORDERED: &str =
+    "SELECT event_json FROM trace_events ORDER BY timestamp ASC, id ASC";
+
+const SQL_SELECT_BY_SUBJECT_KIND: &str =
+    "SELECT event_json FROM trace_events WHERE subject_kind = ?1 ORDER BY timestamp ASC, id ASC";
+
+const SQL_SELECT_BY_EVENT_TYPE: &str =
+    "SELECT event_json FROM trace_events WHERE event_type = ?1 ORDER BY timestamp ASC, id ASC";
+
+const SQL_SELECT_FAILURES: &str =
+    "SELECT event_json FROM trace_events WHERE outcome = 'Failure' ORDER BY timestamp ASC, id ASC";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -80,10 +97,14 @@ pub struct TraceQuery {
 impl TraceQuery {
     /// Open a read-only connection to `<repo_root>/.scryrs/scryrs.db`.
     ///
-    /// Uses `SQLITE_OPEN_READ_ONLY` (without `SQLITE_OPEN_CREATE`) — the file
-    /// is never created, never written to, and WAL/journal PRAGMAs are never
-    /// applied.
-    /// Schema version is validated via a read-only `SELECT` from `schema_meta`.
+    /// Uses `SQLITE_OPEN_READ_ONLY` (without `SQLITE_OPEN_CREATE`) — the
+    /// database file is never created, never written to, and WAL/journal
+    /// PRAGMAs are never applied. Read-only mode implies no-create: if the
+    /// file does not exist the open fails rather than creating it.
+    ///
+    /// Schema version is validated via read-only `SELECT` from `schema_meta`,
+    /// and the `trace_events` table is verified to exist before the handle is
+    /// returned.
     pub fn open(repo_root: impl AsRef<Path>) -> Result<Self, QueryError> {
         let db_path = repo_root.as_ref().join(".scryrs/scryrs.db");
 
@@ -116,16 +137,40 @@ impl TraceQuery {
                 ));
             }
             Err(e) => {
-                // Distinguish "not a database" from missing tables.
+                // Classify the error: a missing schema_meta table means
+                // this isn't a scryrs datastore at all, not just an
+                // unsupported version.
+                let msg = e.to_string();
+                let is_missing_table = msg.contains("no such table");
                 if let rusqlite::Error::SqliteFailure(ref ffi_err, _) = e {
                     if ffi_err.code == rusqlite::ffi::ErrorCode::NotADatabase {
                         return Err(QueryError::StorageError(e));
                     }
                 }
+                if is_missing_table {
+                    return Err(QueryError::UnsupportedStore(format!(
+                        "not a scryrs datastore: required table not found ({e})"
+                    )));
+                }
                 return Err(QueryError::UnsupportedStore(format!(
                     "schema_meta query failed: {e}"
                 )));
             }
+        }
+
+        // Verify the trace_events table exists.
+        let table_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master \
+                 WHERE type = 'table' AND name = 'trace_events'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(QueryError::StorageError)?;
+        if !table_exists {
+            return Err(QueryError::UnsupportedStore(
+                "trace_events table not found in datastore".into(),
+            ));
         }
 
         Ok(Self { conn })
@@ -135,8 +180,7 @@ impl TraceQuery {
     ///
     /// Returns `QueryError::EmptyStore` when `trace_events` has zero rows.
     pub fn iter_events_ordered(&self) -> Result<Vec<TraceEvent>, QueryError> {
-        let sql = "SELECT event_json FROM trace_events ORDER BY timestamp ASC, id ASC";
-        self.query_events(sql, [])
+        self.query_events(SQL_SELECT_ALL_ORDERED, [])
     }
 
     /// Return events where `subject_kind` matches the given kind.
@@ -144,10 +188,7 @@ impl TraceQuery {
     /// Uses the existing `idx_trace_events_subject` index. Returns
     /// `QueryError::EmptyStore` when no matching events exist.
     pub fn query_by_subject_kind(&self, kind: &str) -> Result<Vec<TraceEvent>, QueryError> {
-        let sql = "SELECT event_json FROM trace_events \
-                   WHERE subject_kind = ?1 \
-                   ORDER BY timestamp ASC, id ASC";
-        self.query_events(sql, params![kind])
+        self.query_events(SQL_SELECT_BY_SUBJECT_KIND, params![kind])
     }
 
     /// Return events where `event_type` matches the given type string.
@@ -155,10 +196,7 @@ impl TraceQuery {
     /// Uses the existing `idx_trace_events_event_type` index. Returns
     /// `QueryError::EmptyStore` when no matching events exist.
     pub fn query_by_event_type(&self, event_type: &str) -> Result<Vec<TraceEvent>, QueryError> {
-        let sql = "SELECT event_json FROM trace_events \
-                   WHERE event_type = ?1 \
-                   ORDER BY timestamp ASC, id ASC";
-        self.query_events(sql, params![event_type])
+        self.query_events(SQL_SELECT_BY_EVENT_TYPE, params![event_type])
     }
 
     /// Return events where `outcome = 'Failure'`.
@@ -166,10 +204,7 @@ impl TraceQuery {
     /// Uses the existing `idx_trace_events_outcome_reason` index. Returns
     /// `QueryError::EmptyStore` when no failure events exist.
     pub fn query_failures(&self) -> Result<Vec<TraceEvent>, QueryError> {
-        let sql = "SELECT event_json FROM trace_events \
-                   WHERE outcome = 'Failure' \
-                   ORDER BY timestamp ASC, id ASC";
-        self.query_events(sql, [])
+        self.query_events(SQL_SELECT_FAILURES, [])
     }
 
     // --- private helpers ---
@@ -818,5 +853,124 @@ mod tests {
         );
         let msg = e.to_string();
         assert!(msg.contains("storage error"), "StorageError display: {msg}");
+    }
+
+    // ------------------------------------------------------------------
+    // 5.x: Missing trace_events table at open returns UnsupportedStore
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn missing_trace_events_table_returns_unsupported_store() {
+        let dir = temp_dir();
+        let db_path = mk_scryrs_db_at(&dir);
+
+        // Create a valid database with schema_meta but drop trace_events.
+        {
+            let _store = EventStore::open(&db_path).unwrap_or_else(|e| panic!("create store: {e}"));
+        }
+        {
+            let conn = rusqlite::Connection::open(&db_path).unwrap_or_else(|e| panic!("open: {e}"));
+            conn.execute_batch("DROP TABLE trace_events;")
+                .unwrap_or_else(|e| panic!("drop table: {e}"));
+        }
+
+        let result = TraceQuery::open(dir.path());
+        match result {
+            Err(QueryError::UnsupportedStore(msg)) => {
+                assert!(
+                    msg.contains("trace_events"),
+                    "message must mention trace_events, got: {msg}"
+                );
+                assert!(
+                    msg.contains("not found"),
+                    "message must mention not found, got: {msg}"
+                );
+            }
+            other => panic!("expected UnsupportedStore, got: {other:?}"),
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 5.x: Missing schema_meta table returns clear UnsupportedStore
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn missing_schema_meta_table_returns_clear_unsupported_store() {
+        let dir = temp_dir();
+        let db_path = mk_scryrs_db_at(&dir);
+
+        // Create a blank SQLite database with no scryrs tables.
+        {
+            let conn = rusqlite::Connection::open(&db_path).unwrap_or_else(|e| panic!("open: {e}"));
+            conn.execute_batch("CREATE TABLE unrelated (id INTEGER PRIMARY KEY);")
+                .unwrap_or_else(|e| panic!("create unrelated: {e}"));
+        }
+
+        let result = TraceQuery::open(dir.path());
+        match result {
+            Err(QueryError::UnsupportedStore(msg)) => {
+                assert!(
+                    msg.contains("not a scryrs datastore"),
+                    "message must clearly state this is not a scryrs datastore, got: {msg}"
+                );
+                assert!(
+                    msg.contains("no such table"),
+                    "message must mention the missing table, got: {msg}"
+                );
+            }
+            other => panic!("expected UnsupportedStore, got: {other:?}"),
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 5.x: Integration — full EventStore write → TraceQuery read cycle
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn integration_write_eventstore_read_tracequery_round_trip() {
+        let dir = temp_dir();
+
+        // Phase 1: Write events through EventStore.
+        let events = vec![
+            make_file_opened("s-int", "src/main.rs", "2026-06-21T10:00:00Z"),
+            make_file_opened("s-int", "src/lib.rs", "2026-06-21T10:00:01Z"),
+            make_search_run("s-int", "routing", "2026-06-21T10:00:02Z"),
+            make_command_executed("s-int", "cargo test", "2026-06-21T10:00:03Z"),
+            make_doc_retrieved("s-int", "api.md", "2026-06-21T10:00:04Z"),
+        ];
+        populate_store(&dir, &events);
+
+        // Phase 2: Read all events through TraceQuery.
+        let query = TraceQuery::open(dir.path()).unwrap_or_else(|e| panic!("open: {e}"));
+
+        let all = query
+            .iter_events_ordered()
+            .unwrap_or_else(|e| panic!("iter: {e}"));
+        assert_eq!(all.len(), 5, "all 5 events must be visible");
+
+        // Phase 3: Verify deterministic order.
+        let subjects: Vec<&str> = all.iter().filter_map(|e| e.subject()).collect();
+        assert_eq!(
+            subjects,
+            vec![
+                "src/main.rs",
+                "src/lib.rs",
+                "routing",
+                "cargo test",
+                "api.md"
+            ]
+        );
+
+        // Phase 4: Filter by subject kind.
+        let files = query
+            .query_by_subject_kind("file")
+            .unwrap_or_else(|e| panic!("file: {e}"));
+        assert_eq!(files.len(), 2);
+
+        let commands = query
+            .query_by_subject_kind("command")
+            .unwrap_or_else(|e| panic!("command: {e}"));
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].subject(), Some("cargo test"));
     }
 }
