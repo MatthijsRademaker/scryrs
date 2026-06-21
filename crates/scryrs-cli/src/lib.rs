@@ -303,7 +303,7 @@ OPTIONS\n\
 EXIT CODES\n\
   0    Success (hotspots: JSON written; record: all events accepted)\n\
   1    Hotspots: I/O error writing output. Record: rejected events or I/O error\n\
-  2    Usage error (invalid arguments); record: also fatal I/O error (unreadable file)",
+  2    Usage error (invalid arguments); record: also fatal I/O error (unreadable file or store failure)",
         SCHEMA_VERSION, SCHEMA_VERSION
     )
 }
@@ -420,6 +420,18 @@ fn execute_record<R: Read>(
         }
     };
 
+    if let Err(e) = store.begin_transaction() {
+        if writeln!(
+            err,
+            "scryrs record: cannot begin datastore transaction: {e}"
+        )
+        .is_err()
+        {
+            return 1;
+        }
+        return 2;
+    }
+
     for event in &outcome.accepted {
         if let Err(e) = store.append(event) {
             if writeln!(err, "scryrs record: cannot persist event: {e}").is_err() {
@@ -427,6 +439,18 @@ fn execute_record<R: Read>(
             }
             return 2;
         }
+    }
+
+    if let Err(e) = store.commit_transaction() {
+        if writeln!(
+            err,
+            "scryrs record: cannot commit datastore transaction: {e}"
+        )
+        .is_err()
+        {
+            return 1;
+        }
+        return 2;
     }
 
     let accepted = outcome.accepted.len();
@@ -1349,6 +1373,209 @@ mod record_tests {
             .filter(|p| !p.is_empty())
             .unwrap_or_else(|| super::CANONICAL_STORE_PATH.into());
         assert_eq!(fallback, super::CANONICAL_STORE_PATH);
+    }
+
+    // --- 2.1: --stdin SQLite row-level verification ---
+
+    #[test]
+    fn record_stdin_persists_rows_to_sqlite() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        let store_path = dir.path().join("test.db");
+        super::store_override::set(
+            store_path
+                .to_str()
+                .unwrap_or_else(|| panic!("store path not valid UTF-8"))
+                .to_string(),
+        );
+
+        let input = format!(
+            "{}\n{}\n",
+            make_valid_event_json("s1", "doc/a.md"),
+            make_valid_event_json("s2", "doc/b.md"),
+        );
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes()),
+            0
+        );
+        assert!(
+            err.is_empty(),
+            "stderr must be empty: {:?}",
+            String::from_utf8_lossy(&err)
+        );
+
+        // Re-open the SQLite store and assert rows.
+        let conn =
+            rusqlite::Connection::open(&store_path).unwrap_or_else(|e| panic!("reopen db: {e}"));
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM trace_events", [], |row| row.get(0))
+            .unwrap_or_else(|e| panic!("count query: {e}"));
+        assert_eq!(count, 2, "two events must be persisted");
+
+        // Verify session_ids are correct.
+        let mut stmt = conn
+            .prepare("SELECT session_id FROM trace_events ORDER BY rowid")
+            .unwrap_or_else(|e| panic!("prepare: {e}"));
+        let sessions: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .unwrap_or_else(|e| panic!("query_map: {e}"))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap_or_else(|e| panic!("collect: {e}"));
+        assert_eq!(sessions, vec!["s1", "s2"]);
+    }
+
+    // --- 2.2: --file SQLite row-level verification ---
+
+    #[test]
+    fn record_file_persists_rows_to_sqlite() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        let store_path = dir.path().join("test.db");
+        super::store_override::set(
+            store_path
+                .to_str()
+                .unwrap_or_else(|| panic!("store path not valid UTF-8"))
+                .to_string(),
+        );
+
+        let input_dir = tempfile::tempdir().unwrap_or_else(|e| panic!("input dir: {e}"));
+        let file_path = input_dir.path().join("events.jsonl");
+        let content = format!(
+            "{}\n{}\n",
+            make_valid_event_json("s1", "doc/x.md"),
+            make_valid_event_json("s2", "doc/y.md"),
+        );
+        std::fs::write(&file_path, content).unwrap_or_else(|e| panic!("write: {e}"));
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let stdin = &[] as &[u8];
+
+        assert_eq!(
+            run_with_io(
+                ["record", "--file", &file_path.display().to_string()],
+                &mut out,
+                &mut err,
+                stdin,
+            ),
+            0
+        );
+        assert!(
+            err.is_empty(),
+            "stderr must be empty: {:?}",
+            String::from_utf8_lossy(&err)
+        );
+
+        // Re-open the same canonical store and assert rows.
+        let conn =
+            rusqlite::Connection::open(&store_path).unwrap_or_else(|e| panic!("reopen db: {e}"));
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM trace_events", [], |row| row.get(0))
+            .unwrap_or_else(|e| panic!("count query: {e}"));
+        assert_eq!(count, 2, "two events must be persisted from file");
+
+        let mut stmt = conn
+            .prepare("SELECT session_id FROM trace_events ORDER BY rowid")
+            .unwrap_or_else(|e| panic!("prepare: {e}"));
+        let sessions: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .unwrap_or_else(|e| panic!("query_map: {e}"))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap_or_else(|e| panic!("collect: {e}"));
+        assert_eq!(sessions, vec!["s1", "s2"]);
+    }
+
+    // --- 2.3: Mixed valid/invalid — rejected lines never create rows ---
+
+    #[test]
+    fn mixed_valid_invalid_rejected_lines_no_rows() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        let store_path = dir.path().join("test.db");
+        super::store_override::set(
+            store_path
+                .to_str()
+                .unwrap_or_else(|| panic!("store path not valid UTF-8"))
+                .to_string(),
+        );
+
+        let input = format!(
+            "{}\nnot valid json\n{}\n",
+            make_valid_event_json("s1", "doc/a.md"),
+            make_valid_event_json("s2", "doc/b.md"),
+        );
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes()),
+            1
+        );
+
+        let stdout = String::from_utf8_lossy(&out);
+        assert!(stdout.contains("\"accepted\":2"));
+        assert!(stdout.contains("\"rejected\":1"));
+
+        // Rejected line must produce a diagnostic on stderr.
+        let stderr = String::from_utf8_lossy(&err);
+        assert!(stderr.contains("\"line\":2"), "must diagnose line 2");
+
+        // Open SQLite — only 2 accepted rows must exist.
+        let conn =
+            rusqlite::Connection::open(&store_path).unwrap_or_else(|e| panic!("reopen db: {e}"));
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM trace_events", [], |row| row.get(0))
+            .unwrap_or_else(|e| panic!("count query: {e}"));
+        assert_eq!(count, 2, "only accepted events must be persisted");
+
+        // No .scryrs/events.jsonl was written as canonical output.
+        assert!(
+            !dir.path().join(".scryrs/events.jsonl").exists(),
+            ".scryrs/events.jsonl must not be created"
+        );
+    }
+
+    // --- 2.4: Fatal datastore failure ---
+
+    #[test]
+    fn record_fatal_store_failure_exits_2() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        // Create ".scryrs" as a regular FILE (not a directory) so that
+        // EventStore::open cannot create scryrs.db inside it — simulating
+        // a fatal filesystem-level failure.
+        std::fs::write(dir.path().join(".scryrs"), "blocked")
+            .unwrap_or_else(|e| panic!("write blocker: {e}"));
+        let store_path = dir.path().join(".scryrs/scryrs.db");
+        super::store_override::set(
+            store_path
+                .to_str()
+                .unwrap_or_else(|| panic!("store path not valid UTF-8"))
+                .to_string(),
+        );
+
+        let input = make_valid_event_json("s1", "doc/x.md");
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes()),
+            2,
+            "fatal store failure must exit 2"
+        );
+
+        // No success summary on stdout.
+        let stdout = String::from_utf8_lossy(&out);
+        assert!(
+            !stdout.contains("\"accepted\""),
+            "stdout must not contain success summary, got: {stdout}"
+        );
+
+        // Deterministic stderr diagnostic.
+        let stderr = String::from_utf8_lossy(&err);
+        assert!(
+            stderr.contains("scryrs record: cannot open trace datastore"),
+            "stderr must report store failure, got: {stderr}"
+        );
     }
 }
 

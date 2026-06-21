@@ -118,6 +118,7 @@ fn outcome_str(event: &TraceEvent) -> &'static str {
 pub struct EventStore {
     conn: Connection,
     stored_count: u64,
+    in_transaction: bool,
 }
 
 impl std::fmt::Debug for EventStore {
@@ -125,6 +126,14 @@ impl std::fmt::Debug for EventStore {
         f.debug_struct("EventStore")
             .field("stored_count", &self.stored_count)
             .finish_non_exhaustive()
+    }
+}
+
+impl Drop for EventStore {
+    fn drop(&mut self) {
+        if self.in_transaction {
+            let _ = self.conn.execute_batch("ROLLBACK;");
+        }
     }
 }
 
@@ -141,6 +150,7 @@ impl EventStore {
         Ok(Self {
             conn,
             stored_count: 0,
+            in_transaction: false,
         })
     }
 
@@ -148,6 +158,30 @@ impl EventStore {
     /// the current working directory.
     pub fn default_local() -> Result<Self, rusqlite::Error> {
         Self::open(CANONICAL_STORE_PATH)
+    }
+
+    /// Begin an explicit SQLite transaction.
+    ///
+    /// After this call, subsequent `append` calls are batched within the
+    /// transaction. The caller must call `commit_transaction` (or drop the
+    /// store, which will roll back) to finalize.
+    pub fn begin_transaction(&mut self) -> Result<(), rusqlite::Error> {
+        self.conn.execute_batch("BEGIN TRANSACTION;")?;
+        self.in_transaction = true;
+        Ok(())
+    }
+
+    /// Commit the active transaction.
+    ///
+    /// If no transaction is active, this is a no-op. After commit, the
+    /// batch of accepted events is durable. The caller should only report
+    /// success after this succeeds.
+    pub fn commit_transaction(&mut self) -> Result<(), rusqlite::Error> {
+        if self.in_transaction {
+            self.conn.execute_batch("COMMIT;")?;
+            self.in_transaction = false;
+        }
+        Ok(())
     }
 
     /// Insert a single accepted event into the datastore.
@@ -615,6 +649,89 @@ mod tests {
                 "subject_kind for {event_type:?} must be None"
             );
         }
+    }
+
+    // --- Batch transaction ---
+
+    #[test]
+    fn batch_transaction_commits_all_or_nothing() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("scryrs.db");
+
+        {
+            let mut store = open_ok(&store_path);
+            store
+                .begin_transaction()
+                .unwrap_or_else(|e| panic!("begin: {e}"));
+            store
+                .append(&make_event("s1", "doc/a.md"))
+                .unwrap_or_else(|e| panic!("append 1: {e}"));
+            store
+                .append(&make_event("s2", "doc/b.md"))
+                .unwrap_or_else(|e| panic!("append 2: {e}"));
+            store
+                .commit_transaction()
+                .unwrap_or_else(|e| panic!("commit: {e}"));
+            assert_eq!(store.stored_count(), 2);
+        }
+
+        // Both rows must be visible after commit.
+        let conn = Connection::open(&store_path).unwrap_or_else(|e| panic!("reopen: {e}"));
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM trace_events", [], |row| row.get(0))
+            .unwrap_or_else(|e| panic!("count: {e}"));
+        assert_eq!(count, 2, "both rows must be persisted after commit");
+    }
+
+    #[test]
+    fn uncommitted_transaction_rolls_back_on_drop() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("scryrs.db");
+
+        {
+            let mut store = open_ok(&store_path);
+            store
+                .begin_transaction()
+                .unwrap_or_else(|e| panic!("begin: {e}"));
+            store
+                .append(&make_event("s1", "doc/a.md"))
+                .unwrap_or_else(|e| panic!("append: {e}"));
+            assert_eq!(store.stored_count(), 1);
+            // Drop without commit — transaction must roll back.
+        }
+
+        let conn = Connection::open(&store_path).unwrap_or_else(|e| panic!("reopen: {e}"));
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM trace_events", [], |row| row.get(0))
+            .unwrap_or_else(|e| panic!("count: {e}"));
+        assert_eq!(
+            count, 0,
+            "uncommitted rows must not be persisted after drop"
+        );
+    }
+
+    #[test]
+    fn commit_transaction_without_begin_is_noop() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("scryrs.db");
+
+        let mut store = open_ok(&store_path);
+        // commit without begin must not panic
+        store
+            .commit_transaction()
+            .unwrap_or_else(|e| panic!("commit noop: {e}"));
+
+        store
+            .append(&make_event("s1", "doc/a.md"))
+            .unwrap_or_else(|e| panic!("append: {e}"));
+        // autocommit still works after no-op commit
+        drop(store);
+
+        let conn = Connection::open(&store_path).unwrap_or_else(|e| panic!("reopen: {e}"));
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM trace_events", [], |row| row.get(0))
+            .unwrap_or_else(|e| panic!("count: {e}"));
+        assert_eq!(count, 1, "auto-committed row must be persisted");
     }
 
     // --- Unknown schema version fails fast ---

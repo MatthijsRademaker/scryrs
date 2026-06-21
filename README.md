@@ -182,7 +182,7 @@ OPTIONS
 EXIT CODES
   0    Success (hotspots: JSON written; record: all events accepted; init: hook installed)
   1    Hotspots: I/O error writing output. Record: rejected events or I/O error. Init: I/O error.
-  2    Usage error (invalid arguments); record: also fatal I/O error (unreadable file); init: unsupported harness, collision, or self-install refusal
+  2    Usage error (invalid arguments); record: also fatal I/O error (unreadable file or store failure); init: unsupported harness, collision, or self-install refusal
 ```
 
 **`--version`** prints the binary version:
@@ -218,7 +218,7 @@ The CLI follows a three-code exit convention with command-specific semantics:
 |-----------|-------------|
 | 0         | Success (hotspots: JSON written; record: all events accepted) |
 | 1         | Hotspots: I/O error. Record: rejected events or I/O error |
-| 2         | Usage error; record: also fatal I/O error |
+| 2         | Usage error; record: also fatal I/O error (unreadable file or store failure) |
 
 **Missing required argument** — exit 2:
 

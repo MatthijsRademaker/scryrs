@@ -53,4 +53,4 @@ OPTIONS
 EXIT CODES
 0    Success (hotspots: JSON written; record: all events accepted)
 1    Hotspots: I/O error writing output. Record: rejected events or I/O error
-2    Usage error (invalid arguments); record: also fatal I/O error (unreadable file)
+2    Usage error (invalid arguments); record: also fatal I/O error (unreadable file or store failure)
