@@ -60,45 +60,53 @@ Analyzes persisted trace events in `.scryrs/scryrs.db` and emits a deterministic
 
 ```json
 {
-  "schemaVersion": "1.0.0",
   "command": "hotspots",
-  "repositoryPath": "/absolute/path",
-  "storePath": "/absolute/path/.scryrs/scryrs.db",
-  "runMetadata": {
-    "firstEventId": "2026-06-20T12:00:00Z-000001",
-    "lastEventId": "2026-06-20T12:05:00Z-000042"
-  },
-  "generatedAt": "2026-06-20T12:05:01Z",
   "entries": [
     {
-      "rank": 1,
-      "subjectKind": "FileOpened",
-      "subject": "src/main.rs",
-      "score": 12,
       "counts": {
-        "FileOpened": 5,
-        "SearchRun": 2,
-        "SymbolInspected": 0,
-        "CommandExecuted": 0,
-        "DocRetrieved": 0,
-        "EditMade": 1,
-        "FailedLookup": 0
+        "eventType": {
+          "EditMade": 1,
+          "FileOpened": 5
+        },
+        "outcome": {
+          "failure": 1,
+          "success": 5
+        }
       },
-      "sessionCount": 3,
+      "evidence": {
+        "rowIds": [1, 2, 3, 7, 11, 15]
+      },
       "firstSeen": "2026-06-20T12:00:05Z",
       "lastSeen": "2026-06-20T12:04:55Z",
-      "evidence": []
+      "rank": 1,
+      "score": 10,
+      "sessionCount": 3,
+      "subject": "src/main.rs",
+      "subjectKind": "file"
     }
-  ]
+  ],
+  "generatedAt": "2026-06-20T12:05:01Z",
+  "repositoryPath": "/absolute/path/to/repo",
+  "runMetadata": {
+    "analyzedEventCount": 42,
+    "analyzedSubjectCount": 12,
+    "firstEventId": 1,
+    "lastEventId": 42,
+    "storeSchemaVersion": 1
+  },
+  "schemaVersion": "1.0.0",
+  "storePath": "/absolute/path/to/repo/.scryrs/scryrs.db"
 }
 ```
 
 - `schemaVersion` is `"1.0.0"` — independent of the `record` envelope `schemaVersion`.
 - `command` is always `"hotspots"`.
 - `repositoryPath` and `storePath` are absolute paths.
-- `runMetadata.firstEventId` / `runMetadata.lastEventId` are the earliest/latest event IDs in the store, or `null` when the store is empty.
+- `runMetadata` carries `storeSchemaVersion` (SQLite user version, integer), `analyzedEventCount` (total subject-bearing events analyzed, integer), `analyzedSubjectCount` (distinct subjects, integer), `firstEventId` (earliest event row ID, integer), and `lastEventId` (latest event row ID, integer). All are `0` when the store is empty.
 - `entries` is sorted by score descending with a deterministic six-key tie-break: `score DESC, sessionCount DESC, lastSeen DESC, subjectKind ASC, subject ASC, firstEventId ASC`.
-- `evidence` is a timestamp-ordered list of root-cause event snapshots for the subject.
+- Each entry's `counts` contains two sub-objects: `eventType` maps each trace event type name to its per-subject occurrence count, and `outcome` maps `success`/`failure` to per-subject outcome counts. Only non-zero counts are included.
+- Each entry's `evidence.rowIds` is an ordered list of SQLite row IDs identifying the trace events that contributed to this hotspot entry.
+- `subjectKind` uses short category tags: `file`, `search`, `symbol`, `command`, or `document`.
 
 **Scoring dimensions:**
 
