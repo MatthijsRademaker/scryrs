@@ -74,6 +74,14 @@ PI_EXIT=0
 # which also uses glibc. Alpine-based node images use musl and won't run the binary.
 FIXTURE_NODE_IMAGE="${FIXTURE_NODE_IMAGE:-node:22}"
 
+# Pre-install better-sqlite3 in the workspace so both fixtures can import it.
+step "Installing better-sqlite3 for fixture use"
+run_node --image "$FIXTURE_NODE_IMAGE" \
+    -w /workspace \
+    -- \
+    npm install better-sqlite3 \
+    || { echo "ERROR: failed to install better-sqlite3" >&2; exit 1; }
+
 # ---------------------------------------------------------------------------
 # 2. Claude Code fixture
 # ---------------------------------------------------------------------------

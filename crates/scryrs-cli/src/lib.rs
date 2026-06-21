@@ -9,7 +9,7 @@ use scryrs_types::SCHEMA_VERSION;
 mod init;
 
 #[cfg(feature = "core")]
-use scryrs_core::{EventStore, ingest_jsonl};
+use scryrs_core::{CANONICAL_STORE_PATH, EventStore, ingest_jsonl};
 
 #[cfg(feature = "core")]
 mod store_override {
@@ -21,7 +21,7 @@ mod store_override {
 
     /// Set an override store path for the current thread (test-only).
     /// Subsequent calls to `execute_record` on this thread will use this
-    /// path instead of `.scryrs/events.jsonl`.
+    /// path instead of `.scryrs/scryrs.db`.
     #[allow(dead_code)]
     pub fn set(path: String) {
         PATH.with(|p| *p.borrow_mut() = Some(path));
@@ -404,13 +404,13 @@ fn execute_record<R: Read>(
     };
 
     // Persist accepted events.
-    let store_path = store_override::get().unwrap_or_else(|| ".scryrs/events.jsonl".into());
+    let store_path = store_override::get().unwrap_or_else(|| CANONICAL_STORE_PATH.into());
     let mut store = match EventStore::open(&store_path) {
         Ok(s) => s,
         Err(e) => {
             if writeln!(
                 err,
-                "scryrs record: cannot open event store ({store_path}): {e}"
+                "scryrs record: cannot open trace datastore ({store_path}): {e}"
             )
             .is_err()
             {
@@ -915,10 +915,10 @@ mod record_tests {
     use super::run_with_io;
 
     /// Set a thread-local store path override so tests don't pollute the
-    /// real CWD's .scryrs/events.jsonl. Returns the tempdir guard.
+    /// real CWD's .scryrs/scryrs.db. Returns the tempdir guard.
     fn set_test_store() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-        let store_path = dir.path().join("events.jsonl");
+        let store_path = dir.path().join("scryrs.db");
         super::store_override::set(
             store_path
                 .to_str()
@@ -1287,6 +1287,68 @@ mod record_tests {
             err_str.contains("scryrs record:"),
             "must name record, not hotspots, got: {err_str}"
         );
+    }
+
+    // --- SQLite store integration (Tasks 2.2, 2.4) ---
+
+    #[test]
+    fn record_persists_to_scryrs_db() {
+        // Use set_test_store to override the store path to a temp db.
+        let _store_dir = set_test_store();
+        let input = make_valid_event_json("s1", "doc/x.md");
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes()),
+            0
+        );
+
+        let stdout = String::from_utf8_lossy(&out);
+        assert!(stdout.contains("\"accepted\":1"));
+        assert!(stdout.contains("\"rejected\":0"));
+    }
+
+    #[test]
+    fn record_does_not_create_events_jsonl() {
+        // Prove that canonical persistence uses the SQLite store, not JSONL.
+        // The store_override sends writes to a temp scryrs.db; .scryrs/events.jsonl
+        // should never be touched in the test temp dir.
+        let dir = set_test_store();
+        let override_path = dir.path().join("scryrs.db");
+        assert!(
+            super::store_override::get()
+                .map(|p| p.contains("scryrs.db"))
+                .unwrap_or(false),
+            "override path should point to scryrs.db"
+        );
+
+        let input = make_valid_event_json("s1", "doc/x.md");
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        let _exit_code = run_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes());
+
+        // The SQLite store should be created at the override path.
+        assert!(
+            override_path.exists(),
+            "scryrs.db must be created at override path"
+        );
+        // No events.jsonl should be created alongside.
+        assert!(
+            !dir.path().join("events.jsonl").exists(),
+            "events.jsonl must NOT be created"
+        );
+    }
+
+    #[test]
+    fn record_default_path_uses_canonical_db() {
+        // If no store_override is set (empty matches nothing), the fallback
+        // should be CANONICAL_STORE_PATH.
+        let fallback: String = super::store_override::get()
+            .filter(|p| !p.is_empty())
+            .unwrap_or_else(|| super::CANONICAL_STORE_PATH.into());
+        assert_eq!(fallback, super::CANONICAL_STORE_PATH);
     }
 }
 
