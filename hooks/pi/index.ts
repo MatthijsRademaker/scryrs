@@ -10,7 +10,23 @@
  * agent-visible tool results, and fails open when scryrs is unavailable.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+// Local type stub — satisfied by @earendil-works/pi-coding-agent at Pi runtime.
+// Uses explicit `any` for callback parameters whose full shape is defined by
+// Pi's type system (see Pi documentation for event-specific payloads).
+interface ExtensionAPI {
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	on(event: string, handler: (...args: any[]) => void | Promise<void>): void;
+	exec(
+		command: string,
+		args: string[],
+		options?: Record<string, unknown>,
+	): Promise<{
+		stdout: string;
+		stderr: string;
+		code: number | null;
+		killed: boolean;
+	}>;
+}
 
 // — session-scoped identifier, generated once on extension load —
 const SESSION_ID: string = crypto.randomUUID();
@@ -86,7 +102,7 @@ async function recordEvent(
 
 export default function (pi: ExtensionAPI) {
 	// SessionStart — emitted once per loaded session.
-	pi.on("session_start", (_event, _ctx) => {
+	pi.on("session_start", (_event: unknown, _ctx: unknown) => {
 		const envelope: TraceEventEnvelope = {
 			schema_version: SCHEMA_VERSION,
 			timestamp: new Date().toISOString(),
@@ -101,7 +117,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// tool_result — post-execution observer for the six tracked tools.
-	pi.on("tool_result", async (event) => {
+	pi.on("tool_result", async (event: any) => {
 		const toolName: string = event.toolName;
 
 		if (!TRACKED_TOOLS.has(toolName)) {

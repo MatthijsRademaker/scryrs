@@ -48,12 +48,7 @@ const HARNESS_REGISTRY: &[HarnessEntry] = &[
             "         \"PreToolUse\": [\n",
             "           {\n",
             "             \"matcher\": \"\",\n",
-            "             \"hooks\": [\n",
-            "               {\n",
-            "                 \"type\": \"command\",\n",
-            "                 \"command\": \"node .claude/hooks/scryrs-hook.mjs\"\n",
-            "               }\n",
-            "             ]\n",
+            "             \"hook\": \"node .claude/hooks/scryrs-hook.mjs\"\n",
             "           }\n",
             "         ]\n",
             "       }\n",
@@ -150,7 +145,7 @@ pub fn execute_init(out: &mut impl Write, err: &mut impl Write, agent_name: &str
             let _ = writeln!(err, r#"Insert into .claude/settings.json under "hooks": "#,);
             let _ = writeln!(
                 err,
-                r#"  "PreToolUse": [{{"matcher": "", "hooks": [{{"type": "command", "command": "node .claude/hooks/scryrs-hook.mjs"}}]}}]"#,
+                r#"  "PreToolUse": [{{"matcher": "", "hook": "node .claude/hooks/scryrs-hook.mjs"}}]"#,
             );
             return 2;
         }

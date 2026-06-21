@@ -9,6 +9,12 @@
  * were created. Distinguishes "structurally correct but semantically broken"
  * hooks from hooks that actually work end-to-end.
  *
+ * Pi version assumption: The single-file index.ts sufficiency has been
+ * verified against Pi versions that expect a single index.ts extension file
+ * without additional manifest, package.json, or tsconfig artifacts. If Pi
+ * extends its extension contract to require additional consumer artifacts,
+ * this test must be updated.
+ *
  * Prerequisites:
  *   - Real `scryrs` binary on PATH (built via `cargo build --release`)
  *   - Working directory is the repository root
