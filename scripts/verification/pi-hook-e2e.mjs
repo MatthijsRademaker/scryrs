@@ -28,6 +28,31 @@ const ROOT = join(__dirname, "..", "..");
 const HOOK_SOURCE = join(ROOT, "hooks", "pi", "index.ts");
 
 // -----------------------------------------------------------------------
+// Wait-for-events helper — polls events.jsonl until expected count or timeout
+// -----------------------------------------------------------------------
+function waitForEventCount(jsonlPath, expectedCount, timeoutMs = 5000) {
+	const start = Date.now();
+	while (Date.now() - start < timeoutMs) {
+		if (existsSync(jsonlPath)) {
+			const events = readJsonl(jsonlPath);
+			if (events.length >= expectedCount) {
+				return events;
+			}
+		}
+		// Busy-wait 200ms between polls
+		const waitUntil = Date.now() + 200;
+		while (Date.now() < waitUntil) {
+			/* spin */
+		}
+	}
+	// Last attempt
+	if (existsSync(jsonlPath)) {
+		return readJsonl(jsonlPath);
+	}
+	return [];
+}
+
+// -----------------------------------------------------------------------
 // Temp directory helpers
 // -----------------------------------------------------------------------
 function tempDir() {
@@ -50,6 +75,12 @@ function createHookRunner(dir, scryrsPath) {
 			stdio: "ignore",
 		});
 	} catch {}
+
+	const scryrsDir = dirname(scryrsPath);
+	const subprocessEnv = {
+		...process.env,
+		PATH: `${scryrsDir}:${process.env.PATH || ""}`,
+	};
 
 	return {
 		/**
@@ -111,14 +142,14 @@ import(${JSON.stringify(HOOK_SOURCE)}).then((mod) => {
     if (result && typeof result.then === "function") {
       result.then(() => {
         // Give scryrs a moment to flush
-        setTimeout(() => process.exit(0), 500);
+        setTimeout(() => process.exit(0), 2000);
       }).catch((err) => {
         console.error("HOOK_ERROR:", err.message);
         process.exit(1);
       });
     } else {
       // Handler returned void — give scryrs time then exit
-      setTimeout(() => process.exit(0), 500);
+      setTimeout(() => process.exit(0), 2000);
     }
   } else {
     process.exit(0);
@@ -133,6 +164,7 @@ import(${JSON.stringify(HOOK_SOURCE)}).then((mod) => {
 			const npx = join(dir, "node_modules", ".bin", "tsx");
 			try {
 				const stdout = execFileSync(npx, [scriptFile], {
+					env: subprocessEnv,
 					cwd: dir,
 					timeout: 15000,
 					encoding: "utf-8",
@@ -208,7 +240,7 @@ import(${JSON.stringify(HOOK_SOURCE)}).then((mod) => {
     console.log("RESULT:" + JSON.stringify(result));
     console.log("PRESNAPSHOT:" + preSnapshot);
     console.log("POSTSNAPSHOT:" + JSON.stringify(event));
-    setTimeout(() => process.exit(0), 500);
+    setTimeout(() => process.exit(0), 1000);
   }).catch((err) => {
     console.error("HOOK_ERROR:", err.message);
     process.exit(1);
@@ -223,6 +255,7 @@ import(${JSON.stringify(HOOK_SOURCE)}).then((mod) => {
 			const npx = join(dir, "node_modules", ".bin", "tsx");
 			try {
 				const stdout = execFileSync(npx, [scriptFile], {
+					env: subprocessEnv,
 					cwd: dir,
 					timeout: 15000,
 					encoding: "utf-8",
@@ -288,7 +321,7 @@ import(${JSON.stringify(HOOK_SOURCE)}).then((mod) => {
     console.log("PRESNAPSHOT:" + preSnapshot);
     console.log("POSTSNAPSHOT:" + JSON.stringify(event));
     console.log("ERRORS:" + JSON.stringify(errors));
-    setTimeout(() => process.exit(0), 500);
+    setTimeout(() => process.exit(0), 1000);
   }).catch((err) => {
     console.error("UNEXPECTED_CRASH:", err.message);
     process.exit(1);
@@ -303,6 +336,7 @@ import(${JSON.stringify(HOOK_SOURCE)}).then((mod) => {
 			const npx = join(dir, "node_modules", ".bin", "tsx");
 			try {
 				const stdout = execFileSync(npx, [scriptFile], {
+					env: subprocessEnv,
 					cwd: dir,
 					timeout: 15000,
 					encoding: "utf-8",
@@ -386,7 +420,7 @@ import(${JSON.stringify(HOOK_SOURCE)}).then((mod) => {
     console.log("PRESNAPSHOT:" + preSnapshot);
     console.log("POSTSNAPSHOT:" + JSON.stringify(event));
     console.log("ERRORS:" + JSON.stringify(errors));
-    setTimeout(() => process.exit(0), 500);
+    setTimeout(() => process.exit(0), 1000);
   }).catch((err) => {
     // Fail-open: should not crash
     console.error("UNEXPECTED_CRASH:", err.message);
@@ -402,6 +436,7 @@ import(${JSON.stringify(HOOK_SOURCE)}).then((mod) => {
 			const npx = join(dir, "node_modules", ".bin", "tsx");
 			try {
 				const stdout = execFileSync(npx, [scriptFile], {
+					env: subprocessEnv,
 					cwd: dir,
 					timeout: 15000,
 					encoding: "utf-8",
@@ -530,9 +565,9 @@ async function testSuccessfulCapture() {
 		}
 	}
 
-	// 3. Assert events.jsonl
+	// 3. Assert events.jsonl (poll to avoid SessionStart fire-and-forget race)
 	const eventsJsonl = join(dir, ".scryrs", "events.jsonl");
-	const events = readJsonl(eventsJsonl);
+	const events = waitForEventCount(eventsJsonl, 7, 5000);
 
 	// Should have SessionStart + 6 tool events = 7
 	if (events.length < 7) {
@@ -1025,9 +1060,9 @@ async function testRewriteCompatibility() {
 		}
 	}
 
-	// 3. Assert events.jsonl contents
+	// 3. Assert events.jsonl contents (poll to avoid SessionStart fire-and-forget race)
 	const eventsJsonl = join(dir, ".scryrs", "events.jsonl");
-	const events = readJsonl(eventsJsonl);
+	const events = waitForEventCount(eventsJsonl, 3, 5000);
 
 	const bashEvents = events.filter(
 		(e) => e.event_type === "CommandExecuted" && e.tool_name === "bash",

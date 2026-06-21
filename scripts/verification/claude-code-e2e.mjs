@@ -54,9 +54,8 @@ function invokeHook(toolName, toolInput, workDir) {
 
 	const env = { ...process.env };
 	// Ensure scryrs is on PATH
-	if (workDir) {
-		env.PATH = `${workDir}:${env.PATH || ""}`;
-	}
+	const scryrsDir = join(ROOT, "target", "release");
+	env.PATH = `${scryrsDir}:${workDir || ""}:${env.PATH || ""}`;
 
 	try {
 		const stdout = execFileSync("node", [scriptFile], {
@@ -344,6 +343,111 @@ async function testRewriteCompatibility() {
 			"Claude Code RTK: non-Bash events",
 			"no FileOpened event found for read",
 		);
+	}
+
+	// Non-interference: verify hook writes zero stdout/stderr for RTK commands
+	{
+		const niDir = join(tmpdir(), `scryrs-cc-e2e-rtk-ni-${Date.now()}`);
+		mkdirSync(niDir, { recursive: true });
+		try {
+			execFileSync(realScryrs, ["init"], {
+				cwd: niDir,
+				timeout: 5000,
+				stdio: "ignore",
+			});
+		} catch {}
+
+		// Simple RTK-prefixed command
+		{
+			const scriptFile = join(niDir, "ni-simple.mjs");
+			const code = [
+				`import hook from ${JSON.stringify(HOOK_FILE)};`,
+				`const input = { tool_name: "bash", tool_input: { command: "rtk ls -la" } };`,
+				`const result = await hook(input);`,
+				`// result is not logged — hook should not write to stdout`,
+			].join("\n");
+			writeFileSync(scriptFile, code);
+			const env = {
+				...process.env,
+				PATH: `${niDir}:${process.env.PATH || ""}`,
+			};
+			try {
+				execFileSync("node", [scriptFile], {
+					env,
+					cwd: niDir,
+					timeout: 15000,
+					encoding: "utf-8",
+					stdio: ["ignore", "pipe", "pipe"],
+				});
+				pass("Claude Code RTK NI: simple command — hook stdout empty");
+				pass("Claude Code RTK NI: simple command — hook stderr empty");
+			} catch (err) {
+				const stdout = err.stdout?.toString() || "";
+				const stderr = err.stderr?.toString() || "";
+				if (!stdout.trim())
+					pass("Claude Code RTK NI: simple command — hook stdout empty");
+				else
+					fail(
+						"Claude Code RTK NI: simple command stdout",
+						`unexpected: ${stdout.slice(0, 200)}`,
+					);
+				if (!stderr.trim())
+					pass("Claude Code RTK NI: simple command — hook stderr empty");
+				else
+					fail(
+						"Claude Code RTK NI: simple command stderr",
+						`unexpected: ${stderr.slice(0, 200)}`,
+					);
+			}
+		}
+
+		// Compound rewritten command
+		{
+			const scriptFile = join(niDir, "ni-compound.mjs");
+			const compoundCmd =
+				'echo "=== BACKEND ===" && rtk ls backend/api/ && rtk ls backend/cmd/';
+			const code = [
+				`import hook from ${JSON.stringify(HOOK_FILE)};`,
+				`const input = { tool_name: "bash", tool_input: { command: ${JSON.stringify(compoundCmd)} } };`,
+				`const result = await hook(input);`,
+				`// result is not logged — hook should not write to stdout`,
+			].join("\n");
+			writeFileSync(scriptFile, code);
+			const env = {
+				...process.env,
+				PATH: `${niDir}:${process.env.PATH || ""}`,
+			};
+			try {
+				execFileSync("node", [scriptFile], {
+					env,
+					cwd: niDir,
+					timeout: 15000,
+					encoding: "utf-8",
+					stdio: ["ignore", "pipe", "pipe"],
+				});
+				pass("Claude Code RTK NI: compound command — hook stdout empty");
+				pass("Claude Code RTK NI: compound command — hook stderr empty");
+			} catch (err) {
+				const stdout = err.stdout?.toString() || "";
+				const stderr = err.stderr?.toString() || "";
+				if (!stdout.trim())
+					pass("Claude Code RTK NI: compound command — hook stdout empty");
+				else
+					fail(
+						"Claude Code RTK NI: compound command stdout",
+						`unexpected: ${stdout.slice(0, 200)}`,
+					);
+				if (!stderr.trim())
+					pass("Claude Code RTK NI: compound command — hook stderr empty");
+				else
+					fail(
+						"Claude Code RTK NI: compound command stderr",
+						`unexpected: ${stderr.slice(0, 200)}`,
+					);
+			}
+		}
+
+		rmSync(niDir, { recursive: true, force: true });
 	}
 
 	rmSync(tmpDir, { recursive: true, force: true });

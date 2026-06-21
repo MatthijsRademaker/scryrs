@@ -30,6 +30,15 @@ const TRACKED_TOOLS = new Set([
 
 // —— internals ——
 
+/**
+ * Collapse / replace embedded newlines in a string so the serialized JSON
+ * occupies exactly one physical line. Kept consistent with the Claude Code
+ * reference hook (collapseNewlines in scryrs-hook.mjs).
+ */
+function collapseNewlines(value: string): string {
+	return value.replace(/\r?\n/g, " ⏎ ");
+}
+
 interface TraceEventEnvelope {
 	schema_version: string;
 	timestamp: string;
@@ -104,15 +113,35 @@ export default function (pi: ExtensionAPI) {
 		// —— tool → TraceEvent mapping (design §D2-D4) ——
 
 		switch (toolName) {
-			case "read":
+			case "read": {
 				eventType = "FileOpened";
-				payload = { type: "FileOpened", path: event.input.path };
+				const readPath: string | undefined = event.input?.path;
+				if (readPath === undefined) {
+					console.warn(
+						"scryrs trace hook: read input missing 'path' field — using 'unknown'",
+					);
+				}
+				payload = {
+					type: "FileOpened",
+					path: collapseNewlines(readPath ?? "unknown"),
+				};
 				break;
+			}
 
-			case "bash":
+			case "bash": {
 				eventType = "CommandExecuted";
-				payload = { type: "CommandExecuted", command: event.input.command };
+				const bashCmd: string | undefined = event.input?.command;
+				if (bashCmd === undefined) {
+					console.warn(
+						"scryrs trace hook: bash input missing 'command' field — using 'unknown'",
+					);
+				}
+				payload = {
+					type: "CommandExecuted",
+					command: collapseNewlines(bashCmd ?? "unknown"),
+				};
 				break;
+			}
 
 			case "ast_grep_search": {
 				eventType = "SearchRun";
@@ -122,18 +151,27 @@ export default function (pi: ExtensionAPI) {
 						"scryrs trace hook: ast_grep_search input missing 'query' field — using 'unknown'",
 					);
 				}
-				payload = { type: "SearchRun", query: query ?? "unknown" };
+				payload = {
+					type: "SearchRun",
+					query: collapseNewlines(query ?? "unknown"),
+				};
 				break;
 			}
 
 			case "edit":
 				eventType = "EditMade";
-				payload = { type: "EditMade", target: event.input.path };
+				payload = {
+					type: "EditMade",
+					target: collapseNewlines(event.input.path),
+				};
 				break;
 
 			case "write":
 				eventType = "EditMade";
-				payload = { type: "EditMade", target: event.input.path };
+				payload = {
+					type: "EditMade",
+					target: collapseNewlines(event.input.path),
+				};
 				break;
 
 			case "lsp_navigation": {
@@ -147,10 +185,16 @@ export default function (pi: ExtensionAPI) {
 
 				if (event.isError) {
 					eventType = "FailedLookup";
-					payload = { type: "FailedLookup", subject: navTarget };
+					payload = {
+						type: "FailedLookup",
+						subject: collapseNewlines(navTarget),
+					};
 				} else {
 					eventType = "SymbolInspected";
-					payload = { type: "SymbolInspected", name: navTarget };
+					payload = {
+						type: "SymbolInspected",
+						name: collapseNewlines(navTarget),
+					};
 				}
 				break;
 			}
