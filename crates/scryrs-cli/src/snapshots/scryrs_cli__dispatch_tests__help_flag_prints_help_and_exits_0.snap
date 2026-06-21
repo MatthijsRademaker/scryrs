@@ -1,5 +1,5 @@
 ---
-source: crates/scryrs-cli/src/lib.rs
+source: crates/scryrs-cli/src/dispatch_tests.rs
 expression: "String::from_utf8_lossy(&out)"
 ---
 scryrs — context intelligence for AI-assisted codebases
