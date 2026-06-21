@@ -54,6 +54,7 @@ where
         if first != "hotspots"
             && first != "record"
             && first != "init"
+            && first != "dashboard"
             && first != "--help"
             && first != "-h"
             && first != "--version"
@@ -71,7 +72,10 @@ where
     // Capture the attempted subcommand before clap consumes args, so
     // error handlers can emit subcommand-specific messages.
     let attempted_command: Option<&str> = if !args.is_empty()
-        && (args[0] == "hotspots" || args[0] == "record" || args[0] == "init")
+        && (args[0] == "hotspots"
+            || args[0] == "record"
+            || args[0] == "init"
+            || args[0] == "dashboard")
     {
         Some(args[0].as_str())
     } else {
@@ -127,6 +131,44 @@ where
                         .action(ArgAction::Set)
                         .help("Agent harness name (claude-code or pi)"),
                 ),
+        )
+        .subcommand(
+            Command::new("dashboard")
+                .about("Start local dashboard server (Phase 3 — planned)")
+                .disable_help_flag(true)
+                .disable_version_flag(true)
+                .arg(
+                    Arg::new("port")
+                        .long("port")
+                        .short('p')
+                        .value_name("PORT")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("TCP port to bind (default 8080)"),
+                )
+                .arg(
+                    Arg::new("bind")
+                        .long("bind")
+                        .short('b')
+                        .value_name("ADDR")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Bind address (default 127.0.0.1)"),
+                )
+                .arg(
+                    Arg::new("no-open")
+                        .long("no-open")
+                        .num_args(0)
+                        .action(ArgAction::SetTrue)
+                        .help("Do not open browser automatically"),
+                )
+                .arg(
+                    Arg::new("dev")
+                        .long("dev")
+                        .num_args(0)
+                        .action(ArgAction::SetTrue)
+                        .help("Serve from filesystem instead of embedded assets"),
+                ),
         );
 
     match cmd.try_get_matches_from(&args) {
@@ -158,6 +200,22 @@ where
                         init::execute_init(&mut out, &mut err, agent)
                     }
                 }
+                Some(("dashboard", _m)) => {
+                    // Phase 3 Dashboard — not yet implemented.
+                    // This placeholder will be replaced with
+                    // scryrs_dashboard::run(config) when the crate ships.
+                    if writeln!(
+                        err,
+                        "scryrs dashboard: not yet implemented (Phase 3)"
+                    )
+                    .is_err()
+                        || writeln!(err, "See the roadmap: scryrs --help").is_err()
+                    {
+                        1
+                    } else {
+                        2
+                    }
+                }
                 // Bare invocation (no subcommand matched).
                 _ => write_help(&mut out).map_or(1, |_| 0),
             }
@@ -182,6 +240,16 @@ where
                         2
                     }
                 }
+                Some("dashboard") => {
+                    if writeln!(err, "scryrs dashboard: missing required argument").is_err()
+                        || writeln!(err, "Usage: scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]").is_err()
+                        || writeln!(err, "See `scryrs --help`").is_err()
+                    {
+                        1
+                    } else {
+                        2
+                    }
+                }
                 _ => {
                     if writeln!(err, "scryrs hotspots: missing required PATH argument").is_err()
                         || writeln!(err, "Usage: scryrs hotspots <PATH>").is_err()
@@ -195,6 +263,16 @@ where
             },
             clap::error::ErrorKind::TooManyValues | clap::error::ErrorKind::UnknownArgument => {
                 match attempted_command {
+                    Some("dashboard") => {
+                        if writeln!(err, "scryrs dashboard: unexpected argument").is_err()
+                            || writeln!(err, "Usage: scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]").is_err()
+                            || writeln!(err, "See `scryrs --help`").is_err()
+                        {
+                            1
+                        } else {
+                            2
+                        }
+                    }
                     Some("record") => {
                         if writeln!(err, "scryrs record: unexpected argument").is_err()
                             || writeln!(err, "Usage: scryrs record --stdin").is_err()

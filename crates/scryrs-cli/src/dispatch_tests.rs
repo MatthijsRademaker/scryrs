@@ -370,3 +370,61 @@ fn help_json_output_does_not_contain_placeholder_wording() {
         "--help-json output must not contain 'placeholder', got:\n{json_str}"
     );
 }
+
+// --- Dashboard command tests (Phase 3 — planned, not yet implemented) ---
+
+#[test]
+fn dashboard_is_recognized_not_unknown_command() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(run_with_writers(["dashboard"], &mut out, &mut err), 2);
+    assert!(out.is_empty());
+    let err_str = String::from_utf8_lossy(&err);
+    assert!(
+        err_str.contains("scryrs dashboard: not yet implemented (Phase 3)"),
+        "dashboard must be recognized, not treated as unknown command, got: {err_str}"
+    );
+    assert!(
+        !err_str.contains("unknown command"),
+        "must not say 'unknown command'"
+    );
+}
+
+#[test]
+fn dashboard_with_flags_is_recognized() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(["dashboard", "--port", "9090"], &mut out, &mut err),
+        2
+    );
+    assert!(out.is_empty());
+    let err_str = String::from_utf8_lossy(&err);
+    assert!(
+        err_str.contains("scryrs dashboard: not yet implemented (Phase 3)"),
+        "dashboard --port must be recognized, got: {err_str}"
+    );
+}
+
+#[test]
+fn dashboard_with_unknown_flag_exits_2() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(["dashboard", "--unknown"], &mut out, &mut err),
+        2
+    );
+    assert!(out.is_empty());
+    let err_str = String::from_utf8_lossy(&err);
+    assert!(
+        err_str.contains("scryrs dashboard: unexpected argument"),
+        "dashboard --unknown must report unexpected argument, got: {err_str}"
+    );
+    assert!(
+        !err_str.contains("unknown command"),
+        "must not say 'unknown command'"
+    );
+}

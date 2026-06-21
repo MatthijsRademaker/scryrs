@@ -1,5 +1,5 @@
 //! v0 CLI contract: `scryrs hotspots <PATH>`, `scryrs record --stdin|--file <PATH>`,
-//! and `scryrs init --agent <NAME>`.
+//! `scryrs init --agent <NAME>`, and `scryrs dashboard` (Phase 3 — planned).
 
 mod init;
 
