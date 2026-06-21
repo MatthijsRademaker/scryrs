@@ -20,9 +20,10 @@
 # without recompilation for musl.
 #
 # Usage:
-#   scripts/verify-trace-capture              # run both fixtures
+#   scripts/verify-trace-capture              # run all fixtures
 #   scripts/verify-trace-capture --claude-only  # Claude Code only
 #   scripts/verify-trace-capture --pi-only       # Pi hook only
+#   scripts/verify-trace-capture --init-only     # installed-hook e2e only
 #
 # Prerequisites:
 #   - Docker (host or DinD)
@@ -42,26 +43,57 @@ source "$DOCKER_LIB"
 
 RUN_CLAUDE=true
 RUN_PI=true
+RUN_INIT=true
+INIT_ONLY=false
+CLAUDE_ONLY=false
+PI_ONLY=false
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 		--claude-only)
-			RUN_CLAUDE=true
-			RUN_PI=false
+			CLAUDE_ONLY=true
 			shift
 			;;
 		--pi-only)
-			RUN_CLAUDE=false
-			RUN_PI=true
+			PI_ONLY=true
+			shift
+			;;
+		--init-only)
+			INIT_ONLY=true
 			shift
 			;;
 		*)
 			echo "ERROR: unknown flag: $1" >&2
-			echo "Usage: scripts/verify-trace-capture [--claude-only|--pi-only]" >&2
+			echo "Usage: scripts/verify-trace-capture [--claude-only|--pi-only|--init-only]" >&2
 			exit 2
 			;;
 	esac
 done
+
+# --- mutually-exclusive flag enforcement ---
+FLAG_COUNT=0
+$CLAUDE_ONLY && FLAG_COUNT=$((FLAG_COUNT + 1))
+$PI_ONLY && FLAG_COUNT=$((FLAG_COUNT + 1))
+$INIT_ONLY && FLAG_COUNT=$((FLAG_COUNT + 1))
+
+if [[ $FLAG_COUNT -gt 1 ]]; then
+	echo "ERROR: --claude-only, --pi-only, and --init-only are mutually exclusive" >&2
+	exit 2
+fi
+
+if $CLAUDE_ONLY; then
+	RUN_CLAUDE=true
+	RUN_PI=false
+	RUN_INIT=false
+elif $PI_ONLY; then
+	RUN_CLAUDE=false
+	RUN_PI=true
+	RUN_INIT=false
+elif $INIT_ONLY; then
+	RUN_CLAUDE=false
+	RUN_PI=false
+	RUN_INIT=true
+fi
 
 # ---------------------------------------------------------------------------
 # 1. Build scryrs binary (needed by both fixtures)
@@ -79,6 +111,7 @@ echo "  scryrs binary built at target/release/scryrs"
 
 CLAUDE_EXIT=0
 PI_EXIT=0
+INIT_EXIT=0
 
 # Use node:22 (Debian-based, glibc) because scryrs is compiled on rust:1.85.0
 # which also uses glibc. Alpine-based node images use musl and won't run the binary.
@@ -126,7 +159,24 @@ if $RUN_PI; then
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Summary
+# 4. Installed-hook e2e fixture
+# ---------------------------------------------------------------------------
+if $RUN_INIT; then
+	step "Running installed-hook E2E fixture"
+	run_node --image "$FIXTURE_NODE_IMAGE" \
+		-e "PATH=/workspace/target/release:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+		-- \
+		node /workspace/scripts/verification/installed-hook-e2e.mjs \
+		|| INIT_EXIT=$?
+	if [[ $INIT_EXIT -eq 0 ]]; then
+		echo "  Installed-hook fixture: PASSED"
+	else
+		echo "  Installed-hook fixture: FAILED (exit $INIT_EXIT)" >&2
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# 5. Summary
 # ---------------------------------------------------------------------------
 echo ""
 echo "============================================"
@@ -149,15 +199,26 @@ if $RUN_PI; then
 	fi
 fi
 
+if $RUN_INIT; then
+	if [[ $INIT_EXIT -eq 0 ]]; then
+		echo "  Init hooks:  PASSED"
+	else
+		echo "  Init hooks:  FAILED"
+	fi
+fi
+
 echo "============================================"
 
-ALL_EXIT=$((CLAUDE_EXIT + PI_EXIT))
+ALL_EXIT=$((CLAUDE_EXIT + PI_EXIT + INIT_EXIT))
 if [[ $ALL_EXIT -ne 0 ]]; then
 	if $RUN_CLAUDE && [[ $CLAUDE_EXIT -ne 0 ]]; then
 		echo "Run with --claude-only to debug the Claude Code fixture." >&2
 	fi
 	if $RUN_PI && [[ $PI_EXIT -ne 0 ]]; then
 		echo "Run with --pi-only to debug the Pi fixture." >&2
+	fi
+	if $RUN_INIT && [[ $INIT_EXIT -ne 0 ]]; then
+		echo "Run with --init-only to debug the installed-hook fixture." >&2
 	fi
 	exit 1
 fi

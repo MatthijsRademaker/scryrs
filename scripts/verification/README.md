@@ -12,8 +12,9 @@ scripts/verification/
 ├── lib/
 │   ├── assert.mjs             # pass/fail/assert helpers + summary
 │   └── jsonl.mjs              # readJsonl, assertEventShape
-├── claude-code-e2e.mjs        # Claude Code hook fixture
-└── pi-hook-e2e.mjs            # Pi hook fixture
+├── claude-code-e2e.mjs        # Claude Code source-hook fixture
+├── pi-hook-e2e.mjs            # Pi source-hook fixture
+└── installed-hook-e2e.mjs     # Installed-hook e2e fixture
 ```
 
 ### Entrypoint
@@ -22,8 +23,9 @@ scripts/verification/
 
 1. Builds the real `scryrs` binary via `cargo build --release` in a Rust
    Docker container.
-2. Runs the Claude Code fixture against it in a Node.js Docker container.
-3. Runs the Pi fixture against it in the same container.
+2. Runs the Claude Code source-hook fixture against it in a Node.js Docker container.
+3. Runs the Pi source-hook fixture against it in the same container.
+4. Runs the installed-hook e2e fixture to validate init output.
 
 No host Node.js is required — all execution happens inside Docker containers.
 
@@ -72,6 +74,35 @@ all six tracked Pi tools.
 - **Unlisted tools**: Pi tools not in the tracked set (e.g., `web_search`)
   are silently ignored and produce no trace events.
 
+#### `installed-hook-e2e.mjs`
+
+Runs `scryrs init --agent claude-code` and `scryrs init --agent pi` in temporary
+consumer project directories, loads the installed hook artifacts from consumer
+install paths (NOT from `hooks/` in the repository source tree), and exercises
+them against the real `scryrs` binary.
+
+**What it proves:**
+
+- **Init output is functional**: Proves that `scryrs init` produces
+  loadable, working hook artifacts — not just that files were created.
+  Source-hook fixtures load from `hooks/` in the repo; this fixture loads
+  from `.claude/hooks/` and `.pi/extensions/pi-trace/` in consumer directories.
+- **Claude Code installed hook**: The installed `scryrs-hook.mjs` is a valid
+  Node.js module that returns `{continue: true}`, produces zero stdout/stderr,
+  and persists events to `.scryrs/scryrs.db` via the real scryrs binary.
+- **Pi installed hook**: The installed `index.ts` is a valid TypeScript module
+  (transpiled via `tsx`) that registers a `tool_result` handler, returns
+  `undefined` (non-interference), and persists events to `.scryrs/scryrs.db`.
+  **Version-gating:** The single-file `index.ts` sufficiency assumption has been
+  verified against Pi versions that expect a single `index.ts` extension file
+  without additional manifest, `package.json`, or `tsconfig` artifacts. If Pi
+  extends its extension contract to require additional consumer artifacts, this
+  test must be updated.
+- **Next-step text accuracy**: The deterministic stdout output from `scryrs init`
+  is checked to ensure users receive correct setup instructions.
+- **Error detection**: A corrupt or unloadable hook file causes the fixture to
+  fail with a diagnostic, rather than silently skipping the load step.
+
 ### Libraries
 
 #### `lib/assert.mjs`
@@ -110,6 +141,7 @@ scripts/verify-trace-capture
 ```bash
 scripts/verify-trace-capture --claude-only
 scripts/verify-trace-capture --pi-only
+scripts/verify-trace-capture --init-only
 ```
 
 ### Run a single fixture directly (for debugging)
