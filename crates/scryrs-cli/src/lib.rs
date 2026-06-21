@@ -1957,6 +1957,113 @@ mod hotspot_integration_tests {
         }
     }
 
+    fn make_search_run(session_id: &str, query: &str, timestamp: &str) -> TraceEvent {
+        use scryrs_types::SearchRunPayload;
+        TraceEvent {
+            schema_version: SCHEMA_VERSION.into(),
+            timestamp: timestamp.into(),
+            session_id: session_id.into(),
+            event_type: TraceEventType::SearchRun,
+            tool_name: Some("search".into()),
+            payload: TraceEventPayload::SearchRun(SearchRunPayload {
+                query: query.into(),
+            }),
+            outcome: Outcome::Success,
+        }
+    }
+
+    fn make_symbol_inspected(session_id: &str, name: &str, timestamp: &str) -> TraceEvent {
+        use scryrs_types::SymbolInspectedPayload;
+        TraceEvent {
+            schema_version: SCHEMA_VERSION.into(),
+            timestamp: timestamp.into(),
+            session_id: session_id.into(),
+            event_type: TraceEventType::SymbolInspected,
+            tool_name: Some("inspect".into()),
+            payload: TraceEventPayload::SymbolInspected(SymbolInspectedPayload {
+                name: name.into(),
+            }),
+            outcome: Outcome::Success,
+        }
+    }
+
+    fn make_command_executed(
+        session_id: &str,
+        command: &str,
+        timestamp: &str,
+        outcome: Outcome,
+    ) -> TraceEvent {
+        use scryrs_types::CommandExecutedPayload;
+        TraceEvent {
+            schema_version: SCHEMA_VERSION.into(),
+            timestamp: timestamp.into(),
+            session_id: session_id.into(),
+            event_type: TraceEventType::CommandExecuted,
+            tool_name: Some("bash".into()),
+            payload: TraceEventPayload::CommandExecuted(CommandExecutedPayload {
+                command: command.into(),
+            }),
+            outcome,
+        }
+    }
+
+    fn make_doc_retrieved(session_id: &str, doc_ref: &str, timestamp: &str) -> TraceEvent {
+        use scryrs_types::DocRetrievedPayload;
+        TraceEvent {
+            schema_version: SCHEMA_VERSION.into(),
+            timestamp: timestamp.into(),
+            session_id: session_id.into(),
+            event_type: TraceEventType::DocRetrieved,
+            tool_name: Some("read".into()),
+            payload: TraceEventPayload::DocRetrieved(DocRetrievedPayload {
+                doc_ref: doc_ref.into(),
+            }),
+            outcome: Outcome::Success,
+        }
+    }
+
+    fn make_edit_made(
+        session_id: &str,
+        target: &str,
+        timestamp: &str,
+        outcome: Outcome,
+    ) -> TraceEvent {
+        use scryrs_types::EditMadePayload;
+        TraceEvent {
+            schema_version: SCHEMA_VERSION.into(),
+            timestamp: timestamp.into(),
+            session_id: session_id.into(),
+            event_type: TraceEventType::EditMade,
+            tool_name: Some("edit".into()),
+            payload: TraceEventPayload::EditMade(EditMadePayload {
+                target: target.into(),
+            }),
+            outcome,
+        }
+    }
+
+    fn make_failed_lookup(
+        session_id: &str,
+        subject: &str,
+        reason: &str,
+        timestamp: &str,
+    ) -> TraceEvent {
+        use scryrs_types::FailedLookupPayload;
+        TraceEvent {
+            schema_version: SCHEMA_VERSION.into(),
+            timestamp: timestamp.into(),
+            session_id: session_id.into(),
+            event_type: TraceEventType::FailedLookup,
+            tool_name: Some("search".into()),
+            payload: TraceEventPayload::FailedLookup(FailedLookupPayload {
+                subject: subject.into(),
+            }),
+            outcome: Outcome::Failure {
+                reason: Some(reason.into()),
+            },
+        }
+    }
+
     fn populate_store(dir: &tempfile::TempDir, events: &[TraceEvent]) {
         let scryrs_dir = dir.path().join(".scryrs");
         std::fs::create_dir_all(&scryrs_dir).unwrap_or_else(|e| panic!("create .scryrs: {e}"));
@@ -2588,6 +2695,136 @@ mod hotspot_integration_tests {
         assert!(
             stdout.contains("\"entries\":[]"),
             "stdout must contain empty entries"
+        );
+    }
+
+    // --- Full subject-family fixture test ---
+
+    #[test]
+    fn full_subject_family_fixture_produces_correct_ranking() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        let events = vec![
+            // FileOpened: src/main.rs, session s1, weight 1 → score 1
+            make_file_opened("s1", "src/main.rs", "2026-06-21T09:00:00Z"),
+            // SearchRun: "error handling", session s1, weight 2 → score 2
+            make_search_run("s1", "error handling", "2026-06-21T09:01:00Z"),
+            // SymbolInspected: "Dispatcher", session s1, weight 2 → score 2
+            make_symbol_inspected("s1", "Dispatcher", "2026-06-21T09:02:00Z"),
+            // CommandExecuted (success): "cargo build", session s1, weight 1 → score 1
+            make_command_executed(
+                "s1",
+                "cargo build",
+                "2026-06-21T09:03:00Z",
+                Outcome::Success,
+            ),
+            // CommandExecuted (failure): "cargo test", session s2, weight 1 + 2 bonus → score 3
+            make_command_executed(
+                "s2",
+                "cargo test",
+                "2026-06-21T09:04:00Z",
+                Outcome::Failure {
+                    reason: Some("exit code 1".into()),
+                },
+            ),
+            // DocRetrieved: "docs/api.md", session s1, weight 2 → score 2
+            make_doc_retrieved("s1", "docs/api.md", "2026-06-21T09:05:00Z"),
+            // EditMade (success): src/lib.rs, session s1, weight 3 → score 3
+            make_edit_made("s1", "src/lib.rs", "2026-06-21T09:06:00Z", Outcome::Success),
+            // EditMade (failure): src/broken.rs, session s2, weight 3 + 2 bonus → score 5
+            make_edit_made(
+                "s2",
+                "src/broken.rs",
+                "2026-06-21T09:07:00Z",
+                Outcome::Failure {
+                    reason: Some("write error".into()),
+                },
+            ),
+            // FailedLookup: "nonexistent_fn", session s1, weight 4 + 2 bonus → score 6
+            make_failed_lookup(
+                "s1",
+                "nonexistent_fn",
+                "symbol not found",
+                "2026-06-21T09:08:00Z",
+            ),
+            // FileOpened: src/main.rs again, same session s1, adds +1 → total 2
+            make_file_opened("s1", "src/main.rs", "2026-06-21T09:09:00Z"),
+        ];
+        populate_store(&dir, &events);
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        let exit = run_with_writers(
+            ["hotspots", &dir.path().display().to_string()],
+            &mut out,
+            &mut err,
+        );
+
+        assert_eq!(exit, 0, "stderr: {:?}", String::from_utf8_lossy(&err));
+
+        let stdout = String::from_utf8_lossy(&out);
+        let report: serde_json::Value =
+            serde_json::from_str(stdout.trim()).unwrap_or_else(|e| panic!("parse JSON: {e}"));
+
+        let entries = report["entries"]
+            .as_array()
+            .unwrap_or_else(|| panic!("entries not array"));
+
+        // 9 distinct (subject_kind, subject) pairs expected.
+        assert!(
+            entries.len() >= 9,
+            "expected at least 9 entries, got {}",
+            entries.len()
+        );
+
+        // Verify ranking and scores against documented weight table.
+        // Expected scores:
+        // nonexistent_fn (FailedLookup): 4 + 2 = 6
+        // src/broken.rs (EditMade Failure): 3 + 2 = 5
+        // src/lib.rs (EditMade Success): 3
+        // cargo test (CommandExecuted Failure): 1 + 2 = 3
+        // src/main.rs (2x FileOpened): 1 + 1 = 2
+        // error handling (SearchRun): 2
+        // Dispatcher (SymbolInspected): 2
+        // docs/api.md (DocRetrieved): 2
+        // cargo build (CommandExecuted Success): 1
+
+        assert_eq!(entries[0]["subject"], "nonexistent_fn");
+        assert_eq!(entries[0]["subjectKind"], "symbol");
+        assert_eq!(entries[0]["score"], 6);
+
+        assert_eq!(entries[1]["subject"], "src/broken.rs");
+        assert_eq!(entries[1]["subjectKind"], "file");
+        assert_eq!(entries[1]["score"], 5);
+
+        assert_eq!(entries[2]["subject"], "src/lib.rs");
+        assert_eq!(entries[2]["subjectKind"], "file");
+        assert_eq!(entries[2]["score"], 3);
+
+        assert_eq!(entries[3]["subject"], "cargo test");
+        assert_eq!(entries[3]["subjectKind"], "command");
+        assert_eq!(entries[3]["score"], 3);
+
+        // Verify counts and evidence for top entry (nonexistent_fn).
+        assert_eq!(entries[0]["counts"]["eventType"]["FailedLookup"], 1);
+        assert_eq!(entries[0]["counts"]["outcome"]["failure"], 1);
+        assert_eq!(entries[0]["sessionCount"], 1);
+        assert!(
+            !entries[0]["evidence"]["rowIds"]
+                .as_array()
+                .unwrap_or_else(|| panic!("rowIds not array"))
+                .is_empty()
+        );
+
+        // Verify artifact file is written and matches stdout.
+        let artifact_path = dir.path().join(".scryrs/hotspots.json");
+        assert!(artifact_path.exists());
+        let artifact_content = std::fs::read_to_string(&artifact_path)
+            .unwrap_or_else(|e| panic!("read artifact: {e}"));
+        assert_eq!(
+            stdout.trim(),
+            artifact_content.trim(),
+            "stdout and artifact file must match"
         );
     }
 }

@@ -1,0 +1,220 @@
+---
+source: crates/scryrs-cli/tests/hotspot_e2e.rs
+assertion_line: 300
+expression: "&artifact_value"
+---
+{
+  "command": "hotspots",
+  "entries": [
+    {
+      "counts": {
+        "eventType": {
+          "FailedLookup": 1
+        },
+        "outcome": {
+          "failure": 1
+        }
+      },
+      "evidence": {
+        "rowIds": [
+          9
+        ]
+      },
+      "firstSeen": "2026-06-21T09:08:00Z",
+      "lastSeen": "2026-06-21T09:08:00Z",
+      "rank": 1,
+      "score": 6,
+      "sessionCount": 1,
+      "subject": "nonexistent_fn",
+      "subjectKind": "symbol"
+    },
+    {
+      "counts": {
+        "eventType": {
+          "EditMade": 1
+        },
+        "outcome": {
+          "failure": 1
+        }
+      },
+      "evidence": {
+        "rowIds": [
+          8
+        ]
+      },
+      "firstSeen": "2026-06-21T09:07:00Z",
+      "lastSeen": "2026-06-21T09:07:00Z",
+      "rank": 2,
+      "score": 5,
+      "sessionCount": 1,
+      "subject": "src/broken.rs",
+      "subjectKind": "file"
+    },
+    {
+      "counts": {
+        "eventType": {
+          "EditMade": 1
+        },
+        "outcome": {
+          "success": 1
+        }
+      },
+      "evidence": {
+        "rowIds": [
+          7
+        ]
+      },
+      "firstSeen": "2026-06-21T09:06:00Z",
+      "lastSeen": "2026-06-21T09:06:00Z",
+      "rank": 3,
+      "score": 3,
+      "sessionCount": 1,
+      "subject": "src/lib.rs",
+      "subjectKind": "file"
+    },
+    {
+      "counts": {
+        "eventType": {
+          "CommandExecuted": 1
+        },
+        "outcome": {
+          "failure": 1
+        }
+      },
+      "evidence": {
+        "rowIds": [
+          5
+        ]
+      },
+      "firstSeen": "2026-06-21T09:04:00Z",
+      "lastSeen": "2026-06-21T09:04:00Z",
+      "rank": 4,
+      "score": 3,
+      "sessionCount": 1,
+      "subject": "cargo test",
+      "subjectKind": "command"
+    },
+    {
+      "counts": {
+        "eventType": {
+          "FileOpened": 2
+        },
+        "outcome": {
+          "success": 2
+        }
+      },
+      "evidence": {
+        "rowIds": [
+          1,
+          10
+        ]
+      },
+      "firstSeen": "2026-06-21T09:00:00Z",
+      "lastSeen": "2026-06-21T09:09:00Z",
+      "rank": 5,
+      "score": 2,
+      "sessionCount": 1,
+      "subject": "src/main.rs",
+      "subjectKind": "file"
+    },
+    {
+      "counts": {
+        "eventType": {
+          "DocRetrieved": 1
+        },
+        "outcome": {
+          "success": 1
+        }
+      },
+      "evidence": {
+        "rowIds": [
+          6
+        ]
+      },
+      "firstSeen": "2026-06-21T09:05:00Z",
+      "lastSeen": "2026-06-21T09:05:00Z",
+      "rank": 6,
+      "score": 2,
+      "sessionCount": 1,
+      "subject": "docs/api.md",
+      "subjectKind": "document"
+    },
+    {
+      "counts": {
+        "eventType": {
+          "SymbolInspected": 1
+        },
+        "outcome": {
+          "success": 1
+        }
+      },
+      "evidence": {
+        "rowIds": [
+          3
+        ]
+      },
+      "firstSeen": "2026-06-21T09:02:00Z",
+      "lastSeen": "2026-06-21T09:02:00Z",
+      "rank": 7,
+      "score": 2,
+      "sessionCount": 1,
+      "subject": "Dispatcher",
+      "subjectKind": "symbol"
+    },
+    {
+      "counts": {
+        "eventType": {
+          "SearchRun": 1
+        },
+        "outcome": {
+          "success": 1
+        }
+      },
+      "evidence": {
+        "rowIds": [
+          2
+        ]
+      },
+      "firstSeen": "2026-06-21T09:01:00Z",
+      "lastSeen": "2026-06-21T09:01:00Z",
+      "rank": 8,
+      "score": 2,
+      "sessionCount": 1,
+      "subject": "error handling",
+      "subjectKind": "search"
+    },
+    {
+      "counts": {
+        "eventType": {
+          "CommandExecuted": 1
+        },
+        "outcome": {
+          "success": 1
+        }
+      },
+      "evidence": {
+        "rowIds": [
+          4
+        ]
+      },
+      "firstSeen": "2026-06-21T09:03:00Z",
+      "lastSeen": "2026-06-21T09:03:00Z",
+      "rank": 9,
+      "score": 1,
+      "sessionCount": 1,
+      "subject": "cargo build",
+      "subjectKind": "command"
+    }
+  ],
+  "generatedAt": "<GENERATED_AT>",
+  "repositoryPath": "<REPO>",
+  "runMetadata": {
+    "analyzedEventCount": 10,
+    "analyzedSubjectCount": 9,
+    "firstEventId": 1,
+    "lastEventId": 10,
+    "storeSchemaVersion": 1
+  },
+  "schemaVersion": "1.0.0",
+  "storePath": "<STORE>"
+}
