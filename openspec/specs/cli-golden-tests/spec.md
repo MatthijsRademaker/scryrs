@@ -2,6 +2,21 @@
 
 ## Purpose
 TBD - created by archiving change task-a81f9fdb-3db8-47dd-a8da-8c416d982b32. Update Purpose after archive.
+
+## RECONCILIATION — Phase 2 Hotspot Materialization (2026-06-21)
+
+The Phase 2 hotspot materialization has been fully implemented and delivered. The following requirement is **superseded** by the Phase 2 verification specs:
+
+- **Superseded**: Requirement "hotspots placeholder output is verified by inline snapshot" and its scenario "hotspots /tmp produces exact inline snapshot output" — these asserted that `scryrs hotspots <PATH>` emits a placeholder JSON envelope `{"schemaVersion":"0.1.0","command":"hotspots","status":"placeholder"}` and that this output is verified by an insta inline snapshot. The live implementation now emits a real `HotspotsReport` (schemaVersion 1.0.0) with entries, scoring, and a `.scryrs/hotspots.json` artifact file, verified by the end-to-end test at `crates/scryrs-cli/tests/hotspot_e2e.rs` and integration tests at `crates/scryrs-cli/tests/`.
+
+**Canonical hotspot test coverage** (supersedes the above):
+- [`crates/scryrs-cli/tests/hotspot_e2e.rs`](../../crates/scryrs-cli/tests/hotspot_e2e.rs) — full record → SQLite → hotspots → artifact pipeline, multievent-family fixtures, empty-store, missing-store.
+- `crates/scryrs-cli/tests/` — hotspot integration tests with real SQLite fixtures.
+- [`openspec/specs/hotspot-verification/spec.md`](../hotspot-verification/spec.md) — canonical E2E verification requirements.
+
+**Closure change traceability**: `openspec/changes/task-56573ced-fdeb-49b2-aea6-41b30f19d2bf/specs/phase-2-closure/spec.md` documents the full evidence matrix mapping code/test artifacts to Phase 2 deliverables.
+
+All other requirements in this spec (help, help-json, version, snapshot update workflow) remain valid and are not affected by this reconciliation.
 ## Requirements
 ### Requirement: Help text output is verified by exact-match snapshot
 

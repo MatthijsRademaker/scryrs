@@ -2,6 +2,20 @@
 
 ## Purpose
 TBD - created by archiving change task-93754ce0-28cf-4a1b-b755-909aa7018c19. Update Purpose after archive.
+
+## RECONCILIATION — Phase 2 Hotspot Materialization (2026-06-21)
+
+The Phase 2 hotspot materialization has been fully implemented and delivered. The following requirement is **superseded** by the Phase 2 contractual specs:
+
+- **Superseded**: Requirement "Single placeholder command operates correctly" and its scenarios asserting that `write_hotspots_json()` emits a placeholder JSON envelope `{"schemaVersion":"0.1.0","command":"hotspots","status":"placeholder"}` and that the function has "no backend wiring" — these asserted that the hotspots command was a string-literal stub with no engine calls. The live implementation in `crates/scryrs-cli/src/lib.rs` now opens `.scryrs/scryrs.db` via `TraceQuery`, runs the full scoring engine in `crates/scryrs-core/src/scoring.rs`, and emits a real `HotspotsReport` (schemaVersion 1.0.0) with runMetadata, entries, evidence, and a `.scryrs/hotspots.json` artifact file.
+
+**Canonical Phase 2 contract** (supersedes the above):
+- [`openspec/specs/hotspot-report/spec.md`](../hotspot-report/spec.md) — `HotspotsReport` schema, scoring dimensions, exit codes, artifact file.
+- Live implementation in `crates/scryrs-cli/src/lib.rs` (function `write_hotspots_json`) and `crates/scryrs-core/src/scoring.rs` (function `score_hotspots`).
+
+**Closure change traceability**: `openspec/changes/task-56573ced-fdeb-49b2-aea6-41b30f19d2bf/specs/phase-2-closure/spec.md` documents the full evidence matrix mapping code/test artifacts to Phase 2 deliverables.
+
+All other requirements in this spec remain valid for CLI foundation closure and are not affected by this reconciliation.
 ## Requirements
 ### Requirement: Binary target exists and is buildable
 

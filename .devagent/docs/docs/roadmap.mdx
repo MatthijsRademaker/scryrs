@@ -10,12 +10,12 @@ The Phase 1 deterministic proxy-capture boundary is implemented:
 
 - `crates/scryrs-types/src/lib.rs` defines `TraceEvent` and related payload types.
 - `crates/scryrs-core/src/lib.rs` provides JSONL event ingestion with semantic validation, rejection diagnostics, and an append-only `.scryrs/scryrs.db` SQLite store.
-- `crates/scryrs-cli/src/lib.rs` exposes three commands: `scryrs record --stdin|--file <PATH>`, `scryrs hotspots <PATH>` (placeholder), and `scryrs init --agent <NAME>` for installing reference hooks.
+- `crates/scryrs-cli/src/lib.rs` exposes three commands: `scryrs record --stdin|--file <PATH>`, `scryrs hotspots <PATH>`, and `scryrs init --agent <NAME>` for installing reference hooks.
 - Reference hooks live at `hooks/pi/` (TypeScript extension) and `hooks/claude-code/` (JavaScript PreToolUse hook).
 - `scryrs.json` defines the hook-interface and record-invocation manifest at the repository root.
 - Docker-backed fail-open verification (`scripts/verify-trace-capture`) exercises both hooks end-to-end against the real `scryrs` binary.
 
-Phase 2 hotspot materialization and later-suite features are deferred per the delivery-phase ordering below.
+Phase 2 hotspot materialization is delivered: `scryrs hotspots <PATH>` opens `.scryrs/scryrs.db` via `TraceQuery`, runs deterministic scoring with a documented weight table and six-key tie-break, emits a versioned `HotspotsReport` (schemaVersion 1.0.0) to stdout and `.scryrs/hotspots.json`, and handles empty/missing/corrupt stores with correct exit codes. E2E tests prove the full record → SQLite → hotspots → artifact pipeline. Phase 3+ features (graph, proposal, adapter, runtime, dashboard, MCP, LLM) remain deferred per the delivery-phase ordering below.
 
 ## Phase Order
 
@@ -75,18 +75,20 @@ Hard non-goals for this phase (still deferred):
 - scryrs must not become an MCP server or callable business tool.
 - hooks must not contain business logic beyond formatting plus subprocess delegation.
 
-## Phase 2 - Hotspot Materialization
+## Phase 2 - Hotspot Materialization ✅ Delivered
 
 This phase turns raw event capture into first real product value.
 
-Required deliverables:
+Completed deliverables:
 
-- Replace placeholder `scryrs hotspots <PATH>` output with real hotspot analysis over persisted events.
-- Define ranking dimensions explicitly: files, symbols, searches, commands, docs, failures.
-- Emit stable machine-readable outputs suitable for later graph and proposal work.
-- Keep standalone workflow strong: user should get value without docs adapter, graph, or hosted service.
+- `scryrs hotspots <PATH>` reads `.scryrs/scryrs.db` via `TraceQuery` in `crates/scryrs-core/src/scoring.rs`.
+- Deterministic hotspot scoring with explicit weight table: `WEIGHT_FILE_OPENED=1`, `WEIGHT_SEARCH_RUN=2`, `WEIGHT_SYMBOL_INSPECTED=2`, `WEIGHT_COMMAND_EXECUTED=1`, `WEIGHT_DOC_RETRIEVED=2`, `WEIGHT_EDIT_MADE=3`, `WEIGHT_FAILED_LOOKUP=4`, with `FAILURE_BONUS=2` per-failure.
+- Six-key tie-break chain: `score DESC, sessionCount DESC, lastSeen DESC, subjectKind ASC, subject ASC, firstEventId ASC`.
+- Stable JSON contract: `HotspotsReport` (schemaVersion 1.0.0) with `runMetadata`, `entries`, and `command` fields emitted to stdout.
+- `.scryrs/hotspots.json` artifact file written alongside stdout output.
+- E2E test (`crates/scryrs-cli/tests/hotspot_e2e.rs`) covers full record → SQLite → hotspots → artifact pipeline, multievent-family fixtures, empty-store, and missing-store coverage.
 
-Recommended release boundary:
+Release boundary (achieved):
 
 ```text
 scryrs record --stdin
@@ -94,7 +96,7 @@ scryrs hotspots <PATH>
 /.scryrs/hotspots.json
 ```
 
-If phase 2 is strong, scryrs already has credible standalone utility.
+Phase 2 is strong — scryrs already has credible standalone utility.
 
 ## Phase 3 - Graph and Route Manifests
 
