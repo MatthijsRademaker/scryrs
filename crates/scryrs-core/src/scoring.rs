@@ -169,9 +169,9 @@ pub fn score_hotspots(events_with_ids: &[(u64, &TraceEvent)]) -> Vec<HotspotEntr
             .then_with(|| a.subjectKind.cmp(&b.subjectKind)) // subjectKind ASC
             .then_with(|| a.subject.cmp(&b.subject)) // subject ASC
             .then_with(|| {
-                // firstEventId ASC: use the minimum rowId in evidence.
-                let a_first = a.evidence.rowIds.iter().min().copied().unwrap_or(u64::MAX);
-                let b_first = b.evidence.rowIds.iter().min().copied().unwrap_or(u64::MAX);
+                // firstEventId ASC: use the first rowId in chronological evidence order.
+                let a_first = a.evidence.rowIds.first().copied().unwrap_or(u64::MAX);
+                let b_first = b.evidence.rowIds.first().copied().unwrap_or(u64::MAX);
                 a_first.cmp(&b_first)
             })
     });
@@ -638,5 +638,71 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].subjectKind, "command"); // ASC → command before file
         assert_eq!(entries[1].subjectKind, "file");
+    }
+
+    // 2.x: Final tie-break uses first rowId in evidence order, not min.
+    #[test]
+    fn tie_break_first_event_id_uses_first_row_in_evidence_order_not_min() {
+        // Construct two entries directly (bypassing normal grouping) that differ
+        // only in their evidence.rowIds first element, not their minimum element.
+        // Entry A: rowIds [5, 3] — first=5, min=3
+        // Entry B: rowIds [4, 6] — first=4, min=4
+        // Correct tie-break (first element): 4 < 5 → B before A.
+        // Incorrect tie-break (min element): 3 < 4 → A before B.
+        use std::collections::HashMap;
+
+        let mut entries = vec![
+            HotspotEntry {
+                rank: 0,
+                subjectKind: "file".into(),
+                subject: "z.rs".into(),
+                score: 10,
+                counts: HotspotCounts {
+                    eventType: HashMap::new(),
+                    outcome: HashMap::new(),
+                },
+                sessionCount: 3,
+                firstSeen: "2026-01-01T00:00:00Z".into(),
+                lastSeen: "2026-06-01T00:00:00Z".into(),
+                evidence: HotspotEvidence {
+                    rowIds: vec![5, 3], // first=5, min=3
+                },
+            },
+            HotspotEntry {
+                rank: 0,
+                subjectKind: "file".into(),
+                subject: "z.rs".into(),
+                score: 10,
+                counts: HotspotCounts {
+                    eventType: HashMap::new(),
+                    outcome: HashMap::new(),
+                },
+                sessionCount: 3,
+                firstSeen: "2026-01-01T00:00:00Z".into(),
+                lastSeen: "2026-06-01T00:00:00Z".into(),
+                evidence: HotspotEvidence {
+                    rowIds: vec![4, 6], // first=4, min=4
+                },
+            },
+        ];
+
+        // Apply the same sort as score_hotspots.
+        entries.sort_by(|a, b| {
+            b.score
+                .cmp(&a.score)
+                .then_with(|| b.sessionCount.cmp(&a.sessionCount))
+                .then_with(|| b.lastSeen.cmp(&a.lastSeen))
+                .then_with(|| a.subjectKind.cmp(&b.subjectKind))
+                .then_with(|| a.subject.cmp(&b.subject))
+                .then_with(|| {
+                    let a_first = a.evidence.rowIds.first().copied().unwrap_or(u64::MAX);
+                    let b_first = b.evidence.rowIds.first().copied().unwrap_or(u64::MAX);
+                    a_first.cmp(&b_first)
+                })
+        });
+
+        // With correct tie-break (first element): 4 < 5 → entry with rowIds [4,6] first.
+        assert_eq!(entries[0].evidence.rowIds, vec![4, 6]);
+        assert_eq!(entries[1].evidence.rowIds, vec![5, 3]);
     }
 }

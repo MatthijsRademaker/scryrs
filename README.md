@@ -52,7 +52,7 @@ xtask
 The CLI ships three commands:
 
 ```bash
-# Hotspot analysis placeholder (v0)
+# Hotspot analysis from recorded trace events
 cargo run -p scryrs-cli -- hotspots /path/to/repo
 
 # JSONL trace event ingestion
@@ -149,7 +149,7 @@ Discover, analyze, and navigate hotspots in your codebase.
 
 COMMANDS
   scryrs hotspots <PATH>
-      Emit a versioned JSON placeholder for repository hotspots.
+      Emit a versioned JSON hotspot report from recorded trace events.
   scryrs record --stdin
       Ingest JSONL trace events from stdin.
   scryrs record --file <PATH>
@@ -164,7 +164,7 @@ RECORD OUTPUT
   one per rejected non-empty line.
 
 HOTSPOTS OUTPUT
-  A single-line JSON placeholder on stdout.
+  A single-line JSON envelope on stdout:
 
 EXAMPLES
   scryrs hotspots /path/to/repo
@@ -181,8 +181,8 @@ OPTIONS
 
 EXIT CODES
   0    Success (hotspots: JSON written; record: all events accepted; init: hook installed)
-  1    Hotspots: I/O error writing output. Record: rejected events or I/O error. Init: I/O error.
-  2    Usage error (invalid arguments); record: also fatal I/O error (unreadable file or store failure); init: unsupported harness, collision, or self-install refusal
+  1    Hotspots: storage error. Record: rejected events or I/O error. Init: I/O error.
+  2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file or store failure); init: unsupported harness, collision, or self-install refusal
 ```
 
 **`--version`** prints the binary version:

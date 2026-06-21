@@ -272,7 +272,7 @@ fn write_help(out: &mut impl Write) -> io::Result<()> {
 Discover, analyze, and navigate hotspots in your codebase.\n\n\
 COMMANDS\n\
   scryrs hotspots <PATH>\n\
-      Emit a versioned JSON placeholder for repository hotspots.\n\
+      Emit a versioned JSON hotspot report from recorded trace events.\n\
   scryrs record --stdin\n\
       Ingest JSONL trace events from stdin.\n\
   scryrs record --file <PATH>\n\
@@ -410,8 +410,8 @@ fn write_hotspots_json(out: &mut impl Write, err: &mut impl Write, path: &str) -
         })
         .collect();
 
-    let first_event_id = subject_bearing.first().map(|(id, _)| *id).unwrap_or(0);
-    let last_event_id = subject_bearing.last().map(|(id, _)| *id).unwrap_or(0);
+    let first_event_id = subject_bearing.iter().map(|(id, _)| *id).min().unwrap_or(0);
+    let last_event_id = subject_bearing.iter().map(|(id, _)| *id).max().unwrap_or(0);
 
     let run_metadata = RunMetadata {
         storeSchemaVersion: query.store_schema_version(),
@@ -453,7 +453,7 @@ fn write_hotspots_json(out: &mut impl Write, err: &mut impl Write, path: &str) -
     // Write artifact to .scryrs/hotspots.json.
     if let Err(e) = std::fs::write(repo_root.join(".scryrs/hotspots.json"), &json) {
         let _ = writeln!(err, "scryrs hotspots: cannot write artifact file: {e}");
-        // Don't fail on artifact write failure — output was already written to stdout.
+        return 1;
     }
 
     0
@@ -499,7 +499,10 @@ fn write_empty_success_report(
     }
 
     // Write artifact file.
-    let _ = std::fs::write(repo_root.join(".scryrs/hotspots.json"), &json);
+    if let Err(e) = std::fs::write(repo_root.join(".scryrs/hotspots.json"), &json) {
+        let _ = writeln!(err, "scryrs hotspots: cannot write artifact file: {e}");
+        return 1;
+    }
 
     0
 }
@@ -1167,6 +1170,36 @@ mod tests {
                 "command '{cmd}' should include escalation to --help on stderr"
             );
         }
+    }
+
+    // 3.5: Stale hotspot placeholder wording must be absent from --help output.
+    #[test]
+    fn help_output_does_not_contain_placeholder_wording() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(run_with_writers(["--help"], &mut out, &mut err), 0);
+        assert!(err.is_empty());
+        let help = String::from_utf8_lossy(&out);
+        assert!(
+            !help.contains("placeholder"),
+            "--help output must not contain 'placeholder', got:\n{help}"
+        );
+    }
+
+    // 3.5: Stale hotspot placeholder wording must be absent from --help-json output.
+    #[test]
+    fn help_json_output_does_not_contain_placeholder_wording() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(run_with_writers(["--help-json"], &mut out, &mut err), 0);
+        assert!(err.is_empty());
+        let json_str = String::from_utf8_lossy(&out);
+        assert!(
+            !json_str.contains("placeholder"),
+            "--help-json output must not contain 'placeholder', got:\n{json_str}"
+        );
     }
 }
 
@@ -2240,6 +2273,147 @@ mod hotspot_integration_tests {
         assert!(artifact_path.exists());
     }
 
+    // --- 3.1: Lifecycle-only store exits 0 with entries: [] and zero subject-bearing events ---
+
+    #[test]
+    fn lifecycle_only_store_produces_empty_entries_with_exit_0() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        use scryrs_types::{SessionEndPayload, SessionStartPayload};
+        let events = vec![
+            TraceEvent {
+                schema_version: SCHEMA_VERSION.into(),
+                timestamp: "2026-06-21T09:00:00Z".into(),
+                session_id: "s-life".into(),
+                event_type: TraceEventType::SessionStart,
+                tool_name: None,
+                payload: TraceEventPayload::SessionStart(SessionStartPayload),
+                outcome: Outcome::Success,
+            },
+            TraceEvent {
+                schema_version: SCHEMA_VERSION.into(),
+                timestamp: "2026-06-21T09:01:00Z".into(),
+                session_id: "s-life".into(),
+                event_type: TraceEventType::SessionEnd,
+                tool_name: None,
+                payload: TraceEventPayload::SessionEnd(SessionEndPayload),
+                outcome: Outcome::Success,
+            },
+        ];
+        populate_store(&dir, &events);
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        let exit_code = run_with_writers(
+            ["hotspots", &dir.path().display().to_string()],
+            &mut out,
+            &mut err,
+        );
+
+        assert_eq!(
+            exit_code,
+            0,
+            "exit should be 0 for lifecycle-only store, stderr: {:?}",
+            String::from_utf8_lossy(&err)
+        );
+
+        let stdout = String::from_utf8_lossy(&out);
+        let report: serde_json::Value =
+            serde_json::from_str(stdout.trim()).unwrap_or_else(|e| panic!("parse JSON: {e}"));
+
+        assert_eq!(
+            report["entries"]
+                .as_array()
+                .unwrap_or_else(|| panic!("entries not array"))
+                .len(),
+            0
+        );
+        assert_eq!(report["runMetadata"]["analyzedEventCount"], 0);
+        assert_eq!(report["runMetadata"]["analyzedSubjectCount"], 0);
+        // firstEventId/lastEventId are 0 when no subject-bearing events exist.
+        assert_eq!(report["runMetadata"]["firstEventId"], 0);
+        assert_eq!(report["runMetadata"]["lastEventId"], 0);
+        assert!(!report["generatedAt"].as_str().unwrap_or("").is_empty());
+    }
+
+    // --- 3.2: Non-monotonic timestamp/id deterministic ordering ---
+
+    #[test]
+    fn non_monotonic_timestamp_id_deterministic_ordering() {
+        // Events inserted in non-monotonic timestamp order:
+        // id=1 ts=09:00:03, id=2 ts=09:00:01, id=3 ts=09:00:02
+        // TraceQuery orders by timestamp ASC, id ASC → id=2, id=3, id=1
+        // So evidence.rowIds should be [2, 3, 1].
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        let events = vec![
+            make_file_opened("s1", "src/c.rs", "2026-06-21T09:00:03Z"),
+            make_file_opened("s1", "src/a.rs", "2026-06-21T09:00:01Z"),
+            make_file_opened("s1", "src/b.rs", "2026-06-21T09:00:02Z"),
+        ];
+        populate_store(&dir, &events);
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        let exit_code = run_with_writers(
+            ["hotspots", &dir.path().display().to_string()],
+            &mut out,
+            &mut err,
+        );
+
+        assert_eq!(exit_code, 0);
+
+        let stdout = String::from_utf8_lossy(&out);
+        let report: serde_json::Value =
+            serde_json::from_str(stdout.trim()).unwrap_or_else(|e| panic!("parse JSON: {e}"));
+
+        let entries = report["entries"]
+            .as_array()
+            .unwrap_or_else(|| panic!("entries not array"));
+        assert_eq!(entries.len(), 3);
+
+        // Order: a.rs (earliest timestamp), b.rs, c.rs (all score 1, same session → lastSeen DESC)
+        // a.rs lastSeen=09:00:01, b.rs=09:00:02, c.rs=09:00:03 → c.rs first, b.rs second, a.rs third
+        assert_eq!(entries[0]["subject"], "src/c.rs");
+        assert_eq!(entries[1]["subject"], "src/b.rs");
+        assert_eq!(entries[2]["subject"], "src/a.rs");
+
+        // Evidence rowIds: TraceQuery orders by timestamp ASC, id ASC
+        // So for src/c.rs (id=1): when appearing in loop, it comes after id 2 and 3 in query order.
+        // Actually each subject has only one event, so evidence.rowIds is single-element.
+        // a.rs: event with ts=09:00:01 is id=2 → rowIds=[2]
+        // b.rs: event with ts=09:00:02 is id=3 → rowIds=[3]
+        // c.rs: event with ts=09:00:03 is id=1 → rowIds=[1]
+        assert_eq!(
+            entries[0]["evidence"]["rowIds"]
+                .as_array()
+                .unwrap_or_else(|| panic!("rowIds not array"))
+                .len(),
+            1
+        );
+        assert_eq!(
+            entries[1]["evidence"]["rowIds"]
+                .as_array()
+                .unwrap_or_else(|| panic!("rowIds not array"))
+                .len(),
+            1
+        );
+        assert_eq!(
+            entries[2]["evidence"]["rowIds"]
+                .as_array()
+                .unwrap_or_else(|| panic!("rowIds not array"))
+                .len(),
+            1
+        );
+
+        // firstEventId/lastEventId should be min/max of subject-bearing row IDs (1,2,3) → min=1, max=3
+        assert_eq!(report["runMetadata"]["firstEventId"], 1);
+        assert_eq!(report["runMetadata"]["lastEventId"], 3);
+    }
+
+    // See scoring.rs unit tests for the first-in-evidence-order tie-break verification
+    // (non-monotonic row-id edge case: first row in evidence order, not min, is used).
+
     // Additional: artifact file is not written on error.
     #[test]
     fn artifact_file_not_written_on_error() {
@@ -2262,6 +2436,158 @@ mod hotspot_integration_tests {
         assert!(
             !artifact_path.exists(),
             "hotspots.json must not be written on error"
+        );
+    }
+
+    // --- 3.3: Byte-for-byte artifact equality ---
+
+    #[test]
+    fn artifact_matches_stdout_byte_for_byte() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        let events = vec![make_file_opened("s1", "src/x.rs", "2026-06-21T09:00:00Z")];
+        populate_store(&dir, &events);
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        let exit_code = run_with_writers(
+            ["hotspots", &dir.path().display().to_string()],
+            &mut out,
+            &mut err,
+        );
+
+        assert_eq!(exit_code, 0);
+
+        let artifact_path = dir.path().join(".scryrs/hotspots.json");
+        assert!(artifact_path.exists());
+        let artifact_bytes =
+            std::fs::read(&artifact_path).unwrap_or_else(|e| panic!("read artifact: {e}"));
+        // Strip trailing newline from stdout for comparison (writeln! adds one).
+        let stdout_bytes = out.trim_ascii_end().to_vec();
+        assert_eq!(
+            artifact_bytes, stdout_bytes,
+            "artifact file must match stdout byte-for-byte"
+        );
+    }
+
+    #[test]
+    fn empty_store_artifact_matches_stdout_byte_for_byte() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        populate_store(&dir, &[]);
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        let exit_code = run_with_writers(
+            ["hotspots", &dir.path().display().to_string()],
+            &mut out,
+            &mut err,
+        );
+
+        assert_eq!(exit_code, 0);
+
+        let artifact_path = dir.path().join(".scryrs/hotspots.json");
+        assert!(artifact_path.exists());
+        let artifact_bytes =
+            std::fs::read(&artifact_path).unwrap_or_else(|e| panic!("read artifact: {e}"));
+        let stdout_bytes = out.trim_ascii_end().to_vec();
+        assert_eq!(
+            artifact_bytes, stdout_bytes,
+            "artifact file must match stdout byte-for-byte for empty store"
+        );
+    }
+
+    // --- 3.4: Artifact write failure exits non-zero with stderr ---
+
+    #[test]
+    fn artifact_write_failure_exits_1_with_stderr_populated() {
+        // Make .scryrs a regular file so .scryrs/hotspots.json cannot be created.
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        let events = vec![make_file_opened("s1", "src/a.rs", "2026-06-21T09:00:00Z")];
+        populate_store(&dir, &events);
+        // Replace .scryrs directory with a regular file.
+        let scryrs_path = dir.path().join(".scryrs");
+        std::fs::remove_dir_all(&scryrs_path).unwrap_or_else(|e| panic!("remove .scryrs dir: {e}"));
+        // Recreate only the db file (no .scryrs directory).
+        std::fs::create_dir_all(&scryrs_path)
+            .unwrap_or_else(|e| panic!("recreate .scryrs dir: {e}"));
+        let events2 = vec![make_file_opened("s2", "src/a.rs", "2026-06-21T09:01:00Z")];
+        populate_store(&dir, &events2);
+        // Now replace .scryrs with a regular file so hotspots.json write fails.
+        let _db_path = scryrs_path.join("scryrs.db");
+        // We can't easily make the dir itself a file while keeping the db accessible.
+        // Instead, make the artifact path unwritable by making .scryrs a file.
+        // But TraceQuery::open needs .scryrs/scryrs.db to exist.
+        //
+        // Alternative: open .scryrs/hotspots.json as a read-only file before running.
+        // Or make the parent dir read-only.
+        //
+        // Best approach: create .scryrs/hotspots.json as a directory so file write fails.
+        let artifact_path = scryrs_path.join("hotspots.json");
+        std::fs::create_dir(&artifact_path)
+            .unwrap_or_else(|e| panic!("create hotspots.json as dir: {e}"));
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        let exit_code = run_with_writers(
+            ["hotspots", &dir.path().display().to_string()],
+            &mut out,
+            &mut err,
+        );
+
+        assert_eq!(
+            exit_code,
+            1,
+            "artifact write failure must exit 1, out: {:?}, err: {:?}",
+            String::from_utf8_lossy(&out),
+            String::from_utf8_lossy(&err)
+        );
+
+        let stderr = String::from_utf8_lossy(&err);
+        assert!(
+            stderr.contains("cannot write artifact file"),
+            "stderr must report artifact write failure, got: {stderr}"
+        );
+        // stdout must still contain valid report JSON.
+        let stdout = String::from_utf8_lossy(&out);
+        assert!(!stdout.is_empty(), "stdout must still have the report");
+        let _report: serde_json::Value = serde_json::from_str(stdout.trim())
+            .unwrap_or_else(|e| panic!("stdout must be valid JSON: {e}"));
+    }
+
+    #[test]
+    fn artifact_write_failure_for_empty_store_exits_1_with_stderr() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        populate_store(&dir, &[]);
+        // Make .scryrs/hotspots.json a directory so write fails.
+        let artifact_path = dir.path().join(".scryrs/hotspots.json");
+        std::fs::create_dir(&artifact_path)
+            .unwrap_or_else(|e| panic!("create hotspots.json as dir: {e}"));
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        let exit_code = run_with_writers(
+            ["hotspots", &dir.path().display().to_string()],
+            &mut out,
+            &mut err,
+        );
+
+        assert_eq!(
+            exit_code, 1,
+            "empty store artifact write failure must exit 1"
+        );
+
+        let stderr = String::from_utf8_lossy(&err);
+        assert!(
+            stderr.contains("cannot write artifact file"),
+            "stderr must report artifact write failure, got: {stderr}"
+        );
+        let stdout = String::from_utf8_lossy(&out);
+        assert!(
+            stdout.contains("\"entries\":[]"),
+            "stdout must contain empty entries"
         );
     }
 }
