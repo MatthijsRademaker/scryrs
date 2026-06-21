@@ -1,9 +1,15 @@
 //! Shared contracts for scryrs workspace crates.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Version for machine-facing contracts emitted by this scaffold.
 pub const SCHEMA_VERSION: &str = "0.1.0";
+
+/// Version for the hotspot report output contract, independent of
+/// `SCHEMA_VERSION` which governs trace event wire format.
+pub const HOTSPOT_SCHEMA_VERSION: &str = "1.0.0";
 
 /// Suite component metadata used by feature-gated crates and CLI output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,11 +224,58 @@ pub struct FailedLookupPayload {
 
 // --- Adjacent types (unchanged from scaffold) ---
 
-/// Ranked knowledge hotspot from deterministic analysis.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Hotspot {
+/// Ranked hotspot entry carrying full evidence from deterministic analysis.
+#[allow(non_snake_case)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HotspotEntry {
+    pub rank: u32,
+    pub subjectKind: String,
     pub subject: String,
     pub score: u32,
+    pub counts: HotspotCounts,
+    pub sessionCount: u32,
+    pub firstSeen: String,
+    pub lastSeen: String,
+    pub evidence: HotspotEvidence,
+}
+
+/// Per-event-type and per-outcome breakdown counts for a hotspot entry.
+#[allow(non_snake_case)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HotspotCounts {
+    pub eventType: HashMap<String, u32>,
+    pub outcome: HashMap<String, u32>,
+}
+
+/// Ordered SQLite row ID references for all contributing events.
+#[allow(non_snake_case)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HotspotEvidence {
+    pub rowIds: Vec<u64>,
+}
+
+/// Top-level hotspot report envelope emitted to stdout and `.scryrs/hotspots.json`.
+#[allow(non_snake_case)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HotspotsReport {
+    pub schemaVersion: String,
+    pub command: String,
+    pub repositoryPath: String,
+    pub storePath: String,
+    pub runMetadata: RunMetadata,
+    pub generatedAt: String,
+    pub entries: Vec<HotspotEntry>,
+}
+
+/// Deterministic metadata derived from the SQLite store state.
+#[allow(non_snake_case)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RunMetadata {
+    pub storeSchemaVersion: i64,
+    pub analyzedEventCount: u64,
+    pub analyzedSubjectCount: u64,
+    pub firstEventId: u64,
+    pub lastEventId: u64,
 }
 
 /// Knowledge graph node placeholder.
@@ -736,5 +789,210 @@ mod tests {
                 "JSON must not contain harness-specific field: '{forbidden}'"
             );
         }
+    }
+
+    // --- Hotspot types (Hotspot Foundation 02) ---
+
+    #[test]
+    fn hotspot_schema_version_is_independent() {
+        assert_eq!(HOTSPOT_SCHEMA_VERSION, "1.0.0");
+        assert_ne!(HOTSPOT_SCHEMA_VERSION, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn hotspot_entry_serialization_round_trip() {
+        let mut event_type_counts = HashMap::new();
+        event_type_counts.insert("FileOpened".to_string(), 3u32);
+        event_type_counts.insert("EditMade".to_string(), 2u32);
+
+        let mut outcome_counts = HashMap::new();
+        outcome_counts.insert("success".to_string(), 4u32);
+        outcome_counts.insert("failure".to_string(), 1u32);
+
+        let entry = HotspotEntry {
+            rank: 1,
+            subjectKind: "file".to_string(),
+            subject: "src/main.rs".to_string(),
+            score: 11,
+            counts: HotspotCounts {
+                eventType: event_type_counts,
+                outcome: outcome_counts,
+            },
+            sessionCount: 2,
+            firstSeen: "2026-06-21T09:00:00Z".to_string(),
+            lastSeen: "2026-06-21T12:00:00Z".to_string(),
+            evidence: HotspotEvidence {
+                rowIds: vec![3, 7, 12, 45, 67],
+            },
+        };
+
+        let json = match serde_json::to_string(&entry) {
+            Ok(v) => v,
+            Err(e) => panic!("serialize HotspotEntry: {e}"),
+        };
+        let parsed: serde_json::Value = match serde_json::from_str(&json) {
+            Ok(v) => v,
+            Err(e) => panic!("deserialize HotspotEntry JSON: {e}"),
+        };
+
+        assert_eq!(parsed["rank"], 1);
+        assert_eq!(parsed["subjectKind"], "file");
+        assert_eq!(parsed["subject"], "src/main.rs");
+        assert_eq!(parsed["score"], 11);
+        assert_eq!(parsed["sessionCount"], 2);
+        assert_eq!(parsed["firstSeen"], "2026-06-21T09:00:00Z");
+        assert_eq!(parsed["lastSeen"], "2026-06-21T12:00:00Z");
+        assert_eq!(parsed["counts"]["eventType"]["FileOpened"], 3);
+        assert_eq!(parsed["counts"]["eventType"]["EditMade"], 2);
+        assert_eq!(parsed["counts"]["outcome"]["success"], 4);
+        assert_eq!(parsed["counts"]["outcome"]["failure"], 1);
+        assert_eq!(
+            parsed["evidence"]["rowIds"]
+                .as_array()
+                .unwrap_or_else(|| panic!("rowIds not an array"))
+                .len(),
+            5
+        );
+    }
+
+    #[test]
+    fn hotspots_report_envelope_serialization_round_trip() {
+        let mut event_type_counts = HashMap::new();
+        event_type_counts.insert("SearchRun".to_string(), 1u32);
+        let mut outcome_counts = HashMap::new();
+        outcome_counts.insert("success".to_string(), 1u32);
+
+        let entry = HotspotEntry {
+            rank: 1,
+            subjectKind: "search".to_string(),
+            subject: "routing".to_string(),
+            score: 2,
+            counts: HotspotCounts {
+                eventType: event_type_counts,
+                outcome: outcome_counts,
+            },
+            sessionCount: 1,
+            firstSeen: "2026-06-21T10:00:00Z".to_string(),
+            lastSeen: "2026-06-21T10:00:00Z".to_string(),
+            evidence: HotspotEvidence { rowIds: vec![5] },
+        };
+
+        let report = HotspotsReport {
+            schemaVersion: HOTSPOT_SCHEMA_VERSION.into(),
+            command: "hotspots".into(),
+            repositoryPath: "/abs/path".into(),
+            storePath: "/abs/path/.scryrs/scryrs.db".into(),
+            runMetadata: RunMetadata {
+                storeSchemaVersion: 1,
+                analyzedEventCount: 1,
+                analyzedSubjectCount: 1,
+                firstEventId: 1,
+                lastEventId: 1,
+            },
+            generatedAt: "2026-06-21T12:00:00Z".into(),
+            entries: vec![entry],
+        };
+
+        let json = match serde_json::to_string(&report) {
+            Ok(v) => v,
+            Err(e) => panic!("serialize HotspotsReport: {e}"),
+        };
+        let parsed: serde_json::Value = match serde_json::from_str(&json) {
+            Ok(v) => v,
+            Err(e) => panic!("deserialize HotspotsReport JSON: {e}"),
+        };
+
+        assert_eq!(parsed["schemaVersion"], "1.0.0");
+        assert_eq!(parsed["command"], "hotspots");
+        assert_eq!(parsed["repositoryPath"], "/abs/path");
+        assert_eq!(parsed["storePath"], "/abs/path/.scryrs/scryrs.db");
+        assert_eq!(parsed["runMetadata"]["storeSchemaVersion"], 1);
+        assert_eq!(parsed["runMetadata"]["analyzedEventCount"], 1);
+        assert_eq!(parsed["runMetadata"]["analyzedSubjectCount"], 1);
+        assert_eq!(parsed["generatedAt"], "2026-06-21T12:00:00Z");
+        assert_eq!(
+            parsed["entries"]
+                .as_array()
+                .unwrap_or_else(|| panic!("entries not an array"))
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn empty_entries_hotspots_report_serializes_correctly() {
+        let report = HotspotsReport {
+            schemaVersion: HOTSPOT_SCHEMA_VERSION.into(),
+            command: "hotspots".into(),
+            repositoryPath: "/abs/path".into(),
+            storePath: "/abs/path/.scryrs/scryrs.db".into(),
+            runMetadata: RunMetadata {
+                storeSchemaVersion: 1,
+                analyzedEventCount: 0,
+                analyzedSubjectCount: 0,
+                firstEventId: 0,
+                lastEventId: 0,
+            },
+            generatedAt: "2026-06-21T12:00:00Z".into(),
+            entries: vec![],
+        };
+
+        let json = match serde_json::to_string(&report) {
+            Ok(v) => v,
+            Err(e) => panic!("serialize empty report: {e}"),
+        };
+        let parsed: serde_json::Value = match serde_json::from_str(&json) {
+            Ok(v) => v,
+            Err(e) => panic!("deserialize empty report: {e}"),
+        };
+        assert_eq!(
+            parsed["entries"]
+                .as_array()
+                .unwrap_or_else(|| panic!("entries not an array"))
+                .len(),
+            0
+        );
+        assert_eq!(parsed["runMetadata"]["analyzedEventCount"], 0);
+    }
+
+    #[test]
+    fn hotspot_entry_round_trip_via_value() {
+        // Full serialization round-trip through serde_json::Value.
+        let original = HotspotEntry {
+            rank: 2,
+            subjectKind: "command".to_string(),
+            subject: "cargo build".to_string(),
+            score: 1,
+            counts: HotspotCounts {
+                eventType: {
+                    let mut m = HashMap::new();
+                    m.insert("CommandExecuted".to_string(), 1u32);
+                    m
+                },
+                outcome: {
+                    let mut m = HashMap::new();
+                    m.insert("success".to_string(), 1u32);
+                    m
+                },
+            },
+            sessionCount: 1,
+            firstSeen: "2026-06-21T09:00:00Z".to_string(),
+            lastSeen: "2026-06-21T09:00:00Z".to_string(),
+            evidence: HotspotEvidence { rowIds: vec![42] },
+        };
+
+        let json = match serde_json::to_string(&original) {
+            Ok(v) => v,
+            Err(e) => panic!("serialize: {e}"),
+        };
+        // Can't deserialize because HotspotEntry only derives Serialize, not Deserialize.
+        // But we can verify the JSON is valid.
+        let _v: serde_json::Value = match serde_json::from_str(&json) {
+            Ok(v) => v,
+            Err(e) => panic!("valid JSON: {e}"),
+        };
+        assert!(json.contains("\"rank\":2"));
+        assert!(json.contains("\"score\":1"));
+        assert!(json.contains("\"rowIds\":[42]"));
     }
 }

@@ -4,12 +4,14 @@
 use std::io::{self, Read, Write};
 
 use clap::{Arg, ArgAction, Command};
-use scryrs_types::SCHEMA_VERSION;
+use scryrs_types::{HOTSPOT_SCHEMA_VERSION, SCHEMA_VERSION};
 
 mod init;
 
 #[cfg(feature = "core")]
-use scryrs_core::{CANONICAL_STORE_PATH, EventStore, ingest_jsonl};
+use scryrs_core::{
+    CANONICAL_STORE_PATH, EventStore, QueryError, TraceQuery, ingest_jsonl, score_hotspots,
+};
 
 #[cfg(feature = "core")]
 mod store_override {
@@ -161,7 +163,13 @@ where
     match cmd.try_get_matches_from(&args) {
         Ok(matches) => {
             match matches.subcommand() {
-                Some(("hotspots", _)) => write_hotspots_json(&mut out).map_or(1, |_| 0),
+                Some(("hotspots", m)) => {
+                    let path = m
+                        .get_one::<String>("PATH")
+                        .map(|s| s.as_str())
+                        .unwrap_or(".");
+                    write_hotspots_json(&mut out, &mut err, path)
+                }
                 Some(("record", m)) => execute_record(&mut out, &mut err, &mut stdin, m),
                 Some(("init", m)) => {
                     let agent = m
@@ -283,12 +291,27 @@ RECORD OUTPUT\n\
   Rejection diagnostics are written as JSON objects to stderr,\n\
   one per rejected non-empty line.\n\n\
 HOTSPOTS OUTPUT\n\
-  A single-line JSON placeholder on stdout:\n\
+  A single-line JSON envelope on stdout:\n\
     {{\n\
       \"schemaVersion\": \"{}\",\n\
       \"command\": \"hotspots\",\n\
-      \"status\": \"placeholder\"\n\
-    }}\n\n\
+      \"repositoryPath\": \"<absolute path>\",\n\
+      \"storePath\": \"<absolute path to .scryrs/scryrs.db>\",\n\
+      \"runMetadata\": {{\n\
+        \"storeSchemaVersion\": <integer>,\n\
+        \"analyzedEventCount\": <count>,\n\
+        \"analyzedSubjectCount\": <count>,\n\
+        \"firstEventId\": <id>,\n\
+        \"lastEventId\": <id>\n\
+      }},\n\
+      \"generatedAt\": \"<ISO 8601 timestamp>\",\n\
+      \"entries\": [...]\n\
+    }}\n\
+  Each entry carries rank, subjectKind, subject, score,\n\
+  per-event-type counts, per-outcome counts, sessionCount,\n\
+  firstSeen/lastSeen timestamps, and evidence rowIds.\n\
+  Empty stores produce entries: [].\n\
+  On success, the report is also written to .scryrs/hotspots.json.\n\
 EXAMPLES\n\
   scryrs hotspots /path/to/repo\n\
   scryrs hotspots .\n\
@@ -301,19 +324,232 @@ OPTIONS\n\
   -V, --version    Print version and exit\n\
   -hj, --help-json Print machine-readable CLI surface description and exit\n\n\
 EXIT CODES\n\
-  0    Success (hotspots: JSON written; record: all events accepted)\n\
-  1    Hotspots: I/O error writing output. Record: rejected events or I/O error\n\
-  2    Usage error (invalid arguments); record: also fatal I/O error (unreadable file or store failure)",
-        SCHEMA_VERSION, SCHEMA_VERSION
+  0    Success (hotspots: JSON written; record: all events accepted; init: hook installed)\n\
+  1    Hotspots: storage error. Record: rejected events or I/O error. Init: I/O error.\n\
+  2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file or store failure); init: unsupported harness, collision, or self-install refusal",
+        SCHEMA_VERSION, HOTSPOT_SCHEMA_VERSION
     )
 }
 
-fn write_hotspots_json(out: &mut impl Write) -> io::Result<()> {
-    write!(
-        out,
-        "{{\"schemaVersion\":\"{}\",\"command\":\"hotspots\",\"status\":\"placeholder\"}}",
-        SCHEMA_VERSION
-    )
+#[cfg(feature = "core")]
+fn write_hotspots_json(out: &mut impl Write, err: &mut impl Write, path: &str) -> i32 {
+    use scryrs_types::{HotspotsReport, RunMetadata};
+
+    // Resolve to absolute path.
+    let repo_root = match std::path::absolute(path) {
+        Ok(p) => p,
+        Err(e) => {
+            let _ = writeln!(err, "scryrs hotspots: cannot resolve path '{path}': {e}");
+            return 2;
+        }
+    };
+
+    let store_path = repo_root.join(".scryrs/scryrs.db");
+
+    // Open the trace query read model.
+    let query = match TraceQuery::open(&repo_root) {
+        Ok(q) => q,
+        Err(QueryError::MissingStore) => {
+            let _ = writeln!(
+                err,
+                "scryrs hotspots: datastore not found at {}",
+                store_path.display()
+            );
+            return 2;
+        }
+        Err(QueryError::UnsupportedStore(msg)) => {
+            let _ = writeln!(err, "scryrs hotspots: unsupported datastore: {msg}");
+            return 2;
+        }
+        Err(QueryError::StorageError(e)) => {
+            let _ = writeln!(err, "scryrs hotspots: storage error: {e}");
+            return 1;
+        }
+        // EmptyStore is never returned by open(), but handle it for exhaustiveness.
+        _ => {
+            let _ = writeln!(err, "scryrs hotspots: unexpected error opening store");
+            return 1;
+        }
+    };
+
+    // Materialize events with row IDs.
+    let events_with_ids = match query.iter_events_with_ids_ordered() {
+        Ok(events) => events,
+        Err(QueryError::EmptyStore) => {
+            // Empty store → produce report with empty entries.
+            return write_empty_success_report(
+                out,
+                err,
+                &repo_root,
+                &store_path,
+                query.store_schema_version(),
+            );
+        }
+        Err(QueryError::StorageError(e)) => {
+            let _ = writeln!(err, "scryrs hotspots: storage error: {e}");
+            return 1;
+        }
+        Err(e) => {
+            let _ = writeln!(err, "scryrs hotspots: {e}");
+            return 1;
+        }
+    };
+
+    // Compute runMetadata from events.
+    let subject_bearing: Vec<_> = events_with_ids
+        .iter()
+        .filter(|(_, e)| e.subject().is_some())
+        .collect();
+
+    let subject_set: std::collections::HashSet<String> = subject_bearing
+        .iter()
+        .filter_map(|(_, e)| {
+            let kind = e.subject_kind()?;
+            let subj = e.subject()?;
+            Some(format!("{kind}:{subj}"))
+        })
+        .collect();
+
+    let first_event_id = subject_bearing.first().map(|(id, _)| *id).unwrap_or(0);
+    let last_event_id = subject_bearing.last().map(|(id, _)| *id).unwrap_or(0);
+
+    let run_metadata = RunMetadata {
+        storeSchemaVersion: query.store_schema_version(),
+        analyzedEventCount: subject_bearing.len() as u64,
+        analyzedSubjectCount: subject_set.len() as u64,
+        firstEventId: first_event_id,
+        lastEventId: last_event_id,
+    };
+
+    // Score hotspots.
+    let event_refs: Vec<(u64, &scryrs_types::TraceEvent)> =
+        events_with_ids.iter().map(|(id, e)| (*id, e)).collect();
+    let entries = score_hotspots(&event_refs);
+
+    // Build report.
+    let report = HotspotsReport {
+        schemaVersion: HOTSPOT_SCHEMA_VERSION.into(),
+        command: "hotspots".into(),
+        repositoryPath: repo_root.display().to_string(),
+        storePath: store_path.display().to_string(),
+        runMetadata: run_metadata,
+        generatedAt: chrono_now(),
+        entries,
+    };
+
+    // Serialize and output.
+    let json = match serde_json::to_string(&report) {
+        Ok(j) => j,
+        Err(e) => {
+            let _ = writeln!(err, "scryrs hotspots: serialization error: {e}");
+            return 1;
+        }
+    };
+
+    if writeln!(out, "{json}").is_err() {
+        return 1;
+    }
+
+    // Write artifact to .scryrs/hotspots.json.
+    if let Err(e) = std::fs::write(repo_root.join(".scryrs/hotspots.json"), &json) {
+        let _ = writeln!(err, "scryrs hotspots: cannot write artifact file: {e}");
+        // Don't fail on artifact write failure — output was already written to stdout.
+    }
+
+    0
+}
+
+/// Write success report for an empty (but valid) store.
+#[cfg(feature = "core")]
+fn write_empty_success_report(
+    out: &mut impl Write,
+    err: &mut impl Write,
+    repo_root: &std::path::Path,
+    store_path: &std::path::Path,
+    store_schema_version: i64,
+) -> i32 {
+    use scryrs_types::{HotspotsReport, RunMetadata};
+
+    let report = HotspotsReport {
+        schemaVersion: HOTSPOT_SCHEMA_VERSION.into(),
+        command: "hotspots".into(),
+        repositoryPath: repo_root.display().to_string(),
+        storePath: store_path.display().to_string(),
+        runMetadata: RunMetadata {
+            storeSchemaVersion: store_schema_version,
+            analyzedEventCount: 0,
+            analyzedSubjectCount: 0,
+            firstEventId: 0,
+            lastEventId: 0,
+        },
+        generatedAt: chrono_now(),
+        entries: vec![],
+    };
+
+    let json = match serde_json::to_string(&report) {
+        Ok(j) => j,
+        Err(e) => {
+            let _ = writeln!(err, "scryrs hotspots: serialization error: {e}");
+            return 1;
+        }
+    };
+
+    if writeln!(out, "{json}").is_err() {
+        return 1;
+    }
+
+    // Write artifact file.
+    let _ = std::fs::write(repo_root.join(".scryrs/hotspots.json"), &json);
+
+    0
+}
+
+/// Generate an ISO 8601 timestamp.
+#[cfg(feature = "core")]
+fn chrono_now() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = now.as_secs();
+    // Format as ISO 8601: YYYY-MM-DDTHH:MM:SSZ
+    // Simple formatting without chrono dependency.
+    let days_since_epoch = secs / 86400;
+    let time_of_day = secs % 86400;
+    let hours = time_of_day / 3600;
+    let minutes = (time_of_day % 3600) / 60;
+    let seconds = time_of_day % 60;
+
+    // Calculate year/month/day from days since Unix epoch (1970-01-01).
+    let (year, month, day) = days_to_ymd(days_since_epoch as i64);
+
+    format!("{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}Z")
+}
+
+/// Convert days since Unix epoch to (year, month, day).
+#[cfg(feature = "core")]
+fn days_to_ymd(days: i64) -> (i64, u32, u32) {
+    // Algorithm from http://howardhinnant.github.io/date_algorithms.html
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u32; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
+}
+
+#[cfg(not(feature = "core"))]
+fn write_hotspots_json(out: &mut impl Write, err: &mut impl Write, _path: &str) -> i32 {
+    let _ = writeln!(
+        err,
+        "scryrs hotspots: unavailable (core feature not enabled)"
+    );
+    let _ = writeln!(err, "See `scryrs --help`");
+    2
 }
 
 #[cfg(feature = "core")]
@@ -515,9 +751,13 @@ fn cli_surface_doc() -> String {
                 "output": {
                     "mimeType": "application/json",
                     "fields": [
-                        {"name": "schemaVersion", "type": "string", "description": "Version of the output envelope format", "optional": false},
+                        {"name": "schemaVersion", "type": "string", "description": "Version of the hotspot report output format (independent of trace event version)", "optional": false},
                         {"name": "command", "type": "string", "description": "Name of the executed command", "optional": false},
-                        {"name": "status", "type": "string", "description": "Execution status indicator", "optional": false}
+                        {"name": "repositoryPath", "type": "string", "description": "Resolved absolute path to the repository root", "optional": false},
+                        {"name": "storePath", "type": "string", "description": "Resolved absolute path to .scryrs/scryrs.db", "optional": false},
+                        {"name": "runMetadata", "type": "object", "description": "Deterministic metadata from store state (storeSchemaVersion, analyzedEventCount, analyzedSubjectCount, firstEventId, lastEventId)", "optional": false},
+                        {"name": "generatedAt", "type": "string", "description": "ISO 8601 wall-clock timestamp", "optional": false},
+                        {"name": "entries", "type": "array", "description": "Array of ranked HotspotEntry objects (empty for stores with no subject-bearing events)", "optional": false}
                     ]
                 }
             },
@@ -572,9 +812,9 @@ fn cli_surface_doc() -> String {
         ],
         "rootBehavior": {"action": "help", "exitCode": 0},
         "exitCodes": {
-            "0": "Success (hotspots: JSON written; record: all events accepted; init: hook installed)",
-            "1": "Hotspots: I/O error writing output. Record: one or more events rejected, or I/O error writing output. Init: I/O error.",
-            "2": "Usage error (invalid arguments); record: also fatal I/O error (unreadable file or store failure); init: unsupported harness, collision, or self-install refusal"
+            "0": "Success (hotspots: JSON written, including empty entries; record: all events accepted; init: hook installed)",
+            "1": "Hotspots: storage error. Record: one or more events rejected, or I/O error writing output. Init: I/O error.",
+            "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file or store failure); init: unsupported harness, collision, or self-install refusal"
         }
     });
     serde_json::to_string(&doc).unwrap_or_else(|_| "{}".into())
@@ -655,18 +895,16 @@ mod tests {
 
     #[test]
     fn hotspots_with_path_emits_json_and_exits_0() {
+        // With no store at the path, exits 2 with error on stderr.
         let mut out = Vec::new();
         let mut err = Vec::new();
 
         assert_eq!(
             run_with_writers(["hotspots", "/tmp"], &mut out, &mut err),
-            0
+            2
         );
-        assert!(err.is_empty());
-        insta::assert_snapshot!(
-            String::from_utf8_lossy(&out),
-            @r#"{"schemaVersion":"0.1.0","command":"hotspots","status":"placeholder"}"#
-        );
+        assert!(out.is_empty());
+        assert!(String::from_utf8_lossy(&err).contains("datastore not found"));
     }
 
     #[test]
@@ -812,19 +1050,19 @@ mod tests {
         assert_eq!(run_with_writers(["--version"], &mut out, &mut err), 0);
         assert!(String::from_utf8_lossy(&out).contains("scryrs "));
 
-        // hotspots /tmp still produces JSON envelope
+        // Missing store exits 2 with error on stderr (no longer placeholder).
         out.clear();
         err.clear();
         assert_eq!(
             run_with_writers(["hotspots", "/tmp"], &mut out, &mut err),
-            0
+            2
         );
-        let output = String::from_utf8_lossy(&out);
-        assert!(output.contains("\"schemaVersion\":\"0.1.0\""));
-        assert!(output.contains("\"command\":\"hotspots\""));
-        assert!(output.contains("\"status\":\"placeholder\""));
-
-        // hotspots without PATH still exits 2
+        assert!(out.is_empty());
+        let stderr = String::from_utf8_lossy(&err);
+        assert!(
+            stderr.contains("datastore not found"),
+            "missing store should produce 'not found' error, got: {stderr}"
+        );
         out.clear();
         err.clear();
         assert_eq!(run_with_writers(["hotspots"], &mut out, &mut err), 2);
@@ -1589,7 +1827,8 @@ mod smoke {
         assert_eq!(run(["--help"]), 0);
         assert_eq!(run(["--version"]), 0);
         assert_eq!(run(["--help-json"]), 0);
-        assert_eq!(run(["hotspots", "/tmp"]), 0);
+        // hotspots with no store exits 2 (missing store).
+        assert_eq!(run(["hotspots", "/tmp"]), 2);
         assert_eq!(run(["record", "--file", "/nonexistent"]), 2);
         assert_eq!(run(Vec::<&str>::new()), 0);
         assert_eq!(run(["unknown"]), 2);
@@ -1616,14 +1855,16 @@ mod smoke {
 
     #[test]
     fn hotspots_path_exits_0_stdout_nonempty() {
+        // Hotspot command requires a valid store to exit 0.
+        // This smoke test checks the missing-store case exits 2.
         let mut out = Vec::new();
         let mut err = Vec::new();
         assert_eq!(
             run_with_writers(["hotspots", "/tmp"], &mut out, &mut err),
-            0
+            2
         );
-        assert!(err.is_empty());
-        assert!(!out.is_empty());
+        assert!(out.is_empty());
+        assert!(!err.is_empty());
     }
 
     #[test]
@@ -1660,6 +1901,368 @@ mod smoke {
         assert_eq!(run_with_writers(["--help-json"], &mut out, &mut err), 0);
         assert!(err.is_empty());
         assert!(!out.is_empty());
+    }
+}
+
+#[cfg(all(test, feature = "core"))]
+mod hotspot_integration_tests {
+    use super::*;
+    use scryrs_core::EventStore;
+    use scryrs_types::{
+        FileOpenedPayload, Outcome, SCHEMA_VERSION, TraceEvent, TraceEventPayload, TraceEventType,
+    };
+
+    fn make_file_opened(session_id: &str, path: &str, timestamp: &str) -> TraceEvent {
+        TraceEvent {
+            schema_version: SCHEMA_VERSION.into(),
+            timestamp: timestamp.into(),
+            session_id: session_id.into(),
+            event_type: TraceEventType::FileOpened,
+            tool_name: Some("read".into()),
+            payload: TraceEventPayload::FileOpened(FileOpenedPayload { path: path.into() }),
+            outcome: Outcome::Success,
+        }
+    }
+
+    fn populate_store(dir: &tempfile::TempDir, events: &[TraceEvent]) {
+        let scryrs_dir = dir.path().join(".scryrs");
+        std::fs::create_dir_all(&scryrs_dir).unwrap_or_else(|e| panic!("create .scryrs: {e}"));
+        let store_path = scryrs_dir.join("scryrs.db");
+        {
+            let mut store =
+                EventStore::open(&store_path).unwrap_or_else(|e| panic!("open store: {e}"));
+            store
+                .begin_transaction()
+                .unwrap_or_else(|e| panic!("begin: {e}"));
+            for ev in events {
+                store
+                    .append(ev)
+                    .unwrap_or_else(|e| panic!("append {ev:?}: {e}"));
+            }
+            store
+                .commit_transaction()
+                .unwrap_or_else(|e| panic!("commit: {e}"));
+        }
+    }
+
+    // 3.5.1: Populated store produces correct HotspotsReport JSON.
+    #[test]
+    fn populated_store_produces_correct_hotspots_report() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        let events = vec![
+            make_file_opened("s1", "src/a.rs", "2026-06-21T09:00:00Z"),
+            make_file_opened("s1", "src/b.rs", "2026-06-21T09:01:00Z"),
+            make_file_opened("s2", "src/a.rs", "2026-06-21T09:02:00Z"),
+        ];
+        populate_store(&dir, &events);
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        let exit_code = run_with_writers(
+            ["hotspots", &dir.path().display().to_string()],
+            &mut out,
+            &mut err,
+        );
+
+        assert_eq!(exit_code, 0, "stderr: {:?}", String::from_utf8_lossy(&err));
+
+        let stdout = String::from_utf8_lossy(&out);
+        let report: serde_json::Value =
+            serde_json::from_str(stdout.trim()).unwrap_or_else(|e| panic!("parse JSON: {e}"));
+
+        assert_eq!(report["schemaVersion"], "1.0.0");
+        assert_eq!(report["command"], "hotspots");
+        assert!(!report["repositoryPath"].as_str().unwrap_or("").is_empty());
+        assert!(
+            report["storePath"]
+                .as_str()
+                .unwrap_or("")
+                .ends_with(".scryrs/scryrs.db")
+        );
+        assert_eq!(report["runMetadata"]["analyzedEventCount"], 3);
+        assert_eq!(report["runMetadata"]["analyzedSubjectCount"], 2);
+        assert!(!report["generatedAt"].as_str().unwrap_or("").is_empty());
+
+        let entries = report["entries"]
+            .as_array()
+            .unwrap_or_else(|| panic!("entries not array"));
+        assert!(!entries.is_empty(), "entries should not be empty");
+
+        // src/a.rs should have higher score (2) than src/b.rs (1)
+        assert_eq!(entries[0]["subject"], "src/a.rs");
+        assert_eq!(entries[0]["score"], 2);
+        assert_eq!(entries[1]["subject"], "src/b.rs");
+        assert_eq!(entries[1]["score"], 1);
+    }
+
+    // 3.5.2: Empty store produces entries: [] with exit 0.
+    #[test]
+    fn empty_store_produces_empty_entries_with_exit_0() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        // Create empty store with no events.
+        populate_store(&dir, &[]);
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        let exit_code = run_with_writers(
+            ["hotspots", &dir.path().display().to_string()],
+            &mut out,
+            &mut err,
+        );
+
+        assert_eq!(
+            exit_code,
+            0,
+            "exit should be 0 for empty store, stderr: {:?}",
+            String::from_utf8_lossy(&err)
+        );
+
+        let stdout = String::from_utf8_lossy(&out);
+        let report: serde_json::Value =
+            serde_json::from_str(stdout.trim()).unwrap_or_else(|e| panic!("parse JSON: {e}"));
+
+        assert_eq!(
+            report["entries"]
+                .as_array()
+                .unwrap_or_else(|| panic!("entries not array"))
+                .len(),
+            0
+        );
+        assert_eq!(report["runMetadata"]["analyzedEventCount"], 0);
+        assert_eq!(report["runMetadata"]["analyzedSubjectCount"], 0);
+    }
+
+    // 3.5.3: Missing store exits 2 with error message on stderr.
+    #[test]
+    fn missing_store_exits_2_with_error() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        // Don't create .scryrs/scryrs.db.
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        let exit_code = run_with_writers(
+            ["hotspots", &dir.path().display().to_string()],
+            &mut out,
+            &mut err,
+        );
+
+        assert_eq!(exit_code, 2);
+        assert!(out.is_empty());
+
+        let stderr = String::from_utf8_lossy(&err);
+        assert!(
+            stderr.contains("datastore not found"),
+            "should mention datastore not found, got: {stderr}"
+        );
+    }
+
+    // 3.5.4: Unsupported store (schema version mismatch) exits 2 with error on stderr.
+    #[test]
+    fn unsupported_store_exits_2_with_error() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        // Create a valid store first.
+        populate_store(
+            &dir,
+            &[make_file_opened("s1", "src/a.rs", "2026-06-21T09:00:00Z")],
+        );
+
+        // Tamper with the schema version via direct SQLite connection.
+        let store_path = dir.path().join(".scryrs/scryrs.db");
+        {
+            let conn = rusqlite::Connection::open(&store_path)
+                .unwrap_or_else(|e| panic!("open store for tamper: {e}"));
+            conn.execute(
+                "UPDATE schema_meta SET value = '99' WHERE key = 'datastore_schema_version'",
+                [],
+            )
+            .unwrap_or_else(|e| panic!("tamper schema version: {e}"));
+        }
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        let exit_code = run_with_writers(
+            ["hotspots", &dir.path().display().to_string()],
+            &mut out,
+            &mut err,
+        );
+
+        assert_eq!(exit_code, 2, "stderr: {:?}", String::from_utf8_lossy(&err));
+        assert!(out.is_empty());
+
+        let stderr = String::from_utf8_lossy(&err);
+        assert!(
+            stderr.contains("unsupported datastore"),
+            "should mention unsupported datastore, got: {stderr}"
+        );
+        assert!(
+            stderr.contains("version mismatch"),
+            "should mention version mismatch, got: {stderr}"
+        );
+    }
+
+    // 3.5.5: Corrupt/non-SQLite file exits 1 with error message on stderr.
+    #[test]
+    fn corrupt_store_exits_1_with_error() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        let scryrs_dir = dir.path().join(".scryrs");
+        std::fs::create_dir_all(&scryrs_dir).unwrap_or_else(|e| panic!("create .scryrs: {e}"));
+        std::fs::write(scryrs_dir.join("scryrs.db"), "not a sqlite database\n")
+            .unwrap_or_else(|e| panic!("write corrupt file: {e}"));
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        let exit_code = run_with_writers(
+            ["hotspots", &dir.path().display().to_string()],
+            &mut out,
+            &mut err,
+        );
+
+        assert_eq!(exit_code, 1, "stderr: {:?}", String::from_utf8_lossy(&err));
+        assert!(out.is_empty());
+
+        let stderr = String::from_utf8_lossy(&err);
+        assert!(
+            stderr.contains("storage error"),
+            "should mention storage error, got: {stderr}"
+        );
+    }
+
+    // 3.5.6: Deterministic ordering: same store produces identical output on repeated runs
+    // (ignoring the generatedAt wall-clock timestamp which may differ).
+    #[test]
+    fn deterministic_ordering_repeated_runs() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        let events = vec![
+            make_file_opened("s1", "src/a.rs", "2026-06-21T09:00:00Z"),
+            make_file_opened("s1", "src/b.rs", "2026-06-21T09:01:00Z"),
+        ];
+        populate_store(&dir, &events);
+
+        let mut out1 = Vec::new();
+        let mut err1 = Vec::new();
+        let exit1 = run_with_writers(
+            ["hotspots", &dir.path().display().to_string()],
+            &mut out1,
+            &mut err1,
+        );
+
+        let mut out2 = Vec::new();
+        let mut err2 = Vec::new();
+        let exit2 = run_with_writers(
+            ["hotspots", &dir.path().display().to_string()],
+            &mut out2,
+            &mut err2,
+        );
+
+        assert_eq!(exit1, 0);
+        assert_eq!(exit2, 0);
+
+        // Parse both outputs and compare everything except generatedAt.
+        let stdout1 = String::from_utf8_lossy(&out1);
+        let stdout2 = String::from_utf8_lossy(&out2);
+        let mut r1: serde_json::Value =
+            serde_json::from_str(stdout1.trim()).unwrap_or_else(|e| panic!("parse 1: {e}"));
+        let mut r2: serde_json::Value =
+            serde_json::from_str(stdout2.trim()).unwrap_or_else(|e| panic!("parse 2: {e}"));
+
+        // Strip generatedAt before comparing.
+        r1.as_object_mut()
+            .unwrap_or_else(|| panic!("r1 not object"))
+            .remove("generatedAt");
+        r2.as_object_mut()
+            .unwrap_or_else(|| panic!("r2 not object"))
+            .remove("generatedAt");
+
+        assert_eq!(
+            r1, r2,
+            "repeated runs must produce identical deterministic output"
+        );
+    }
+
+    // 3.5.8: .scryrs/hotspots.json artifact file is written when store is valid.
+    #[test]
+    fn artifact_file_is_written_on_success() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        let events = vec![make_file_opened("s1", "src/a.rs", "2026-06-21T09:00:00Z")];
+        populate_store(&dir, &events);
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        let exit_code = run_with_writers(
+            ["hotspots", &dir.path().display().to_string()],
+            &mut out,
+            &mut err,
+        );
+
+        assert_eq!(exit_code, 0);
+
+        let artifact_path = dir.path().join(".scryrs/hotspots.json");
+        assert!(
+            artifact_path.exists(),
+            "hotspots.json should be written at {}",
+            artifact_path.display()
+        );
+
+        let artifact_content = std::fs::read_to_string(&artifact_path)
+            .unwrap_or_else(|e| panic!("read artifact: {e}"));
+        let stdout = String::from_utf8_lossy(&out);
+        assert_eq!(
+            stdout.trim(),
+            artifact_content.trim(),
+            "stdout and artifact file must match"
+        );
+    }
+
+    // Additional: empty store also writes artifact file.
+    #[test]
+    fn artifact_file_is_written_for_empty_store() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        populate_store(&dir, &[]);
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        let exit_code = run_with_writers(
+            ["hotspots", &dir.path().display().to_string()],
+            &mut out,
+            &mut err,
+        );
+
+        assert_eq!(exit_code, 0);
+
+        let artifact_path = dir.path().join(".scryrs/hotspots.json");
+        assert!(artifact_path.exists());
+    }
+
+    // Additional: artifact file is not written on error.
+    #[test]
+    fn artifact_file_not_written_on_error() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        let scryrs_dir = dir.path().join(".scryrs");
+        std::fs::create_dir_all(&scryrs_dir).unwrap_or_else(|e| panic!("create .scryrs: {e}"));
+        std::fs::write(scryrs_dir.join("scryrs.db"), "corrupt\n")
+            .unwrap_or_else(|e| panic!("write: {e}"));
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        let _exit_code = run_with_writers(
+            ["hotspots", &dir.path().display().to_string()],
+            &mut out,
+            &mut err,
+        );
+
+        let artifact_path = dir.path().join(".scryrs/hotspots.json");
+        assert!(
+            !artifact_path.exists(),
+            "hotspots.json must not be written on error"
+        );
     }
 }
 
@@ -2134,16 +2737,17 @@ mod init_tests {
 
     #[test]
     fn init_does_not_regress_hotspots() {
+        // Hotspot command requires a valid store. Without one, exits 2.
         let mut out = Vec::new();
         let mut err = Vec::new();
 
         assert_eq!(
             run_with_writers(["hotspots", "/tmp"], &mut out, &mut err),
-            0
+            2
         );
-        assert!(err.is_empty());
-        let output = String::from_utf8_lossy(&out);
-        assert!(output.contains("\"status\":\"placeholder\""));
+        assert!(out.is_empty());
+        let stderr = String::from_utf8_lossy(&err);
+        assert!(stderr.contains("datastore not found"));
     }
 
     #[test]

@@ -34,6 +34,9 @@ use crate::store::DATASTORE_SCHEMA_VERSION;
 const SQL_SELECT_ALL_ORDERED: &str =
     "SELECT event_json FROM trace_events ORDER BY timestamp ASC, id ASC";
 
+const SQL_SELECT_ALL_WITH_IDS_ORDERED: &str =
+    "SELECT id, event_json FROM trace_events ORDER BY timestamp ASC, id ASC";
+
 const SQL_SELECT_BY_SUBJECT_KIND: &str =
     "SELECT event_json FROM trace_events WHERE subject_kind = ?1 ORDER BY timestamp ASC, id ASC";
 
@@ -92,6 +95,7 @@ impl std::error::Error for QueryError {
 #[derive(Debug)]
 pub struct TraceQuery {
     conn: Connection,
+    store_schema_version: i64,
 }
 
 impl TraceQuery {
@@ -119,13 +123,13 @@ impl TraceQuery {
             })?;
 
         // Validate schema version via read-only SELECT.
-        match conn.query_row(
+        let store_schema_version = match conn.query_row(
             "SELECT CAST(value AS INTEGER) FROM schema_meta \
              WHERE key = 'datastore_schema_version'",
             [],
             |row| row.get::<_, i64>(0),
         ) {
-            Ok(v) if v == DATASTORE_SCHEMA_VERSION => {} // Version matches.
+            Ok(v) if v == DATASTORE_SCHEMA_VERSION => v,
             Ok(v) => {
                 return Err(QueryError::UnsupportedStore(format!(
                     "datastore schema version mismatch: found {v}, expected {DATASTORE_SCHEMA_VERSION}"
@@ -156,7 +160,7 @@ impl TraceQuery {
                     "schema_meta query failed: {e}"
                 )));
             }
-        }
+        };
 
         // Verify the trace_events table exists.
         let table_exists: bool = conn
@@ -173,7 +177,15 @@ impl TraceQuery {
             ));
         }
 
-        Ok(Self { conn })
+        Ok(Self {
+            conn,
+            store_schema_version,
+        })
+    }
+
+    /// Return the datastore schema version read from `schema_meta` during `open()`.
+    pub fn store_schema_version(&self) -> i64 {
+        self.store_schema_version
     }
 
     /// Return all events in deterministic order: `timestamp ASC, id ASC`.
@@ -181,6 +193,35 @@ impl TraceQuery {
     /// Returns `QueryError::EmptyStore` when `trace_events` has zero rows.
     pub fn iter_events_ordered(&self) -> Result<Vec<TraceEvent>, QueryError> {
         self.query_events(SQL_SELECT_ALL_ORDERED, [])
+    }
+
+    /// Return all events with their SQLite row `id`, in deterministic order:
+    /// `timestamp ASC, id ASC`.
+    ///
+    /// Returns `QueryError::EmptyStore` when `trace_events` has zero rows.
+    pub fn iter_events_with_ids_ordered(&self) -> Result<Vec<(u64, TraceEvent)>, QueryError> {
+        let mut stmt = self
+            .conn
+            .prepare(SQL_SELECT_ALL_WITH_IDS_ORDERED)
+            .map_err(QueryError::StorageError)?;
+
+        let rows: Vec<(u64, TraceEvent)> = stmt
+            .query_map([], |row| {
+                let id: u64 = row.get(0)?;
+                let json: String = row.get(1)?;
+                let event: TraceEvent = serde_json::from_str(&json)
+                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                Ok((id, event))
+            })
+            .map_err(QueryError::StorageError)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(QueryError::StorageError)?;
+
+        if rows.is_empty() {
+            return Err(QueryError::EmptyStore);
+        }
+
+        Ok(rows)
     }
 
     /// Return events where `subject_kind` matches the given kind.

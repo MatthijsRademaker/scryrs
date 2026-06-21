@@ -201,14 +201,22 @@ $ cargo run -p scryrs-cli -- --help-json
 
 The JSON document describes every command, argument, flag, output field, and exit code — suitable for parsing by tooling or agents. Use `scryrs --help-json` directly for the full surface document.
 
-### Run the placeholder command
+### Run the hotspot command
 
 ```bash
 $ cargo run -p scryrs-cli -- hotspots .
-{"schemaVersion":"0.1.0","command":"hotspots","status":"placeholder"}
+{"schemaVersion":"1.0.0","command":"hotspots","repositoryPath":"/abs/path","storePath":"/abs/path/.scryrs/scryrs.db","runMetadata":{"storeSchemaVersion":1,"analyzedEventCount":0,"analyzedSubjectCount":0,"firstEventId":0,"lastEventId":0},"generatedAt":"2026-06-21T12:00:00Z","entries":[]}
 ```
 
-This emits a single-line JSON envelope. The `status: "placeholder"` field means no engine behavior is wired yet — the command always returns this same structure regardless of what path you give it. It confirms the CLI pipeline works and exit code 0 means success.
+This emits a single-line JSON envelope containing the `HotspotsReport` schema.
+If the `.scryrs/scryrs.db` datastore exists and contains trace events, `entries`
+will contain ranked `HotspotEntry` objects with scores, per-event-type counts,
+per-outcome counts, session breadth, time spans, and evidence row IDs.
+An empty datastore (or one with only lifecycle events) produces `entries: []`
+with exit code 0. Missing or unsupported datastores produce exit code 2
+with an error message on stderr.
+
+The report is also written to `.scryrs/hotspots.json` at the repository root.
 
 ### Error paths
 
@@ -216,9 +224,9 @@ The CLI follows a three-code exit convention with command-specific semantics:
 
 | Exit code | Meaning     |
 |-----------|-------------|
-| 0         | Success (hotspots: JSON written; record: all events accepted) |
-| 1         | Hotspots: I/O error. Record: rejected events or I/O error |
-| 2         | Usage error; record: also fatal I/O error (unreadable file or store failure) |
+| 0         | Success (hotspots: JSON written, including empty entries; record: all events accepted) |
+| 1         | Hotspots: storage error. Record: rejected events or I/O error |
+| 2         | Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file or store failure) |
 
 **Missing required argument** — exit 2:
 
@@ -233,9 +241,8 @@ See `scryrs --help`
 ### Current limitations
 
 - **Three commands:** `hotspots`, `record`, and `init` are the supported commands. Everything else (`trace`, `propose`, `graph`, `route`, `adapters`, `report`, `suggest-docs`) produces an "unknown command" error.
-- **Placeholder output:** `hotspots` always returns `{"status":"placeholder"}` regardless of the path argument. No analysis engine is wired yet.
+- **Hotspot analysis:** `hotspots` reads from `.scryrs/scryrs.db` and produces ranked `HotspotEntry` results. Empty or missing stores produce distinct exit codes.
 - **Record is ingestion-only:** `scryrs record` validates and persists trace events. It does not trigger hotspot analysis, graph building, or other downstream processing.
-- **No engine behavior:** The CLI is a contract shell — argument parsing, help text, error messages, and output formatting are frozen, but the analysis internals are not implemented.
 - **What's not listed:** No speculative future commands or features appear here. The quickstart documents exactly what exists today.
 
 ### Troubleshooting
@@ -249,7 +256,7 @@ See `scryrs --help`
 
 ## Current status
 
-v0 CLI contract. `scryrs record` ingests JSONL trace events via `--stdin` or `--file <PATH>`, validates against the shared `TraceEvent` schema, persists accepted events to `.scryrs/scryrs.db`, and returns deterministic summary counts and rejection diagnostics. `scryrs hotspots <PATH>` emits a versioned JSON placeholder. Engine behavior comes next.
+v0 CLI contract. `scryrs record` ingests JSONL trace events via `--stdin` or `--file <PATH>`, validates against the shared `TraceEvent` schema, persists accepted events to `.scryrs/scryrs.db`, and returns deterministic summary counts and rejection diagnostics. `scryrs hotspots <PATH>` reads from `.scryrs/scryrs.db`, scores subjects with a deterministic weight table and failure bonus, produces a versioned `HotspotsReport` envelope with ranked evidence-carrying entries, and writes the report to stdout and `.scryrs/hotspots.json`.
 
 ## Local checks
 
