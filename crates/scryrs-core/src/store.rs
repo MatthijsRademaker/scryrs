@@ -11,7 +11,7 @@ use rusqlite::{Connection, params};
 use scryrs_types::TraceEvent;
 
 /// Current datastore schema version (independent of TraceEvent wire schema).
-const DATASTORE_SCHEMA_VERSION: i64 = 1;
+pub(crate) const DATASTORE_SCHEMA_VERSION: i64 = 1;
 
 /// Canonical local datastore path relative to the current working directory.
 pub const CANONICAL_STORE_PATH: &str = ".scryrs/scryrs.db";

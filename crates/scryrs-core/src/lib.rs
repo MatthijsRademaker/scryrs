@@ -1,9 +1,11 @@
 //! Standalone trace and hotspot foundation for scryrs.
 
 pub mod ingestion;
+pub mod query;
 pub mod store;
 
 pub use ingestion::{IngestionOutcome, Rejection, ingest_jsonl};
+pub use query::{QueryError, TraceQuery};
 pub use store::{CANONICAL_STORE_PATH, EventStore};
 
 use scryrs_types::{FeatureDescriptor, Hotspot, TraceEvent};
