@@ -922,10 +922,167 @@ async function testUnlistedTools() {
 }
 
 // -----------------------------------------------------------------------
+// Test: Rewrite-tool compatibility — RTK-style Bash commands on tool_result
+// -----------------------------------------------------------------------
+async function testRewriteCompatibility() {
+	console.log(`\n\x1b[33m--- Pi: Rewrite-tool Compatibility ---\x1b[0m`);
+
+	const dir = tempDir();
+	const scryrsPath = join(ROOT, "target", "release", "scryrs");
+	const runner = createHookRunner(dir, scryrsPath);
+
+	// 1. Emit SessionStart
+	const ssResult = await runner.runSessionStart("rtk-test");
+	if (!ssResult.ok) {
+		fail(
+			"Pi RTK SessionStart",
+			`hook invocation failed: ${ssResult.stderr?.slice(0, 200)}`,
+		);
+		rmSync(dir, { recursive: true, force: true });
+		return;
+	}
+	pass("Pi RTK: SessionStart invoked without error");
+
+	// 2a. Simple RTK-prefixed Bash command via tool_result
+	const simpleResult = await runner.runToolResult(
+		"bash",
+		{ command: "rtk ls -la" },
+		false,
+	);
+	if (!simpleResult.ok) {
+		fail(
+			"Pi RTK simple",
+			`hook invocation failed: ${simpleResult.stderr?.slice(0, 200)}`,
+		);
+	} else {
+		pass("Pi RTK simple: hook invoked without error");
+
+		const parsed = parseFixtureOutput(simpleResult.stdout);
+
+		// Assert handler returns undefined (non-interference)
+		if (parsed.result !== undefined) {
+			fail(
+				"Pi RTK simple: handler return",
+				`expected undefined, got ${JSON.stringify(parsed.result)}`,
+			);
+		} else {
+			pass("Pi RTK simple: handler returned undefined (non-interference)");
+		}
+
+		// Assert original event input unchanged (deep equality)
+		if (parsed.preSnapshot && parsed.postSnapshot) {
+			if (
+				JSON.stringify(parsed.preSnapshot) ===
+				JSON.stringify(parsed.postSnapshot)
+			) {
+				pass("Pi RTK simple: original event input unchanged");
+			} else {
+				fail("Pi RTK simple: event input mutated");
+			}
+		} else {
+			fail("Pi RTK simple: snapshot", "missing pre/post snapshot");
+		}
+	}
+
+	// 2b. Compound rewritten Bash command via tool_result
+	const compoundCmd =
+		'echo "=== BACKEND ===" && rtk ls backend/api/ && rtk ls backend/cmd/';
+	const compoundResult = await runner.runToolResult(
+		"bash",
+		{ command: compoundCmd },
+		false,
+	);
+	if (!compoundResult.ok) {
+		fail(
+			"Pi RTK compound",
+			`hook invocation failed: ${compoundResult.stderr?.slice(0, 200)}`,
+		);
+	} else {
+		pass("Pi RTK compound: hook invoked without error");
+
+		const parsed = parseFixtureOutput(compoundResult.stdout);
+
+		if (parsed.result !== undefined) {
+			fail(
+				"Pi RTK compound: handler return",
+				`expected undefined, got ${JSON.stringify(parsed.result)}`,
+			);
+		} else {
+			pass("Pi RTK compound: handler returned undefined (non-interference)");
+		}
+
+		if (parsed.preSnapshot && parsed.postSnapshot) {
+			if (
+				JSON.stringify(parsed.preSnapshot) ===
+				JSON.stringify(parsed.postSnapshot)
+			) {
+				pass("Pi RTK compound: original event input unchanged");
+			} else {
+				fail("Pi RTK compound: event input mutated");
+			}
+		} else {
+			fail("Pi RTK compound: snapshot", "missing pre/post snapshot");
+		}
+	}
+
+	// 3. Assert events.jsonl contents
+	const eventsJsonl = join(dir, ".scryrs", "events.jsonl");
+	const events = readJsonl(eventsJsonl);
+
+	const bashEvents = events.filter(
+		(e) => e.event_type === "CommandExecuted" && e.tool_name === "bash",
+	);
+
+	if (bashEvents.length !== 2) {
+		fail(
+			"Pi RTK: bash events count",
+			`expected 2 Bash events, got ${bashEvents.length}`,
+		);
+	} else {
+		pass("Pi RTK: 2 Bash events persisted");
+	}
+
+	// Check simple RTK-prefixed command persisted as-is
+	const rtkSimple = bashEvents.find((e) => e.payload?.command === "rtk ls -la");
+	if (rtkSimple) {
+		pass("Pi RTK: simple command persisted as 'rtk ls -la'");
+		const shapeOk = assertEventShape(rtkSimple, "CommandExecuted", "bash");
+		if (shapeOk) {
+			pass("Pi RTK simple: envelope shape correct");
+		}
+	} else {
+		fail(
+			"Pi RTK: simple command",
+			`expected payload.command='rtk ls -la', got: ${JSON.stringify(bashEvents.map((e) => e.payload?.command))}`,
+		);
+	}
+
+	// Check compound rewritten command persisted exactly
+	const rtkCompound = bashEvents.find(
+		(e) => e.payload?.command === compoundCmd,
+	);
+	if (rtkCompound) {
+		pass("Pi RTK: compound command persisted exactly as observed");
+		const shapeOk = assertEventShape(rtkCompound, "CommandExecuted", "bash");
+		if (shapeOk) {
+			pass("Pi RTK compound: envelope shape correct");
+		}
+	} else {
+		fail(
+			"Pi RTK: compound command",
+			`expected payload.command='${compoundCmd}', got: ${JSON.stringify(bashEvents.map((e) => e.payload?.command))}`,
+		);
+	}
+
+	rmSync(dir, { recursive: true, force: true });
+}
+
+// -----------------------------------------------------------------------
 // Main
 // -----------------------------------------------------------------------
 async function main() {
 	await testSuccessfulCapture();
+	await testRewriteCompatibility();
 	await testFailurePropagation();
 	await testFailOpenNonZeroExit();
 	await testFailOpen();

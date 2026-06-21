@@ -33,6 +33,34 @@ If a hook's invocation of `scryrs record` fails for any reason — process crash
 
 The design rule is: **scryrs can fail, tools cannot.**
 
+## Rewrite-Tool Compatibility (Phase 1)
+
+`CommandExecuted.payload.command` records the command string **observed by the hook at capture time**. scryrs never rewrites, normalizes, canonicalizes, or reconstructs original agent intent from the command string it receives. This is the Phase 1 compatibility policy — it resolves the original-versus-rewritten ambiguity by recording exactly what the hook observed, nothing more.
+
+### What scryrs does NOT do
+
+- scryrs does **not** invoke rewrite tools (e.g., RTK) from within any hook.
+- scryrs does **not** strip rewrite prefixes (e.g., `rtk`) from observed command strings.
+- scryrs does **not** split compound commands into multiple trace events.
+- scryrs does **not** attempt to recover or preserve the pre-rewrite command text.
+- scryrs does **not** normalize, canonicalize, or alter the command string in any way.
+
+### Harness-specific semantics
+
+Rewrite-tool co-installation behaves differently across harnesses. Integrators must understand these differences:
+
+| Harness | Capture point | What the hook sees |
+|---------|---------------|--------------------|
+| **Pi** | `tool_result` (post-execution) | `event.input.command` from the `tool_result` event — reflects whatever command string the harness presents after execution completes. If an upstream rewrite extension mutated the `tool_call` input, and the harness propagates that mutation into `tool_result`, scryrs records the rewritten form. |
+| **Claude Code** | PreToolUse (pre-execution) | `tool_input.command` from the PreToolUse event — reflects whatever command string the harness presents at the time the scryrs hook runs in the PreToolUse pipeline. Co-installed rewrite hooks can change this value depending on hook order. |
+
+### Limitations
+
+- **Hotspot subjects remain fragmented** between rewritten and non-rewritten commands (e.g., `ls -la` and `rtk ls -la` are distinct subjects). Canonicalization for hotspot grouping is deferred to Phase 2.
+- **Pi mutation propagation** from `tool_call` input mutations through to `tool_result` is an empirical assumption. If not yet verified, this behavior is presented as a limitation rather than a guarantee.
+- **Claude Code updated-input forwarding** between PreToolUse hooks is platform-dependent. The observed command may differ if hook-order changes between environments.
+- The `CommandExecutedPayload` schema contains a single `command` field. Preserving both original and effective commands within a single trace event is not supported in Phase 1.
+
 ## TraceEvent Schema
 
 The canonical `TraceEvent` schema is defined in [`crates/scryrs-types/src/lib.rs`](https://github.com/scryrs-project/scryrs/blob/main/crates/scryrs-types/src/lib.rs). Do not redefine it. The Rust types are the executable source of truth for the wire contract.
