@@ -1,8 +1,11 @@
 # hotspot-report Specification
 
 ## Purpose
-TBD - created by archiving change task-21eace10-7b48-40f3-afe4-96191d63d7ac. Update Purpose after archive.
+
+Defines the deterministic hotspot scoring contract, output schema, and ranking rules over SQLite trace evidence. Every `scryrs hotspots <PATH>` invocation produces a versioned `HotspotsReport` JSON envelope with ranked `HotspotEntry` results, computed exclusively from persisted `trace_events` rows using a documented integer weight table and a six-key tie-break chain.
+
 ## Requirements
+
 ### Requirement: Hotspot report envelope is versioned and self-describing
 
 The system SHALL emit a `HotspotsReport` JSON envelope to stdout for every successful `scryrs hotspots <PATH>` invocation. The envelope SHALL include a `schemaVersion` field set to `HOTSPOT_SCHEMA_VERSION` (`"1.0.0"`), independent of `SCHEMA_VERSION` (`"0.1.0"`) which governs trace event wire format.
@@ -297,4 +300,3 @@ The `scryrs --help-json` output SHALL describe the hotspot output fields matchin
 - **THEN** exit code 0 describes success with data or empty entries
 - **AND** exit code 1 describes I/O or storage errors
 - **AND** exit code 2 describes missing store, unsupported store, or usage errors
-

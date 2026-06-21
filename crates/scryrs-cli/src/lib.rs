@@ -365,10 +365,10 @@ fn write_hotspots_json(out: &mut impl Write, err: &mut impl Write, path: &str) -
             let _ = writeln!(err, "scryrs hotspots: storage error: {e}");
             return 1;
         }
-        Err(QueryError::EmptyStore) => {
-            // Empty store is not returned from open(), but handle it anyway.
-            let _ = writeln!(err, "scryrs hotspots: trace_events table is empty");
-            return 2;
+        // EmptyStore is never returned by open(), but handle it for exhaustiveness.
+        _ => {
+            let _ = writeln!(err, "scryrs hotspots: unexpected error opening store");
+            return 1;
         }
     };
 
@@ -377,10 +377,13 @@ fn write_hotspots_json(out: &mut impl Write, err: &mut impl Write, path: &str) -
         Ok(events) => events,
         Err(QueryError::EmptyStore) => {
             // Empty store → produce report with empty entries.
-            // Need to open a direct connection to read schema_meta.
-            // We can use the already-opened query object but it doesn't expose
-            // the raw connection. Instead, re-derive runMetadata from empty state.
-            return write_empty_success_report(out, err, &repo_root, &store_path);
+            return write_empty_success_report(
+                out,
+                err,
+                &repo_root,
+                &store_path,
+                query.store_schema_version(),
+            );
         }
         Err(QueryError::StorageError(e)) => {
             let _ = writeln!(err, "scryrs hotspots: storage error: {e}");
@@ -411,7 +414,7 @@ fn write_hotspots_json(out: &mut impl Write, err: &mut impl Write, path: &str) -
     let last_event_id = subject_bearing.last().map(|(id, _)| *id).unwrap_or(0);
 
     let run_metadata = RunMetadata {
-        storeSchemaVersion: 1,
+        storeSchemaVersion: query.store_schema_version(),
         analyzedEventCount: subject_bearing.len() as u64,
         analyzedSubjectCount: subject_set.len() as u64,
         firstEventId: first_event_id,
@@ -463,6 +466,7 @@ fn write_empty_success_report(
     err: &mut impl Write,
     repo_root: &std::path::Path,
     store_path: &std::path::Path,
+    store_schema_version: i64,
 ) -> i32 {
     use scryrs_types::{HotspotsReport, RunMetadata};
 
@@ -472,7 +476,7 @@ fn write_empty_success_report(
         repositoryPath: repo_root.display().to_string(),
         storePath: store_path.display().to_string(),
         runMetadata: RunMetadata {
-            storeSchemaVersion: 1,
+            storeSchemaVersion: store_schema_version,
             analyzedEventCount: 0,
             analyzedSubjectCount: 0,
             firstEventId: 0,
@@ -2052,6 +2056,51 @@ mod hotspot_integration_tests {
         assert!(
             stderr.contains("datastore not found"),
             "should mention datastore not found, got: {stderr}"
+        );
+    }
+
+    // 3.5.4: Unsupported store (schema version mismatch) exits 2 with error on stderr.
+    #[test]
+    fn unsupported_store_exits_2_with_error() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        // Create a valid store first.
+        populate_store(
+            &dir,
+            &[make_file_opened("s1", "src/a.rs", "2026-06-21T09:00:00Z")],
+        );
+
+        // Tamper with the schema version via direct SQLite connection.
+        let store_path = dir.path().join(".scryrs/scryrs.db");
+        {
+            let conn = rusqlite::Connection::open(&store_path)
+                .unwrap_or_else(|e| panic!("open store for tamper: {e}"));
+            conn.execute(
+                "UPDATE schema_meta SET value = '99' WHERE key = 'datastore_schema_version'",
+                [],
+            )
+            .unwrap_or_else(|e| panic!("tamper schema version: {e}"));
+        }
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        let exit_code = run_with_writers(
+            ["hotspots", &dir.path().display().to_string()],
+            &mut out,
+            &mut err,
+        );
+
+        assert_eq!(exit_code, 2, "stderr: {:?}", String::from_utf8_lossy(&err));
+        assert!(out.is_empty());
+
+        let stderr = String::from_utf8_lossy(&err);
+        assert!(
+            stderr.contains("unsupported datastore"),
+            "should mention unsupported datastore, got: {stderr}"
+        );
+        assert!(
+            stderr.contains("version mismatch"),
+            "should mention version mismatch, got: {stderr}"
         );
     }
 

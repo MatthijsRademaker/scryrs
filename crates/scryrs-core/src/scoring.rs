@@ -55,7 +55,6 @@ struct GroupAccum {
     sessions: std::collections::HashSet<String>,
     first_seen: String,
     last_seen: String,
-    first_event_id: u64,
     row_ids: Vec<u64>,
 }
 
@@ -101,7 +100,6 @@ pub fn score_hotspots(events_with_ids: &[(u64, &TraceEvent)]) -> Vec<HotspotEntr
             sessions: std::collections::HashSet::new(),
             first_seen: event.timestamp.clone(),
             last_seen: event.timestamp.clone(),
-            first_event_id: row_id,
             row_ids: Vec::new(),
         });
 
@@ -139,11 +137,6 @@ pub fn score_hotspots(events_with_ids: &[(u64, &TraceEvent)]) -> Vec<HotspotEntr
             entry.last_seen = event.timestamp.clone();
         }
 
-        // First event id tracking.
-        if row_id < entry.first_event_id {
-            entry.first_event_id = row_id;
-        }
-
         // Row ID evidence.
         entry.row_ids.push(row_id);
     }
@@ -176,10 +169,9 @@ pub fn score_hotspots(events_with_ids: &[(u64, &TraceEvent)]) -> Vec<HotspotEntr
             .then_with(|| a.subjectKind.cmp(&b.subjectKind)) // subjectKind ASC
             .then_with(|| a.subject.cmp(&b.subject)) // subject ASC
             .then_with(|| {
-                // We need firstEventId, but it's not stored in HotspotEntry directly.
-                // Instead, use the smallest rowId in evidence as the firstEventId proxy.
-                let a_first = a.evidence.rowIds.first().copied().unwrap_or(u64::MAX);
-                let b_first = b.evidence.rowIds.first().copied().unwrap_or(u64::MAX);
+                // firstEventId ASC: use the minimum rowId in evidence.
+                let a_first = a.evidence.rowIds.iter().min().copied().unwrap_or(u64::MAX);
+                let b_first = b.evidence.rowIds.iter().min().copied().unwrap_or(u64::MAX);
                 a_first.cmp(&b_first)
             })
     });
