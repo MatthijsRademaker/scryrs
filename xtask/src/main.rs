@@ -20,9 +20,13 @@ where
 
     // Unknown command check before clap dispatch.
     // Only known subcommands pass through to clap.
+    // "help" is handled directly (clap reserves it as a built-in subcommand).
     if !args.is_empty() {
         let first = &args[0];
-        if first != "help" && first != "bootstrap" && first != "ci-fast" {
+        if first == "help" {
+            return write_help(&mut out).map_or(1, |_| 0);
+        }
+        if first != "bootstrap" && first != "ci-fast" {
             if writeln!(err, "unknown xtask command: {first}").is_err() {
                 return 1;
             }
@@ -33,13 +37,11 @@ where
     let cmd = Command::new("xtask")
         .no_binary_name(true)
         .subcommand_required(true)
-        .subcommand(Command::new("help"))
         .subcommand(Command::new("bootstrap"))
         .subcommand(Command::new("ci-fast"));
 
     match cmd.try_get_matches_from(&args) {
         Ok(matches) => match matches.subcommand() {
-            Some(("help", _)) => write_help(&mut out).map_or(1, |_| 0),
             Some(("bootstrap", _)) => writeln!(
                 out,
                 "xtask bootstrap: scaffold only; implementation pending"
@@ -81,5 +83,60 @@ mod tests {
         assert_eq!(run(["wat"], &mut out, &mut err), 2);
         assert!(out.is_empty());
         assert!(String::from_utf8_lossy(&err).contains("unknown xtask command: wat"));
+    }
+
+    #[test]
+    fn help_subcommand_prints_help_and_exits_zero() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(run(["help"], &mut out, &mut err), 0);
+        let output = String::from_utf8_lossy(&out);
+        assert!(output.contains("xtask commands:"));
+        assert!(output.contains("bootstrap"));
+        assert!(output.contains("ci-fast"));
+    }
+
+    #[test]
+    fn bootstrap_subcommand_exits_zero() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(run(["bootstrap"], &mut out, &mut err), 0);
+        let output = String::from_utf8_lossy(&out);
+        assert!(output.contains("scaffold only"));
+        assert!(err.is_empty());
+    }
+
+    #[test]
+    fn ci_fast_subcommand_exits_zero() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(run(["ci-fast"], &mut out, &mut err), 0);
+        let output = String::from_utf8_lossy(&out);
+        assert!(output.contains("scaffold only"));
+        assert!(err.is_empty());
+    }
+
+    #[test]
+    fn no_args_prints_help_and_exits_zero() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        let args: [&str; 0] = [];
+        assert_eq!(run(args, &mut out, &mut err), 0);
+        let output = String::from_utf8_lossy(&out);
+        assert!(output.contains("xtask commands:"));
+    }
+
+    #[test]
+    fn empty_string_arg_is_unknown_command() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(run([""], &mut out, &mut err), 2);
+        assert!(out.is_empty());
+        assert!(String::from_utf8_lossy(&err).contains("unknown xtask command:"));
     }
 }

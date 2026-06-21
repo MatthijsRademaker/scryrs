@@ -1,0 +1,35 @@
+name: hook-ci
+
+on:
+  pull_request:
+    paths:
+      - "hooks/**"
+      - "scripts/hook-test"
+      - "scripts/hook-test-runner.mjs"
+      - ".github/workflows/hook-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "hooks/**"
+      - "scripts/hook-test"
+      - "scripts/hook-test-runner.mjs"
+      - ".github/workflows/hook-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  hook-verification:
+    name: hook verification
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Hook tests
+        run: scripts/hook-test

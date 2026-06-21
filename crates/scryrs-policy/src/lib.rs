@@ -37,10 +37,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn allow_has_no_reasons() {
+        let decision = PolicyDecision::allow();
+        assert!(decision.allowed);
+        assert!(decision.reasons.is_empty());
+    }
+
+    #[test]
     fn denial_carries_reason() {
         let decision = PolicyDecision::deny("write access disabled");
 
         assert!(!decision.allowed);
         assert_eq!(decision.reasons, vec!["write access disabled"]);
+    }
+
+    #[test]
+    fn deny_preserves_exact_reason() {
+        let decision = PolicyDecision::deny("rate limit exceeded");
+        assert_eq!(decision.reasons, vec!["rate limit exceeded"]);
+    }
+
+    #[test]
+    fn allow_then_deny_are_distinct() {
+        let allowed = PolicyDecision::allow();
+        let denied = PolicyDecision::deny("nope");
+        assert_ne!(allowed, denied);
     }
 }
