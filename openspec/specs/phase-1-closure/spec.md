@@ -2,6 +2,20 @@
 
 ## Purpose
 TBD - created by archiving change task-2f5159c2-943a-46cb-b743-20fee7f79bec. Update Purpose after archive.
+
+## RECONCILIATION — Phase 2 Hotspot Materialization (2026-06-21)
+
+The Phase 2 hotspot materialization has been fully implemented and delivered. The following requirement is **superseded** by the Phase 2 contractual specs:
+
+- **Superseded**: Requirement "Phase 2 behavior remains out of scope" and its scenario "Closure work does not add Phase 2 behavior" — these asserted that `scryrs hotspots <PATH>` must remain a placeholder. The live implementation has replaced the placeholder with real SQLite analysis, deterministic scoring, and a versioned `HotspotsReport` (schemaVersion 1.0.0).
+
+**Canonical Phase 2 contract** (supersedes the above):
+- [`openspec/specs/hotspot-report/spec.md`](../hotspot-report/spec.md) — `HotspotsReport` schema, scoring dimensions, exit codes, artifact file.
+- [`openspec/specs/hotspot-verification/spec.md`](../hotspot-verification/spec.md) — E2E verification, edge-case coverage, snapshot assertions.
+
+**Closure change traceability**: `openspec/changes/archive/2026-06-21-task-56573ced-fdeb-49b2-aea6-41b30f19d2bf/specs/phase-2-closure/spec.md` documents the full evidence matrix mapping code/test artifacts to Phase 2 deliverables.
+
+All other requirements in this spec remain valid for Phase 1 closure and are not affected by this reconciliation.
 ## Requirements
 ### Requirement: Phase 1 closure evidence is published and bounded
 

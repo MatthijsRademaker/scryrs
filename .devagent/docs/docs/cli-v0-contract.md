@@ -44,28 +44,83 @@ Ingest JSONL trace events from stdin or a file. `--stdin` and `--file` are mutua
 
 **Persistence:** Accepted events are persisted to `.scryrs/scryrs.db` (the canonical SQLite trace datastore) in the current working directory. This store is append-only and ingestion-only; no query, delete, or analysis APIs are provided. `.scryrs/events.jsonl` is the ingestion input format and is NOT used as the canonical persistence store.
 
-### `scryrs hotspots <PATH>` (v0 placeholder)
+### `scryrs hotspots <PATH>`
 
-The v0 placeholder command. Emits a versioned JSON envelope to stdout.
+Analyzes persisted trace events in `.scryrs/scryrs.db` and emits a deterministic `HotspotsReport` to stdout (JSON) and `.scryrs/hotspots.json` (artifact file).
 
 | Field | Value |
 |-------|-------|
-| Input | Required local directory `<PATH>` |
-| Output | Versioned JSON on stdout |
-| Exit 0 | JSON written successfully |
-| Exit 2 | PATH argument omitted (usage error on stderr) |
+| Input | Required local directory `<PATH>` containing `.scryrs/scryrs.db` |
+| Output | `HotspotsReport` JSON on stdout; `.scryrs/hotspots.json` artifact file written to `<PATH>/.scryrs/` |
+| Exit 0 | Report written successfully (may have zero entries for empty stores) |
+| Exit 1 | I/O or storage error (stdout write failure, artifact write failure) |
+| Exit 2 | PATH argument omitted, directory does not contain `.scryrs/scryrs.db`, or corrupt/unreadable store (usage/fatal error on stderr) |
 
-**JSON envelope:**
+**JSON envelope (HotspotsReport):**
 
 ```json
-{"schemaVersion":"0.1.0","command":"hotspots","status":"placeholder"}
+{
+  "command": "hotspots",
+  "entries": [
+    {
+      "counts": {
+        "eventType": {
+          "EditMade": 1,
+          "FileOpened": 5
+        },
+        "outcome": {
+          "failure": 1,
+          "success": 5
+        }
+      },
+      "evidence": {
+        "rowIds": [1, 2, 3, 7, 11, 15]
+      },
+      "firstSeen": "2026-06-20T12:00:05Z",
+      "lastSeen": "2026-06-20T12:04:55Z",
+      "rank": 1,
+      "score": 10,
+      "sessionCount": 3,
+      "subject": "src/main.rs",
+      "subjectKind": "file"
+    }
+  ],
+  "generatedAt": "2026-06-20T12:05:01Z",
+  "repositoryPath": "/absolute/path/to/repo",
+  "runMetadata": {
+    "analyzedEventCount": 42,
+    "analyzedSubjectCount": 12,
+    "firstEventId": 1,
+    "lastEventId": 42,
+    "storeSchemaVersion": 1
+  },
+  "schemaVersion": "1.0.0",
+  "storePath": "/absolute/path/to/repo/.scryrs/scryrs.db"
+}
 ```
 
-- `schemaVersion` matches `scryrs-types::SCHEMA_VERSION`.
+- `schemaVersion` is `"1.0.0"` — independent of the `record` envelope `schemaVersion`.
 - `command` is always `"hotspots"`.
-- `status` is always `"placeholder"` (no engine behavior in v0).
+- `repositoryPath` and `storePath` are absolute paths.
+- `runMetadata` carries `storeSchemaVersion` (SQLite user version, integer), `analyzedEventCount` (total subject-bearing events analyzed, integer), `analyzedSubjectCount` (distinct subjects, integer), `firstEventId` (earliest event row ID, integer), and `lastEventId` (latest event row ID, integer). All are `0` when the store is empty.
+- `entries` is sorted by score descending with a deterministic six-key tie-break: `score DESC, sessionCount DESC, lastSeen DESC, subjectKind ASC, subject ASC, firstEventId ASC`.
+- Each entry's `counts` contains two sub-objects: `eventType` maps each trace event type name to its per-subject occurrence count, and `outcome` maps `success`/`failure` to per-subject outcome counts. Only non-zero counts are included.
+- Each entry's `evidence.rowIds` is an ordered list of SQLite row IDs identifying the trace events that contributed to this hotspot entry.
+- `subjectKind` uses short category tags: `file`, `search`, `symbol`, `command`, or `document`.
 
-No human-readable text is emitted to stdout for this command. Agents should parse stdout as JSON.
+**Scoring dimensions:**
+
+| Event type | Weight |
+|------------|--------|
+| `FileOpened` | 1 |
+| `SearchRun` | 2 |
+| `SymbolInspected` | 2 |
+| `CommandExecuted` | 1 |
+| `DocRetrieved` | 2 |
+| `EditMade` | 3 |
+| `FailedLookup` | 4 (+2 failure bonus) |
+
+Per-subject score = sum of event weights multiplied by per-type counts. `FailedLookup` events add a fixed `FAILURE_BONUS` of 2 per occurrence in addition to the weight.
 
 ## Global flags
 
@@ -115,9 +170,9 @@ Agents should check `surfaceVersion` before parsing to detect format changes. Th
 
 | Code | Meaning |
 |------|---------|
-| 0 | Hotspots: JSON placeholder written successfully. Record: all processed non-empty lines were accepted. Help/version/surface display. |
-| 1 | Hotspots: I/O error writing output. Record: one or more events rejected, or I/O error writing output. |
-| 2 | Unknown commands, missing required arguments, invalid arguments, unsupported paths (usage errors). Record: fatal I/O error (unreadable file or store failure). |
+| 0 | Hotspots: report written successfully (may have zero entries). Record: all processed non-empty lines were accepted. Help/version/surface display. |
+| 1 | Hotspots: I/O error writing stdout or artifact file. Record: one or more events rejected, or I/O error writing output. |
+| 2 | Hotspots: missing PATH, store not found, corrupt store. Unknown commands, missing required arguments, invalid arguments, unsupported paths (usage errors). Record: fatal I/O error (unreadable file or store failure). |
 
 All error messages and human-facing diagnostics are written to stderr.
 
@@ -125,15 +180,15 @@ All error messages and human-facing diagnostics are written to stderr.
 
 ### Hotspots command
 
-**When to call:** An agent should call `scryrs hotspots <PATH>` when the agent needs scryrs' repository hotspot summary for a given local directory path.
+**When to call:** An agent should call `scryrs hotspots <PATH>` when the agent needs scryrs' repository hotspot summary for a given local directory path. The command opens `.scryrs/scryrs.db` at `<PATH>`, runs deterministic scoring over all persisted trace events, and emits a `HotspotsReport`.
 
-**Input:** An explicit local directory path (required).
+**Input:** An explicit local directory path (required). The path must contain `.scryrs/scryrs.db`.
 
-**Output:** A parseable JSON envelope on stdout (see envelope above). The agent can distinguish outcomes by exit code:
+**Output:** A parseable JSON `HotspotsReport` on stdout and `.scryrs/hotspots.json` artifact file. The agent can distinguish outcomes by exit code:
 
-- Exit 0: JSON result available.
-- Exit 2: Contract violation (missing PATH, unknown command, invalid args). Do not retry without fixing input.
-- Exit 1: Transient runtime failure. May retry.
+- Exit 0: Report available (may have zero entries if store is empty).
+- Exit 1: I/O or storage error (stdout write failure, artifact write failure). May retry.
+- Exit 2: Missing PATH, store not found at `<PATH>/.scryrs/scryrs.db`, or corrupt store. Do not retry without fixing input.
 
 ### Record command
 
@@ -214,7 +269,7 @@ cargo test -p scryrs-cli
 
 All tests for the `scryrs-cli` crate run through Cargo's built-in test runner. The crate includes:
 
-- **Snapshot tests** (via `insta`) for `--help`, `--help-json`, and `hotspots` output — these verify exact output byte-for-byte against committed `.snap` files.
+- **Snapshot tests** (via `insta`) for `--help`, `--help-json`, and `hotspots` output — these verify exact output byte-for-byte against committed `.snap` files. Hotspots integration tests use real SQLite fixtures and full pipeline assertions.
 - **Identity tests** — verify `-h` produces identical output to `--help`, `-hj` to `--help-json`, and bare invocation to `--help`.
 - **Error-path tests** — verify exit codes and error messages for unknown commands, missing arguments, and extra arguments.
 - **Smoke tests** — exercise the public `run()` entrypoint to verify arg-collection wiring from the environment args iterator to the writer-based logic.
@@ -225,7 +280,7 @@ When a snapshot test fails, Cargo prints a diff showing what changed between the
 
 ### Updating snapshots
 
-After an intentional change to the CLI contract (help text, `--help-json` surface document, or `hotspots` JSON envelope), update the committed snapshots:
+After an intentional change to the CLI contract (help text, `--help-json` surface document, or `hotspots` JSON envelope), update the committed snapshots. For hotspots, this also means updating the integration test snapshots (`hotspot_integration_tests`) and E2E test:
 
 ```bash
 # Batch-accept all new or changed snapshots:

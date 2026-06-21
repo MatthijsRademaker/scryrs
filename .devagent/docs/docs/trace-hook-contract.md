@@ -56,7 +56,7 @@ Rewrite-tool co-installation behaves differently across harnesses. Integrators m
 
 ### Limitations
 
-- **Hotspot subjects remain fragmented** between rewritten and non-rewritten commands (e.g., `ls -la` and `rtk ls -la` are distinct subjects). Canonicalization for hotspot grouping is deferred to Phase 2.
+- **Hotspot subjects remain fragmented** between rewritten and non-rewritten commands (e.g., `ls -la` and `rtk ls -la` are distinct subjects). Command canonicalization remains a known limitation not scheduled for any current roadmap phase.
 - **Pi mutation propagation** from `tool_call` input mutations through to `tool_result` is an empirical assumption. If not yet verified, this behavior is presented as a limitation rather than a guarantee.
 - **Claude Code updated-input forwarding** between PreToolUse hooks is platform-dependent. The observed command may differ if hook-order changes between environments.
 - The `CommandExecutedPayload` schema contains a single `command` field. Preserving both original and effective commands within a single trace event is not supported in Phase 1.

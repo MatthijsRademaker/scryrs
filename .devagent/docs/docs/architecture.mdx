@@ -101,7 +101,7 @@ Adapters depend on shared contracts and suite outputs. Core detection should nev
 
 ### CI lanes
 
-- **Pull request**: `cargo test --workspace --all-targets --all-features --locked` (all Rust tests, ~60 in scryrs-core, ~85 in scryrs-cli, plus scaffold crates).
+- **Pull request**: `cargo test --workspace --all-targets --all-features --locked` (all Rust tests across workspace crates).
 - **Hook verification**: A separate CI job in `.github/workflows/ci.yml` runs `scripts/hook-test` on every PR, checking Claude Code hook JSON shaping, fail-open, and transparency. Runtime: <5 seconds, Node-only.
 - **Cross-harness e2e** (`scripts/verify-trace-capture`): Docker-backed end-to-end verification exercising both Claude Code and Pi hook fixtures against a real `scryrs` binary. Measured runtime ~41 seconds (cached build). Assigned to **nightly lane** pending CI Docker-in-Docker support.
 
@@ -120,8 +120,8 @@ Adapters depend on shared contracts and suite outputs. Core detection should nev
 
 | Crate | Tests | Notes |
 | --- | --- | --- |
-| `scryrs-cli` | ~85 | CLI contract, record, init, hotspots integration |
-| `scryrs-core` | ~64 | Trace events, hotspot scoring |
+| `scryrs-cli` | Comprehensive | CLI contract, record, init, hotspots integration |
+| `scryrs-core` | Comprehensive | Trace events, hotspot scoring |
 | `scryrs-types` | 24 | Serialization, type-level contracts |
 | `scryrs-curator` | 3 | `propose_from_hotspot`, title/rationale/edge cases |
 | `scryrs-sandbox` | 5 | `ToolPolicy::read_only`, `can_write` path matching |
@@ -129,7 +129,7 @@ Adapters depend on shared contracts and suite outputs. Core detection should nev
 
 ## Current Limitations
 
-- Behavior is scaffold-level: commands print placeholders and crates expose minimal public contracts.
+- `scryrs hotspots` is production-level: it opens `.scryrs/scryrs.db` via `TraceQuery`, runs deterministic scoring with a documented weight table and six-key tie-break, emits a versioned `HotspotsReport` (schemaVersion 1.0.0) to stdout and `.scryrs/hotspots.json`, and handles empty/missing/corrupt stores with correct exit codes. The `scryrs record` and `scryrs init` commands are similarly production-grade with Docker-backed verification. Graph, curator, and adapter crates remain scaffold-level (sentinel descriptor tests only).
 - LikeC4 views on this page are high-level architecture projections, not exhaustive Cargo dependency graphs.
 - Rust toolchain is not installed in the current local environment, so cargo-backed verification is blocked until `rust-toolchain.toml` can be installed.
 - `tests/golden/`, `tests/integration/`, and `tests/llm/` are `.gitkeep` placeholder directories with no active test suites. These remain deferred until a real test suite is designed to occupy each directory. Adding tests to these directories before their purpose is defined would create untethered suites with no clear assertion boundary.
