@@ -20,7 +20,7 @@ import { execSync, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { pass, fail, summary } from "./lib/assert.mjs";
-import { readJsonl, assertEventShape } from "./lib/jsonl.mjs";
+import { readEventsDb, assertEventShape } from "./lib/db.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -28,13 +28,13 @@ const ROOT = join(__dirname, "..", "..");
 const HOOK_SOURCE = join(ROOT, "hooks", "pi", "index.ts");
 
 // -----------------------------------------------------------------------
-// Wait-for-events helper — polls events.jsonl until expected count or timeout
+// Wait-for-events helper — polls scryrs.db until expected count or timeout
 // -----------------------------------------------------------------------
-function waitForEventCount(jsonlPath, expectedCount, timeoutMs = 5000) {
+function waitForEventCount(dbPath, expectedCount, timeoutMs = 5000) {
 	const start = Date.now();
 	while (Date.now() - start < timeoutMs) {
-		if (existsSync(jsonlPath)) {
-			const events = readJsonl(jsonlPath);
+		if (existsSync(dbPath)) {
+			const events = readEventsDb(dbPath);
 			if (events.length >= expectedCount) {
 				return events;
 			}
@@ -46,8 +46,8 @@ function waitForEventCount(jsonlPath, expectedCount, timeoutMs = 5000) {
 		}
 	}
 	// Last attempt
-	if (existsSync(jsonlPath)) {
-		return readJsonl(jsonlPath);
+	if (existsSync(dbPath)) {
+		return readEventsDb(dbPath);
 	}
 	return [];
 }
@@ -565,9 +565,9 @@ async function testSuccessfulCapture() {
 		}
 	}
 
-	// 3. Assert events.jsonl (poll to avoid SessionStart fire-and-forget race)
-	const eventsJsonl = join(dir, ".scryrs", "events.jsonl");
-	const events = waitForEventCount(eventsJsonl, 7, 5000);
+	// 3. Assert scryrs.db (poll to avoid SessionStart fire-and-forget race)
+	const eventsDb = join(dir, ".scryrs", "scryrs.db");
+	const events = waitForEventCount(eventsDb, 7, 5000);
 
 	// Should have SessionStart + 6 tool events = 7
 	if (events.length < 7) {
@@ -599,7 +599,7 @@ async function testSuccessfulCapture() {
 			);
 		}
 	} else {
-		fail("Pi SessionStart", "no SessionStart event found in events.jsonl");
+		fail("Pi SessionStart", "no SessionStart event found in scryrs.db");
 	}
 
 	// Check each tool event
@@ -610,7 +610,7 @@ async function testSuccessfulCapture() {
 		if (!toolEvent) {
 			fail(
 				`Pi ${tool.name}`,
-				`no ${tool.expectedType} event for ${tool.name} found in events.jsonl`,
+				`no ${tool.expectedType} event for ${tool.name} found in scryrs.db`,
 			);
 			continue;
 		}
@@ -718,13 +718,13 @@ async function testFailurePropagation() {
 		fail("Pi failure: snapshot", "missing pre/post snapshot");
 	}
 
-	// Assert events.jsonl contains FailedLookup
-	const eventsJsonl = join(dir, ".scryrs", "events.jsonl");
-	const events = readJsonl(eventsJsonl);
+	// Assert scryrs.db contains FailedLookup
+	const eventsDb = join(dir, ".scryrs", "scryrs.db");
+	const events = readEventsDb(eventsDb);
 	const failedEvent = events.find((e) => e.event_type === "FailedLookup");
 
 	if (!failedEvent) {
-		fail("Pi failure: FailedLookup", "no FailedLookup event in events.jsonl");
+		fail("Pi failure: FailedLookup", "no FailedLookup event in scryrs.db");
 	} else {
 		const shapeOk = assertEventShape(
 			failedEvent,
@@ -894,9 +894,9 @@ async function testFailOpen() {
 	}
 
 	// Pass-through: event should not be persisted
-	const eventsJsonl = join(dir, ".scryrs", "events.jsonl");
-	if (existsSync(eventsJsonl)) {
-		const events = readJsonl(eventsJsonl);
+	const eventsDb = join(dir, ".scryrs", "scryrs.db");
+	if (existsSync(eventsDb)) {
+		const events = readEventsDb(eventsDb);
 		if (events.length === 0) {
 			pass("Pi fail-open: no events persisted (expected with scryrs missing)");
 		}
@@ -941,8 +941,8 @@ async function testUnlistedTools() {
 	}
 
 	// No event should be written for unlisted web_search
-	const eventsJsonl = join(dir, ".scryrs", "events.jsonl");
-	const events = readJsonl(eventsJsonl);
+	const eventsDb = join(dir, ".scryrs", "scryrs.db");
+	const events = readEventsDb(eventsDb);
 	const unlistedEvents = events.filter((e) => e.tool_name === "web_search");
 	if (unlistedEvents.length === 0) {
 		pass("Pi unlisted: no event persisted for unlisted tool");
@@ -1060,9 +1060,9 @@ async function testRewriteCompatibility() {
 		}
 	}
 
-	// 3. Assert events.jsonl contents (poll to avoid SessionStart fire-and-forget race)
-	const eventsJsonl = join(dir, ".scryrs", "events.jsonl");
-	const events = waitForEventCount(eventsJsonl, 3, 15000);
+	// 3. Assert scryrs.db contents (poll to avoid SessionStart fire-and-forget race)
+	const eventsDb = join(dir, ".scryrs", "scryrs.db");
+	const events = waitForEventCount(eventsDb, 3, 15000);
 
 	const bashEvents = events.filter(
 		(e) => e.event_type === "CommandExecuted" && e.tool_name === "bash",

@@ -42,7 +42,7 @@ Ingest JSONL trace events from stdin or a file. `--stdin` and `--file` are mutua
 
 **Ingestion behavior:** Blank or whitespace-only lines are skipped without incrementing accepted or rejected counts. Malformed JSON and schema-invalid `TraceEvent` lines are rejected with diagnostics, and ingestion continues with later lines.
 
-**Persistence:** Accepted events are appended to `.scryrs/events.jsonl` (one JSON event per line) in the current working directory. This store is append-only and ingestion-only; no query, delete, or analysis APIs are provided.
+**Persistence:** Accepted events are persisted to `.scryrs/scryrs.db` (the canonical SQLite trace datastore) in the current working directory. This store is append-only and ingestion-only; no query, delete, or analysis APIs are provided. `.scryrs/events.jsonl` is the ingestion input format and is NOT used as the canonical persistence store.
 
 ### `scryrs hotspots <PATH>` (v0 placeholder)
 

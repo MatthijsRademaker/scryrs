@@ -43,6 +43,33 @@ impl TraceEvent {
         }
     }
 
+    /// Return a short category tag for subject-bearing events, or `None`
+    /// for lifecycle events. This is the `subject_kind` column used for
+    /// indexed subject lookup in the datastore.
+    #[must_use]
+    pub fn subject_kind(&self) -> Option<&'static str> {
+        match &self.payload {
+            TraceEventPayload::SessionStart(_) | TraceEventPayload::SessionEnd(_) => None,
+            TraceEventPayload::FileOpened(_) | TraceEventPayload::EditMade(_) => Some("file"),
+            TraceEventPayload::SearchRun(_) => Some("search"),
+            TraceEventPayload::SymbolInspected(_) | TraceEventPayload::FailedLookup(_) => {
+                Some("symbol")
+            }
+            TraceEventPayload::CommandExecuted(_) => Some("command"),
+            TraceEventPayload::DocRetrieved(_) => Some("document"),
+        }
+    }
+
+    /// Extract the failure reason string for `Outcome::Failure` events,
+    /// or `None` for success outcomes.
+    #[must_use]
+    pub fn failure_reason(&self) -> Option<&str> {
+        match &self.outcome {
+            Outcome::Success => None,
+            Outcome::Failure { reason } => reason.as_deref(),
+        }
+    }
+
     /// Validate semantic invariants for an event that has passed
     /// structural deserialization. Returns `Ok(())` when both
     /// `schema_version` equals `SCHEMA_VERSION` and `event_type`

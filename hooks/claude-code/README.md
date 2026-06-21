@@ -57,7 +57,7 @@ This builds the real `scryrs` binary and exercises the hook against it in a
 Docker-backed environment (no host Node.js required). It verifies:
 
 - JSON shaping for all nine whitelisted tools
-- Event persistence to `.scryrs/events.jsonl` with canonical `TraceEvent` envelope shape
+- Event persistence to `.scryrs/scryrs.db` with canonical `TraceEvent` envelope shape
 - Non-interference: hook produces zero stdout/stderr
 - Fail-open: hook returns `{continue: true}` when scryrs is missing
 - Pass-through: unlisted tools produce no events

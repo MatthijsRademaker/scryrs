@@ -1,29 +1,4 @@
-# cross-harness-verification Specification
-
-## Purpose
-TBD - created by archiving change task-0cb48e7a-ad81-4ad4-a451-7bb21ef6a750. Update Purpose after archive.
-## Requirements
-### Requirement: Docker-backed verification entrypoint exercises both harnesses
-
-The system SHALL provide a `scripts/verify-trace-capture` bash entrypoint that builds the real `scryrs` binary in a Rust Docker container and drives both the Claude Code and Pi hook fixtures against it in a Node.js Docker container. The entrypoint SHALL NOT require host-installed Node.js and SHALL be runnable in the worker environment.
-
-#### Scenario: Entrypoint runs end-to-end successfully
-- **WHEN** `scripts/verify-trace-capture` is invoked in the repository root
-- **THEN** the scryrs binary is built via `cargo build --release` in a Rust container
-- **AND** the Claude Code fixture is executed in a Node container, piping hook events to the real scryrs binary
-- **AND** the Pi fixture is executed in the Node container, loading `hooks/pi/index.ts` via `tsx` against a fake `ExtensionAPI`
-- **AND** the entrypoint exits 0 when all assertions pass
-
-#### Scenario: Entrypoint exits non-zero on failure
-- **WHEN** any assertion in either fixture fails
-- **THEN** the entrypoint prints the failure details to stderr
-- **AND** the entrypoint exits with a non-zero code
-
-#### Scenario: Targeted fixture execution is supported
-- **WHEN** `scripts/verify-trace-capture --claude-only` is invoked
-- **THEN** only the Claude Code fixture runs
-- **WHEN** `scripts/verify-trace-capture --pi-only` is invoked
-- **THEN** only the Pi fixture runs
+## MODIFIED Requirements
 
 ### Requirement: Claude Code fixture proves success capture against real scryrs
 
@@ -102,40 +77,6 @@ The Pi verification fixture SHALL prove that a failing `lsp_navigation` tool res
 - **THEN** it verifies failure outcome
 - **AND** it does not require any specific `outcome.reason` string
 
-### Requirement: Both fixtures prove fail-open behavior
-
-The verification SHALL prove that when `scryrs` is not on PATH or cannot execute, both hooks continue normally and do not corrupt tool output.
-
-#### Scenario: Claude Code fail-open when scryrs missing
-- **GIVEN** `scryrs` is not on PATH in the fixture's test environment
-- **WHEN** the Claude Code hook processes a tracked tool event
-- **THEN** the hook returns `{continue: true}`
-- **AND** the hook writes zero bytes to stdout
-- **AND** the hook writes zero bytes to stderr
-- **AND** the warning log `.scryrs/hooks/claude-code-warnings.log` is created with a timestamped entry
-
-#### Scenario: Pi fail-open when scryrs missing
-- **GIVEN** `scryrs` is not on PATH in the fixture's test environment
-- **WHEN** the Pi hook processes any tracked tool event
-- **THEN** the handler returns `undefined`
-- **AND** the handler does not throw
-- **AND** `console.error` is called with a descriptive scryrs-failure message
-
-### Requirement: run_node Docker helper follows existing run_rust pattern
-
-The `run_node` function in `scripts/lib/docker-verification.sh` SHALL follow the same pattern as `run_rust`: mount the repository root at `/workspace`, map the caller's UID/GID for correct file ownership, use `NODE_IMAGE` from `scripts/.versions` (default `node:22-alpine`), and pull the image on first use.
-
-#### Scenario: run_node executes Node.js commands
-- **WHEN** `run_node node --version` is invoked
-- **THEN** the command runs inside a `node:22-alpine` container with the repository mounted at `/workspace`
-- **AND** the output is the Node.js version string
-- **AND** the exit code matches the child process exit code
-
-#### Scenario: run_node uses pinned image from .versions
-- **WHEN** `run_node` is invoked
-- **THEN** it sources or reads the `NODE_IMAGE` value from `scripts/.versions`
-- **AND** it pulls the image if not already present locally
-
 ### Requirement: Verification does not modify hook sources, CLI behavior, or OpenSpec specs
 
 The verification entrypoint and fixtures SHALL remain read-only consumers of hook source files and SHALL align their persistence assertions with the current canonical datastore contract instead of freezing prior JSONL-only behavior.
@@ -183,4 +124,3 @@ The Pi verification fixture SHALL simulate rewrite-tool compatibility by emittin
 - **WHEN** the event input command is `echo "=== BACKEND ===" && rtk ls backend/api/ && rtk ls backend/cmd/`
 - **THEN** `.scryrs/scryrs.db` contains a persisted `CommandExecuted` event whose `payload.command` is the full compound command string
 - **AND** the fixture does not require RTK to be installed
-

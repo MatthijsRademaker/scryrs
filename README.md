@@ -249,7 +249,7 @@ See `scryrs --help`
 
 ## Current status
 
-v0 CLI contract. `scryrs record` ingests JSONL trace events via `--stdin` or `--file <PATH>`, validates against the shared `TraceEvent` schema, persists accepted events to `.scryrs/events.jsonl`, and returns deterministic summary counts and rejection diagnostics. `scryrs hotspots <PATH>` emits a versioned JSON placeholder. Engine behavior comes next.
+v0 CLI contract. `scryrs record` ingests JSONL trace events via `--stdin` or `--file <PATH>`, validates against the shared `TraceEvent` schema, persists accepted events to `.scryrs/scryrs.db`, and returns deterministic summary counts and rejection diagnostics. `scryrs hotspots <PATH>` emits a versioned JSON placeholder. Engine behavior comes next.
 
 ## Local checks
 

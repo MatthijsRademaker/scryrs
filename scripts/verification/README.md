@@ -39,7 +39,7 @@ Exercises `hooks/claude-code/scryrs-hook.mjs` against real `scryrs record --stdi
   shaped `TraceEvent` JSON with canonical envelope fields (`schema_version`,
   `timestamp`, `session_id`, `event_type`, `tool_name`, `payload` with `type`
   tag, `outcome`).
-- **Persistence**: Events are appended to `.scryrs/events.jsonl` by the real
+- **Persistence**: Events are persisted to `.scryrs/scryrs.db` by the real
   scryrs binary.
 - **Non-interference**: The hook subprocess writes zero bytes to stdout and
   zero bytes to stderr.
@@ -94,7 +94,7 @@ JSONL helpers for reading and validating scryrs event files:
 
 | Function | Description |
 |---|---|
-| `readJsonl(path)` | Read and parse a `.scryrs/events.jsonl` file |
+| `readEventsDb(path)` | Read all events from a `.scryrs/scryrs.db` SQLite datastore |
 | `assertEventShape(event, type, toolName?)` | Validate canonical `TraceEvent` envelope |
 
 ## Usage

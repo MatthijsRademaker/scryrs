@@ -1,30 +1,4 @@
-# scryrs-record-endpoint Specification
-
-## Purpose
-
-Defines requirements for the scryrs record endpoint — the JSONL trace-event ingestion command covering stdin/file input modes, deterministic output contract, exit-code semantics, and minimal append-only event store persistence.
-## Requirements
-### Requirement: Record command accepts JSONL trace events from stdin and file
-
-The system SHALL expose `scryrs record --stdin` and `scryrs record --file <PATH>` as the only public ingestion modes for this change. Both modes MUST read newline-delimited JSON using the existing `scryrs-types::TraceEvent` wire contract, use the same ingestion path, and reject invocations that provide both or neither input mode.
-
-#### Scenario: Hook pipes events via stdin
-
-- **WHEN** a hook runs `scryrs record --stdin` and writes newline-delimited `TraceEvent` JSON to stdin
-- **THEN** the system ingests each non-empty line through the shared record path
-- **THEN** accepted events are persisted
-
-#### Scenario: Record reads events from file
-
-- **WHEN** a user runs `scryrs record --file session.jsonl`
-- **THEN** the system reads the file as newline-delimited `TraceEvent` JSON
-- **THEN** the system uses the same validation, storage, summary, and exit-code behavior as `--stdin`
-
-#### Scenario: Invalid input mode fails fast
-
-- **WHEN** `scryrs record` is invoked with both `--stdin` and `--file`, or with neither
-- **THEN** the system writes a usage error to stderr
-- **THEN** the system exits with code 2
+## MODIFIED Requirements
 
 ### Requirement: Accepted events are persisted through a versioned local SQLite datastore
 
@@ -61,30 +35,6 @@ The system SHALL persist each accepted `TraceEvent` through a core-owned SQLite 
 - **WHEN** this change is implemented
 - **THEN** the store surface only opens or creates the datastore, inserts accepted events, and reports stored counts needed by record ingestion
 - **AND** the change does not add hotspot analysis, promotion logic, query APIs, hosted storage, legacy JSONL migration, or alternate canonical write paths
-
-### Requirement: Validation rejects malformed non-empty lines without aborting ingestion
-
-The system SHALL validate each non-empty physical line as a `TraceEvent`. Malformed JSON or schema-invalid events MUST be rejected with deterministic diagnostics containing the 1-based physical line number, the failing field/path when available, and a reason, while ingestion continues with later lines.
-
-#### Scenario: Malformed JSON line is rejected
-
-- **WHEN** a non-empty line contains invalid JSON
-- **THEN** the system records a rejection for that 1-based physical line number
-- **THEN** the rejection diagnostic includes the parse reason
-- **THEN** the system continues processing subsequent lines
-
-#### Scenario: Schema-invalid event is rejected
-
-- **WHEN** a non-empty line parses as JSON but fails `TraceEvent` validation
-- **THEN** the system records a rejection for that 1-based physical line number
-- **THEN** the rejection diagnostic includes the failing field/path when available and a reason
-- **THEN** the system continues processing subsequent lines
-
-#### Scenario: Blank line is ignored
-
-- **WHEN** a physical input line is empty or whitespace-only
-- **THEN** the system skips that line
-- **THEN** the line does not increment accepted or rejected counts
 
 ### Requirement: Record output and exit codes are deterministic
 
@@ -135,14 +85,3 @@ The CLI discovery surfaces SHALL document `record` as a first-class command. `sc
 - **THEN** the docs describe JSONL as the accepted ingestion format
 - **AND** the docs describe `.scryrs/scryrs.db` as the canonical persisted store
 - **AND** the docs no longer describe `.scryrs/events.jsonl` as canonical persistence
-
-### Requirement: Record remains ingestion-only
-
-The `record` endpoint SHALL be limited to ingestion. This change MUST NOT trigger hotspot scoring, promotion logic, graph building, routing, LLM calls, or harness-specific IPC beyond JSONL over stdin or file.
-
-#### Scenario: Record does not invoke analysis behavior
-
-- **WHEN** `scryrs record` accepts or rejects events
-- **THEN** it only validates, stores, summarizes, and reports diagnostics
-- **THEN** no hotspot report or promotion output is produced
-

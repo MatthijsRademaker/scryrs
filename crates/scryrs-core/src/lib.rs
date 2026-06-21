@@ -4,7 +4,7 @@ pub mod ingestion;
 pub mod store;
 
 pub use ingestion::{IngestionOutcome, Rejection, ingest_jsonl};
-pub use store::EventStore;
+pub use store::{CANONICAL_STORE_PATH, EventStore};
 
 use scryrs_types::{FeatureDescriptor, Hotspot, TraceEvent};
 

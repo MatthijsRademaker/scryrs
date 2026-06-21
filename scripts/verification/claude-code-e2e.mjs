@@ -25,7 +25,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { pass, fail, summary } from "./lib/assert.mjs";
-import { readJsonl, assertEventShape } from "./lib/jsonl.mjs";
+import { readEventsDb, assertEventShape } from "./lib/db.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -188,19 +188,17 @@ async function testJsonShaping() {
 		pass(`Claude Code ${tool.name}: hook returned {continue:true}`);
 	}
 
-	// Assert events.jsonl contents (appended by each scryrs record invocation)
-	const eventsJsonl = join(tmpDir, ".scryrs", "events.jsonl");
-	const events = readJsonl(eventsJsonl);
+	// Assert events persisted in the datastore (appended by each scryrs record invocation)
+	const eventsDb = join(tmpDir, ".scryrs", "scryrs.db");
+	const events = readEventsDb(eventsDb);
 
 	if (events.length !== tools.length) {
 		fail(
-			"events.jsonl count",
+			"events count",
 			`expected ${tools.length} events, got ${events.length}`,
 		);
 	} else {
-		pass(
-			`events.jsonl: ${events.length} events (matches ${tools.length} tools)`,
-		);
+		pass(`events: ${events.length} events (matches ${tools.length} tools)`);
 	}
 
 	for (let i = 0; i < Math.min(events.length, tools.length); i++) {
@@ -275,9 +273,9 @@ async function testRewriteCompatibility() {
 		}
 	}
 
-	// Assert events.jsonl contains both commands exactly as observed
-	const eventsJsonl = join(tmpDir, ".scryrs", "events.jsonl");
-	const events = readJsonl(eventsJsonl);
+	// Assert events are persisted with both commands exactly as observed
+	const eventsDb = join(tmpDir, ".scryrs", "scryrs.db");
+	const events = readEventsDb(eventsDb);
 
 	const bashEvents = events.filter(
 		(e) => e.event_type === "CommandExecuted" && e.tool_name === "bash",
@@ -332,7 +330,7 @@ async function testRewriteCompatibility() {
 		}
 	}
 
-	const allEvents = readJsonl(eventsJsonl);
+	const allEvents = readEventsDb(eventsDb);
 	const readEvents = allEvents.filter(
 		(e) => e.event_type === "FileOpened" && e.tool_name === "read",
 	);
@@ -645,8 +643,8 @@ async function testPassthrough() {
 	}
 
 	// No event should be written for Task
-	const eventsJsonl = join(tmpDir, ".scryrs", "events.jsonl");
-	const events = readJsonl(eventsJsonl);
+	const eventsDb = join(tmpDir, ".scryrs", "scryrs.db");
+	const events = readEventsDb(eventsDb);
 	const taskEvents = events.filter((e) => e.tool_name === "task");
 	if (taskEvents.length > 0) {
 		fail(

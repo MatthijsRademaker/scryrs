@@ -13,7 +13,7 @@ Copy this directory (`hooks/pi/`) to one of Pi's trusted extension locations:
 Then reload Pi with `/reload` (or restart).
 
 Once installed every invocation of the six tracked Pi tools produces a
-corresponding entry in `.scryrs/events.jsonl` in the working directory.
+corresponding entry in `.scryrs/scryrs.db` in the working directory.
 
 ## Requirements
 
@@ -137,7 +137,7 @@ After installation, verify the hook works:
 1. Install the hook into Pi and restart.
 2. Invoke each of the six tracked tools (`read`, `bash`, `ast_grep_search`,
    `lsp_navigation`, `edit`, `write`).
-3. Confirm `.scryrs/events.jsonl` contains a `SessionStart` event followed by
+3. Confirm `.scryrs/scryrs.db` contains a `SessionStart` event followed by
    the corresponding tool events.
 4. Move `scryrs` off `PATH` and invoke a tracked tool — confirm the tool result
    is unchanged and `console.error` reports the scryrs failure.
