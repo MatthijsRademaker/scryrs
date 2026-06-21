@@ -61,6 +61,23 @@ If a field is missing the hook uses the fallback value `"unknown"` and logs a
 `console.warn`.  **Consumers should verify these field names against their
 Pi tool definitions** — Pi releases may rename tool arguments.
 
+## Rewrite-tool compatibility
+
+### Capture point: `tool_result`
+
+The Pi hook captures Bash commands from `event.input.command` on `tool_result` — the post-execution event. Whatever command string the harness presents on `tool_result` is recorded as `CommandExecuted.payload.command` exactly as observed.
+
+This means:
+
+- If an upstream rewrite extension (e.g., RTK) transforms the `tool_call` input **and** the harness propagates that mutation into `tool_result`, scryrs records the rewritten form.
+- If the harness does **not** propagate `tool_call` mutations, scryrs records whatever command string `tool_result` carries — which may be the original agent-entered command.
+
+### Limitations
+
+- **Mutation propagation is not verified.** Whether Pi propagates `tool_call` input mutations through to `tool_result` is an empirical question. Until confirmed, the observed-command behavior described above is a **limitation statement**, not a verified guarantee.
+- **Rewrite prefixes are persisted as-is.** Commands like `rtk ls -la` appear verbatim in traces. scryrs does not strip prefixes, normalize, or reconstruct original intent.
+- **Compound commands remain single trace events.** A command like `echo "=== BACKEND ===" && rtk ls backend/api/ && rtk ls backend/cmd/` is recorded as one `CommandExecuted` event, not split into subcommands.
+
 ## Fail-open guarantees
 
 - The entire `scryrs record --stdin` subprocess call runs inside a try-catch.

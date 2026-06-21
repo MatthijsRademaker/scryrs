@@ -71,6 +71,28 @@ scripts/hook-test
 This uses a fake shell-script scryrs and validates JSON shaping and fail-open
 logic without building the Rust binary.
 
+## Rewrite-tool compatibility
+
+### Capture point: PreToolUse
+
+The Claude Code hook captures Bash commands from `tool_input.command` during the **PreToolUse** event — before the tool executes. Whatever command string the harness presents at the time the scryrs hook runs in the PreToolUse pipeline is recorded as `CommandExecuted.payload.command` exactly as observed.
+
+### Hook-order dependence
+
+Co-installed rewrite hooks (e.g., RTK) **can change** what scryrs observes, depending on hook execution order and platform forwarding behavior:
+
+- If scryrs runs **before** a rewrite hook, it records the original agent-entered command.
+- If scryrs runs **after** a rewrite hook, it records the rewritten command.
+- If the platform forwards `updatedInput` between hooks, the observed command depends on whether scryrs is positioned before or after the rewrite hook in the pipeline.
+
+Hook order is determined by the consumer's `.claude/settings.json` hook configuration. scryrs does not control or enforce hook ordering.
+
+### What is NOT guaranteed
+
+- `CommandExecuted.payload.command` **is not guaranteed** to preserve the original agent-entered command. It records whichever command string PreToolUse presents when scryrs runs.
+- The single-string `CommandExecutedPayload` schema **cannot** preserve both original and rewritten commands in one event.
+- Whether the platform forwards `updatedInput` between hooks is platform-dependent and may vary between Claude Code versions.
+
 ## Tool-to-Event Mapping
 
 The nine intercepted Claude Code tools map to scryrs event families as follows:
