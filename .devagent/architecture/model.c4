@@ -26,6 +26,12 @@ model {
       graph_build = flowstep "graph build"
     }
 
+    dashboard = crate "scryrs-dashboard" {
+      technology "Local dashboard and SPA server"
+
+      dashboard_server = flowstep "dashboard server"
+    }
+
     curator = crate "scryrs-curator" {
       technology "Proposal foundation"
 
@@ -79,6 +85,7 @@ model {
   repo.cli -> repo.policy
   repo.cli -> repo.sandbox
   repo.cli -> repo.telemetry
+  repo.cli -> repo.dashboard
   repo.cli -[optional]-> repo.llm
   repo.cli -[optional]-> repo.adapter_rspress
 
@@ -106,6 +113,8 @@ model {
   repo.core.hotspot_scoring -> repo.graph "score hotspots"
   repo.core.hotspot_scoring -> repo.core.hotspots_report "materialize hotspot report"
   repo.core.hotspots_report -> repo.graph.graph_build "publish evidence"
+  repo.core.hotspots_report -> repo.dashboard.dashboard_server "serve dashboard"
+  repo.dashboard.dashboard_server -> repo.graph.graph_build "Phase 4: graph inputs"
   repo.graph -> repo.curator.proposal_creation "update graph"
   repo.graph.graph_build -> repo.runtime.routing_hint "emit route manifests"
   repo.graph.graph_build -> repo.curator.proposal_creation "derive proposals"

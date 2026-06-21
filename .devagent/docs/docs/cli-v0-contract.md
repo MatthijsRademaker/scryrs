@@ -1,6 +1,6 @@
 # CLI v0 Contract
 
-The v0 CLI surface for `scryrs` provides three commands: the `hotspots` placeholder, the `record` ingestion endpoint, and the `init` hook installer. This contract serves agent integrators and follow-up feature developers.
+The v0 CLI surface for `scryrs` provides three implemented commands (`hotspots`, `record`, `init`) and one planned command (`dashboard` — Phase 3). This contract serves agent integrators and follow-up feature developers.
 
 ## Binary
 
@@ -122,6 +122,32 @@ Analyzes persisted trace events in `.scryrs/scryrs.db` and emits a deterministic
 
 Per-subject score = sum of event weights multiplied by per-type counts. `FailedLookup` events add a fixed `FAILURE_BONUS` of 2 per occurrence in addition to the weight.
 
+### `scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]`
+
+**Status: Planned — Phase 3 (Dashboard). Not yet implemented.**
+
+Starts a local HTTP server and serves an embedded Vue.js SPA dashboard for visual browsing of `.scryrs/` hotspot, session, and event data. Reads `.scryrs/hotspots.json` and `.scryrs/scryrs.db` from the current working directory (or auto-detected repository root).
+
+| Field | Value |
+|-------|-------|
+| Input | No required arguments. Optional flags: `--port` (default `8080`), `--bind` (default `127.0.0.1`), `--no-open` (suppress browser open), `--dev` (serve from filesystem instead of embedded assets) |
+| Output | HTTP server with REST API at `GET /api/hotspots`, `GET /api/sessions`, `GET /api/events`. SPA served at `GET /` and `GET /assets/*`. Non-API, non-asset paths fall through to `index.html` for Vue Router push-state. |
+| Exit 0 | Server shut down cleanly (SIGINT/SIGTERM) |
+| Exit 1 | Port already in use, or I/O error reading artifact files |
+| Exit 2 | Missing `.scryrs/` directory, corrupt `.scryrs/scryrs.db`, or usage error |
+
+**Startup behavior:** Prints "Dashboard available at <http://127.0.0.1:8080>" to stderr (adjusting for `--port` and `--bind` flags). Opens the default browser unless `--no-open` is set. In `--dev` mode, appends "(dev mode)" to the startup message and serves from the filesystem `frontend/dist/` directory.
+
+**REST API contract:**
+
+| Endpoint | Method | Response |
+|----------|--------|----------|
+| `/api/hotspots` | GET | `200 OK` with `.scryrs/hotspots.json` content as JSON. `404 Not Found` if no hotspot report exists. |
+| `/api/sessions` | GET | `200 OK` with JSON array of session objects (`sessionId`, `startedAt`, `endedAt`, `eventCount`, `source`), ordered by `startedAt DESC`, default limit 50. `404 Not Found` if no `.scryrs/scryrs.db`. `502 Bad Gateway` if store is corrupt. |
+| `/api/events` | GET | `200 OK` with JSON object `{ events: [...], nextCursor: string|null }`, cursor-based pagination via`?limit=N&cursor=<token>`. Each event has`eventId`,`eventType`,`timestamp`,`subjectKind`,`subject`,`payload`.`404 Not Found` if no store. `502 Bad Gateway` if corrupt. |
+
+**SPA contract:** The SPA is a Vue 3 application built with Vite and embedded in the binary via `rust-embed`. Views: `/` (hotspot table, landing page), `/subjects/:subjectKind/:subject` (subject detail), `/sessions` (session list), `/sessions/:sessionId` (session detail), `/events` (event distribution chart), `/about` (version info). Unknown routes display a 404 page with a link back to the landing page.
+
 ## Global flags
 
 | Flag | Behavior | Exit code |
@@ -170,9 +196,9 @@ Agents should check `surfaceVersion` before parsing to detect format changes. Th
 
 | Code | Meaning |
 |------|---------|
-| 0 | Hotspots: report written successfully (may have zero entries). Record: all processed non-empty lines were accepted. Help/version/surface display. |
-| 1 | Hotspots: I/O error writing stdout or artifact file. Record: one or more events rejected, or I/O error writing output. |
-| 2 | Hotspots: missing PATH, store not found, corrupt store. Unknown commands, missing required arguments, invalid arguments, unsupported paths (usage errors). Record: fatal I/O error (unreadable file or store failure). |
+| 0 | Hotspots: report written successfully (may have zero entries). Record: all processed non-empty lines were accepted. Dashboard: server shut down cleanly. Help/version/surface display. |
+| 1 | Hotspots: I/O error writing stdout or artifact file. Record: one or more events rejected, or I/O error writing output. Dashboard: port in use or artifact read error. |
+| 2 | Hotspots: missing PATH, store not found, corrupt store. Dashboard: missing `.scryrs/` directory or corrupt store. Unknown commands, missing required arguments, invalid arguments, unsupported paths (usage errors). Record: fatal I/O error (unreadable file or store failure). |
 
 All error messages and human-facing diagnostics are written to stderr.
 
@@ -189,6 +215,22 @@ All error messages and human-facing diagnostics are written to stderr.
 - Exit 0: Report available (may have zero entries if store is empty).
 - Exit 1: I/O or storage error (stdout write failure, artifact write failure). May retry.
 - Exit 2: Missing PATH, store not found at `<PATH>/.scryrs/scryrs.db`, or corrupt store. Do not retry without fixing input.
+
+### Dashboard command
+
+**Status: Planned (Phase 3).**
+
+**When to call:** An agent should call `scryrs dashboard` when it needs to visually browse hotspot, session, and event data from a local `.scryrs/` store. The command starts a local HTTP server and opens the dashboard SPA in the default browser.
+
+**Input:** No required positional arguments. Optional flags: `--port <PORT>` (default `8080`), `-p <PORT>`, `--bind <ADDR>` (default `127.0.0.1`), `-b <ADDR>`, `--no-open` (flag, no value), `--dev` (flag, no value).
+
+**Output:** SPA and REST API served over HTTP. Server lifecycle messages written to stderr.
+
+**Exit codes:**
+
+- Exit 0: Server shut down cleanly.
+- Exit 1: Port already in use, or artifact file read error.
+- Exit 2: Missing `.scryrs/` directory, corrupt store, or usage error.
 
 ### Record command
 
@@ -212,7 +254,7 @@ All error messages and human-facing diagnostics are written to stderr.
 
 **Fail-fast paths:** The following always exit 2 and write an error to stderr:
 
-- Any command other than `hotspots`, `record`, or `init` (including `components`, `trace`, `propose`, `graph`, `route`, `adapters`, `report`, `suggest-docs`)
+- Any command other than `hotspots`, `dashboard`, `record`, or `init` (including `components`, `trace`, `propose`, `graph`, `route`, `adapters`, `report`, `suggest-docs`). **Note:** `scryrs dashboard` is recognized as a valid command but exits 2 with "not yet implemented (Phase 3)" until the dashboard crate ships. This is a planned entrypoint, not an unknown command.
 - `scryrs hotspots` without a PATH argument
 - `scryrs record` with neither or both input modes (mutually exclusive)
 - `scryrs record --file` with an unreadable path

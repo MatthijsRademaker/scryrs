@@ -4,14 +4,14 @@ views {
 
     include user_ci_agent
     include repo.cli
-    include repo.core, repo.graph, repo.curator, repo.runtime
+    include repo.core, repo.graph, repo.curator, repo.runtime, repo.dashboard
     include repo.types
     include repo.policy, repo.sandbox, repo.telemetry
     include repo.adapter_markdown, repo.adapter_rspress
     include repo.llm
 
     group "Core suite" {
-      include repo.core, repo.graph, repo.curator, repo.runtime
+      include repo.core, repo.graph, repo.curator, repo.runtime, repo.dashboard
     }
 
     group "Shared contracts" {
@@ -32,7 +32,7 @@ views {
 
     style repo.cli { color primary }
     style repo.types { color secondary }
-    style repo.core, repo.graph, repo.curator, repo.runtime { color blue }
+    style repo.core, repo.graph, repo.curator, repo.runtime, repo.dashboard { color blue }
     style repo.policy, repo.sandbox, repo.telemetry { color amber }
     style repo.adapter_markdown, repo.adapter_rspress { color green }
     style repo.llm { color muted; border dashed }
@@ -63,13 +63,15 @@ views {
     repo.core.record_ingest -> repo.core.event_store "persist event stream"
     repo.core.event_store -> repo.core.hotspot_scoring "Phase 2: score hotspots"
     repo.core.hotspot_scoring -> repo.core.hotspots_report "emit stable hotspot outputs"
-    repo.core.hotspots_report -> repo.graph.graph_build "Phase 3: build graph inputs"
-    repo.graph.graph_build -> repo.runtime.routing_hint "Phase 4: route manifests"
-    repo.graph.graph_build -> repo.curator.proposal_creation "Phase 5: proposal inputs"
-    repo.curator.proposal_creation -> repo.adapter_rspress "Phase 6: publish reviewable knowledge"
+    repo.core.hotspots_report -> repo.dashboard.dashboard_server "Phase 3: local dashboard"
+    repo.dashboard.dashboard_server -> repo.graph.graph_build "Phase 4: build graph inputs"
+    repo.graph.graph_build -> repo.runtime.routing_hint "Phase 5: route manifests"
+    repo.graph.graph_build -> repo.curator.proposal_creation "Phase 6: proposal inputs"
+    repo.curator.proposal_creation -> repo.adapter_rspress "Phase 7: publish reviewable knowledge"
 
     style repo.cli, repo.core.record_ingest, repo.core.event_store { color primary }
     style repo.core.hotspot_scoring, repo.core.hotspots_report { color blue }
+    style repo.dashboard.dashboard_server { color amber }
     style repo.graph.graph_build, repo.runtime.routing_hint { color secondary }
     style repo.curator.proposal_creation, repo.adapter_rspress { color green }
   }
