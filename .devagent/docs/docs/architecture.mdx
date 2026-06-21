@@ -97,11 +97,42 @@ Adapters depend on shared contracts and suite outputs. Core detection should nev
 - `.github/workflows/ci.yml` mirrors fast-lane checks for pull requests and `main`.
 - `deny.toml`, `clippy.toml`, `rustfmt.toml`, and `rust-toolchain.toml` capture tool policy.
 
+## Test Coverage & Verification
+
+### CI lanes
+
+- **Pull request**: `cargo test --workspace --all-targets --all-features --locked` (all Rust tests, ~60 in scryrs-core, ~85 in scryrs-cli, plus scaffold crates).
+- **Hook verification**: A separate CI job in `.github/workflows/ci.yml` runs `scripts/hook-test` on every PR, checking Claude Code hook JSON shaping, fail-open, and transparency. Runtime: <5 seconds, Node-only.
+- **Cross-harness e2e** (`scripts/verify-trace-capture`): Docker-backed end-to-end verification exercising both Claude Code and Pi hook fixtures against a real `scryrs` binary. Measured runtime ~41 seconds (cached build). Assigned to **nightly lane** pending CI Docker-in-Docker support.
+
+### Hook verification
+
+- `scripts/hook-test` — Node-only Claude Code hook contract checks (JSON shaping, fail-open, transparency), runs on every PR.
+- `scripts/verify-trace-capture` — Docker-backed cross-harness e2e (Claude Code + Pi fixtures against real `scryrs` binary).
+- `scripts/verification/installed-hook-e2e.mjs` — End-to-end validation that `scryrs init --agent claude-code|pi` produces loadable, functional hook artifacts in a consumer project context.
+
+### Local test lanes
+
+- `scripts/test` — Rust tests only (default lane).
+- `scripts/test --full` — Full suite: Rust tests followed by `scripts/hook-test`.
+
+### Unit test coverage by crate
+
+| Crate | Tests | Notes |
+| --- | --- | --- |
+| `scryrs-cli` | ~85 | CLI contract, record, init, hotspots integration |
+| `scryrs-core` | ~64 | Trace events, hotspot scoring |
+| `scryrs-types` | 24 | Serialization, type-level contracts |
+| `scryrs-curator` | 3 | `propose_from_hotspot`, title/rationale/edge cases |
+| `scryrs-sandbox` | 5 | `ToolPolicy::read_only`, `can_write` path matching |
+| Other scaffold crates | 1 each | Sentinel descriptor test only |
+
 ## Current Limitations
 
 - Behavior is scaffold-level: commands print placeholders and crates expose minimal public contracts.
 - LikeC4 views on this page are high-level architecture projections, not exhaustive Cargo dependency graphs.
 - Rust toolchain is not installed in the current local environment, so cargo-backed verification is blocked until `rust-toolchain.toml` can be installed.
+- `tests/golden/`, `tests/integration/`, and `tests/llm/` are `.gitkeep` placeholder directories with no active test suites. These remain deferred until a real test suite is designed to occupy each directory. Adding tests to these directories before their purpose is defined would create untethered suites with no clear assertion boundary.
 
 ## Related Pages
 

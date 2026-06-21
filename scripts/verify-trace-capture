@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 # Cross-harness end-to-end verification entrypoint.
 #
+# Runtime measurement (2026-06-21, CI-like DinD environment):
+#   ~41 seconds with cached cargo build (binary already compiled)
+#   Estimated <3 minutes without cache (clean checkout, fresh Docker images)
+#
+# CI lane assignment: NIGHTLY (conservative starting point).
+#   The measured wall-clock time is well under the 3-minute PR-gate threshold,
+#   but Docker-in-Docker adds operational overhead (image pulls, DIND socket
+#   availability). If CI gains stable DIND support, this can be promoted to a
+#   path-triggered PR check (on hooks/** changes).
+#
 # Builds the real scryrs binary via Docker (Rust container) and drives both
 # Claude Code and Pi hook fixtures against it (Node container). Run this to
 # prove that reference hooks correctly feed scryrs record --stdin without
@@ -77,7 +87,6 @@ FIXTURE_NODE_IMAGE="${FIXTURE_NODE_IMAGE:-node:22}"
 # Pre-install better-sqlite3 in the workspace so both fixtures can import it.
 step "Installing better-sqlite3 for fixture use"
 run_node --image "$FIXTURE_NODE_IMAGE" \
-    -w /workspace \
     -- \
     npm install better-sqlite3 \
     || { echo "ERROR: failed to install better-sqlite3" >&2; exit 1; }

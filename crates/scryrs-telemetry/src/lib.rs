@@ -42,4 +42,32 @@ mod tests {
         assert!(!config.telemetry_opt_in);
         assert!(config.redact_prompts);
     }
+
+    #[test]
+    fn all_redaction_defaults_are_enabled() {
+        let config = PrivacyConfig::default();
+        assert!(config.redact_prompts);
+        assert!(config.redact_source);
+        assert!(config.redact_paths);
+    }
+
+    #[test]
+    fn remote_prompt_storage_defaults_off() {
+        let config = PrivacyConfig::default();
+        assert!(!config.allow_remote_prompt_storage);
+    }
+
+    #[test]
+    fn custom_config_overrides_defaults() {
+        let config = PrivacyConfig {
+            telemetry_opt_in: true,
+            redact_prompts: false,
+            redact_source: true,
+            redact_paths: true,
+            allow_remote_prompt_storage: true,
+        };
+        assert!(config.telemetry_opt_in);
+        assert!(!config.redact_prompts);
+        assert!(config.allow_remote_prompt_storage);
+    }
 }

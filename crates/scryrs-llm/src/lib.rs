@@ -76,6 +76,46 @@ impl ModelError {
 mod tests {
     use super::*;
 
+    fn valid_request() -> ModelRequest {
+        ModelRequest {
+            model_id: "exact-model-id".to_string(),
+            mode: ModelMode::Explain,
+            input: "test input".to_string(),
+            max_input_chars: 100,
+            max_output_tokens: 100,
+            timeout_ms: 30_000,
+            allow_tools: false,
+            trace_id: "trace-1".to_string(),
+        }
+    }
+
+    #[test]
+    fn valid_request_passes_validation() {
+        assert_eq!(valid_request().validate(), Ok(()));
+    }
+
+    #[test]
+    fn empty_model_id_fails_validation() {
+        let mut req = valid_request();
+        req.model_id = "   ".to_string();
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn zero_max_output_tokens_fails_validation() {
+        let mut req = valid_request();
+        req.max_output_tokens = 0;
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn input_at_ceiling_passes_validation() {
+        let mut req = valid_request();
+        req.max_input_chars = 10;
+        req.input = "1234567890".to_string();
+        assert_eq!(req.validate(), Ok(()));
+    }
+
     #[test]
     fn request_validation_enforces_input_ceiling() {
         let request = ModelRequest {
