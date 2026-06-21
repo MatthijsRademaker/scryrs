@@ -1,10 +1,57 @@
 #!/usr/bin/env bash
 # Run Rust tests inside a Docker container.
 # No host Rust toolchain required — works on swarm worker agents via DinD.
+#
+# Usage:
+#   scripts/test              Run Rust tests only (default lane)
+#   scripts/test --full       Run Rust tests + hook verification (full suite)
+#   scripts/test --help       Print this help
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib/docker-verification.sh"
 
+FULL_MODE=false
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--full)
+			FULL_MODE=true
+			shift
+			;;
+		--help|-h)
+			echo "scryrs test — run project tests"
+			echo ""
+			echo "Usage:"
+			echo "  scripts/test              Run Rust tests only (default lane)"
+			echo "  scripts/test --full       Run Rust tests + hook verification (full suite)"
+			echo "  scripts/test --help       Print this help"
+			echo ""
+			echo "Options:"
+			echo "  --full    Run the full test suite: cargo test --workspace followed by"
+			echo "            scripts/hook-test (Node-only Claude Code hook contract checks)."
+			echo "            Exits non-zero if either phase fails."
+			exit 0
+			;;
+		*)
+			echo "ERROR: unknown flag: $1" >&2
+			echo "Usage: scripts/test [--full|--help]" >&2
+			exit 2
+			;;
+	esac
+done
+
+RUST_EXIT=0
+
 step "cargo test --workspace --all-targets --all-features --locked"
-run_rust cargo test --workspace --all-targets --all-features --locked
+run_rust cargo test --workspace --all-targets --all-features --locked || RUST_EXIT=$?
+
+if $FULL_MODE; then
+	step "scripts/hook-test (full suite)"
+	"$SCRIPT_DIR/hook-test" || {
+		echo "  hook-test: FAILED" >&2
+		exit 1
+	}
+fi
+
+exit $RUST_EXIT
