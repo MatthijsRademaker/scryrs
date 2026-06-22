@@ -31,6 +31,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const ROOT = join(__dirname, "..", "..");
 const HOOK_FILE = join(ROOT, "hooks", "claude-code", "scryrs-hook.mjs");
+const SCRYRS_BIN = process.env.SCRYRS_BIN || join(ROOT, "target", "release", "scryrs");
 
 // -----------------------------------------------------------------------
 // Helper: invoke the hook as a subprocess
@@ -54,7 +55,7 @@ function invokeHook(toolName, toolInput, workDir) {
 
 	const env = { ...process.env };
 	// Ensure scryrs is on PATH
-	const scryrsDir = join(ROOT, "target", "release");
+	const scryrsDir = dirname(SCRYRS_BIN);
 	env.PATH = `${scryrsDir}:${workDir || ""}:${env.PATH || ""}`;
 
 	try {
@@ -98,7 +99,7 @@ async function testJsonShaping() {
 	const tmpDir = join(tmpdir(), `scryrs-cc-e2e-json-${Date.now()}`);
 	mkdirSync(tmpDir, { recursive: true });
 
-	const realScryrs = join(ROOT, "target", "release", "scryrs");
+	const realScryrs = SCRYRS_BIN;
 
 	// Initialize scryrs in the temp dir
 	try {
@@ -234,7 +235,7 @@ async function testRewriteCompatibility() {
 	const tmpDir = join(tmpdir(), `scryrs-cc-e2e-rtk-${Date.now()}`);
 	mkdirSync(tmpDir, { recursive: true });
 
-	const realScryrs = join(ROOT, "target", "release", "scryrs");
+	const realScryrs = SCRYRS_BIN;
 	try {
 		execFileSync(realScryrs, ["init"], {
 			cwd: tmpDir,
@@ -621,7 +622,7 @@ async function testPassthrough() {
 	const tmpDir = join(tmpdir(), `scryrs-cc-e2e-pt-${Date.now()}`);
 	mkdirSync(tmpDir, { recursive: true });
 
-	const realScryrs = join(ROOT, "target", "release", "scryrs");
+	const realScryrs = SCRYRS_BIN;
 	try {
 		execFileSync(realScryrs, ["init"], {
 			cwd: tmpDir,

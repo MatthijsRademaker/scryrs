@@ -2,9 +2,10 @@
  * scryrs Pi end-to-end verification fixture.
  *
  * Installs `tsx` transiently in a temp directory, loads hooks/pi/index.ts
- * against a fake ExtensionAPI, and exercises SessionStart, tool capture,
- * failure propagation, and fail-open behavior against the real
- * `scryrs record --stdin` binary.
+ * against a fake ExtensionAPI whose exec() matches Pi's real semantics
+ * (`stdio: ["ignore", "pipe", "pipe"]`), and exercises SessionStart,
+ * tool capture, failure propagation, and fail-open behavior against the real
+ * `scryrs record --file <PATH>` binary path.
  *
  * Prerequisites:
  *   - Real `scryrs` binary on PATH (built via `cargo build --release`)
@@ -16,7 +17,7 @@
 import { writeFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { execSync, execFileSync } from "node:child_process";
+import { execSync, execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { pass, fail, summary } from "./lib/assert.mjs";
@@ -26,6 +27,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const ROOT = join(__dirname, "..", "..");
 const HOOK_SOURCE = join(ROOT, "hooks", "pi", "index.ts");
+const SCRYRS_BIN = process.env.SCRYRS_BIN || join(ROOT, "target", "release", "scryrs");
 
 // -----------------------------------------------------------------------
 // Wait-for-events helper — polls scryrs.db until expected count or timeout
@@ -80,14 +82,34 @@ function createHookRunner(dir, scryrsPath) {
 	const subprocessEnv = {
 		...process.env,
 		PATH: `${scryrsDir}:${process.env.PATH || ""}`,
+		SCRYRS_DEBUG: "",
 	};
+
+	function runTsxScript(scriptFile, envOverrides = {}) {
+		const npx = join(dir, "node_modules", ".bin", "tsx");
+		const result = spawnSync(npx, [scriptFile], {
+			env: { ...subprocessEnv, ...envOverrides },
+			cwd: dir,
+			timeout: 15000,
+			encoding: "utf-8",
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+
+		return {
+			ok: result.status === 0,
+			stdout: result.stdout?.toString() || "",
+			stderr: result.stderr?.toString() || "",
+			status: result.status,
+			signal: result.signal,
+		};
+	}
 
 	return {
 		/**
 		 * Invoke the hook for a given event, wait for it to complete,
 		 * and return the result.
 		 */
-		async runSessionStart(reason) {
+		async runSessionStart(reason, envOverrides = {}) {
 			const scriptFile = join(dir, "invoke-session.mjs");
 			// We write a self-contained script that loads the hook, fires the event, and exits.
 			writeFileSync(
@@ -98,7 +120,8 @@ const require = createRequire(import.meta.url);
 
 // The pi hook imports '@earendil-works/pi-coding-agent' as a type-only import.
 // tsx strips type-only imports, so this is safe.
-// The fake exec spawns real scryrs.
+// The fake exec spawns real scryrs using Pi's actual exec semantics:
+// stdin ignored, stdout/stderr captured, timeout enforced.
 const { spawnSync } = require("node:child_process");
 
 const fakeApi = {
@@ -107,17 +130,15 @@ const fakeApi = {
     this.handlers[event] = handler;
   },
   async exec(command, args, options) {
-    const input = options?.input ?? "";
-    const timeout = options?.timeout ?? 5000;
-    const cwd = options?.cwd ?? process.cwd();
-    const result = spawnSync(command, args, {
-      input,
-      timeout,
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-      cwd,
-      env: { ...process.env },
-    });
+	const timeout = options?.timeout ?? 5000;
+	const cwd = options?.cwd ?? process.cwd();
+	const result = spawnSync(command, args, {
+	  timeout,
+	  encoding: "utf-8",
+	  stdio: ["ignore", "pipe", "pipe"],
+	  cwd,
+	  env: { ...process.env },
+	});
     return {
       stdout: result.stdout?.toString() || "",
       stderr: result.stderr?.toString() || "",
@@ -161,29 +182,19 @@ import(${JSON.stringify(HOOK_SOURCE)}).then((mod) => {
 `,
 			);
 
-			const npx = join(dir, "node_modules", ".bin", "tsx");
-			try {
-				const stdout = execFileSync(npx, [scriptFile], {
-					env: subprocessEnv,
-					cwd: dir,
-					timeout: 15000,
-					encoding: "utf-8",
-					stdio: ["ignore", "pipe", "pipe"],
-				});
-				return { ok: true, stdout: stdout?.toString() || "" };
-			} catch (err) {
-				return {
-					ok: false,
-					stderr: err.stderr?.toString() || "",
-					stdout: err.stdout?.toString() || "",
-				};
-			}
+			return runTsxScript(scriptFile, envOverrides);
 		},
 
 		/**
 		 * Invoke the hook for a tool_result event.
 		 */
-		async runToolResult(toolName, input, isError = false) {
+		async runToolResult(
+			toolName,
+			input,
+			isError = false,
+			options = {},
+		) {
+			const { envOverrides = {}, content = null, details = null } = options;
 			const scriptFile = join(dir, "invoke.mjs");
 			writeFileSync(
 				scriptFile,
@@ -198,17 +209,15 @@ const fakeApi = {
     this.handlers[event] = handler;
   },
   async exec(command, args, options) {
-    const input = options?.input ?? "";
-    const timeout = options?.timeout ?? 5000;
-    const cwd = options?.cwd ?? process.cwd();
-    const result = spawnSync(command, args, {
-      input,
-      timeout,
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-      cwd,
-      env: { ...process.env },
-    });
+	const timeout = options?.timeout ?? 5000;
+	const cwd = options?.cwd ?? process.cwd();
+	const result = spawnSync(command, args, {
+	  timeout,
+	  encoding: "utf-8",
+	  stdio: ["ignore", "pipe", "pipe"],
+	  cwd,
+	  env: { ...process.env },
+	});
     return {
       stdout: result.stdout?.toString() || "",
       stderr: result.stderr?.toString() || "",
@@ -228,8 +237,8 @@ import(${JSON.stringify(HOOK_SOURCE)}).then((mod) => {
     toolName: ${JSON.stringify(toolName)},
     toolCallId: "call-test-123",
     input: ${JSON.stringify(input)},
-    content: null,
-    details: null,
+    content: ${JSON.stringify(content)},
+    details: ${JSON.stringify(details)},
     isError: ${isError},
   };
 
@@ -252,30 +261,14 @@ import(${JSON.stringify(HOOK_SOURCE)}).then((mod) => {
 `,
 			);
 
-			const npx = join(dir, "node_modules", ".bin", "tsx");
-			try {
-				const stdout = execFileSync(npx, [scriptFile], {
-					env: subprocessEnv,
-					cwd: dir,
-					timeout: 15000,
-					encoding: "utf-8",
-					stdio: ["ignore", "pipe", "pipe"],
-				});
-				return { ok: true, stdout: stdout?.toString() || "" };
-			} catch (err) {
-				return {
-					ok: false,
-					stderr: err.stderr?.toString() || "",
-					stdout: err.stdout?.toString() || "",
-				};
-			}
+			return runTsxScript(scriptFile, envOverrides);
 		},
 
 		/**
 		 * Run fail-open non-zero-exit test: invoke tool_result with a fake
 		 * scryrs that resolves with a non-zero exit code.
 		 */
-		async runFailOpenNonZeroExit(toolName, input) {
+		async runFailOpenNonZeroExit(toolName, input, envOverrides = {}) {
 			const scriptFile = join(dir, "invoke-nonzero.mjs");
 			writeFileSync(
 				scriptFile,
@@ -333,29 +326,13 @@ import(${JSON.stringify(HOOK_SOURCE)}).then((mod) => {
 `,
 			);
 
-			const npx = join(dir, "node_modules", ".bin", "tsx");
-			try {
-				const stdout = execFileSync(npx, [scriptFile], {
-					env: subprocessEnv,
-					cwd: dir,
-					timeout: 15000,
-					encoding: "utf-8",
-					stdio: ["ignore", "pipe", "pipe"],
-				});
-				return { ok: true, stdout: stdout?.toString() || "" };
-			} catch (err) {
-				return {
-					ok: false,
-					stderr: err.stderr?.toString() || "",
-					stdout: err.stdout?.toString() || "",
-				};
-			}
+			return runTsxScript(scriptFile, envOverrides);
 		},
 
 		/**
 		 * Run fail-open test: invoke tool_result with scryrs not on PATH.
 		 */
-		async runFailOpen(toolName, input) {
+		async runFailOpen(toolName, input, envOverrides = {}) {
 			const scriptFile = join(dir, "invoke-failopen.mjs");
 			writeFileSync(
 				scriptFile,
@@ -370,16 +347,14 @@ const fakeApi = {
     this.handlers[event] = handler;
   },
   async exec(command, args, options) {
-    const input = options?.input ?? "";
-    const timeout = options?.timeout ?? 5000;
-    const result = spawnSync(command, args, {
-      input,
-      timeout,
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-      cwd: process.cwd(),
-      env: { PATH: "/nonexistent", HOME: process.env.HOME },
-    });
+	const timeout = options?.timeout ?? 5000;
+	const result = spawnSync(command, args, {
+	  timeout,
+	  encoding: "utf-8",
+	  stdio: ["ignore", "pipe", "pipe"],
+	  cwd: process.cwd(),
+	  env: { PATH: "/nonexistent", HOME: process.env.HOME },
+	});
     // Simulate the error that happens when scryrs is not found
     if (result.error && result.error.code === "ENOENT") {
       throw new Error(\`Command not found: \${command}\`);
@@ -433,23 +408,7 @@ import(${JSON.stringify(HOOK_SOURCE)}).then((mod) => {
 `,
 			);
 
-			const npx = join(dir, "node_modules", ".bin", "tsx");
-			try {
-				const stdout = execFileSync(npx, [scriptFile], {
-					env: subprocessEnv,
-					cwd: dir,
-					timeout: 15000,
-					encoding: "utf-8",
-					stdio: ["ignore", "pipe", "pipe"],
-				});
-				return { ok: true, stdout: stdout?.toString() || "" };
-			} catch (err) {
-				return {
-					ok: false,
-					stderr: err.stderr?.toString() || "",
-					stdout: err.stdout?.toString() || "",
-				};
-			}
+			return runTsxScript(scriptFile, envOverrides);
 		},
 	};
 }
@@ -475,6 +434,293 @@ function parseFixtureOutput(stdout) {
 	return result;
 }
 
+function assertContains(text, needle, name) {
+	if (text.includes(needle)) {
+		pass(name);
+	} else {
+		fail(name, `missing ${JSON.stringify(needle)} in ${JSON.stringify(text)}`);
+	}
+}
+
+function assertNotContains(text, needle, name) {
+	if (!text.includes(needle)) {
+		pass(name);
+	} else {
+		fail(name, `unexpected ${JSON.stringify(needle)} in ${JSON.stringify(text)}`);
+	}
+}
+
+// -----------------------------------------------------------------------
+// Test: Debug disabled stays quiet
+// -----------------------------------------------------------------------
+async function testDebugDisabledQuiet() {
+	console.log(`\n\x1b[33m--- Pi: Debug Disabled ---\x1b[0m`);
+
+	const dir = tempDir();
+	const scryrsPath = SCRYRS_BIN;
+	const runner = createHookRunner(dir, scryrsPath);
+
+	const sessionResult = await runner.runSessionStart("debug-disabled");
+	const toolResult = await runner.runToolResult("bash", {
+		command: "echo quiet",
+	});
+
+	if (!sessionResult.ok) {
+		fail(
+			"Pi debug disabled: session_start",
+			`hook invocation failed: ${sessionResult.stderr?.slice(0, 200)}`,
+		);
+		rmSync(dir, { recursive: true, force: true });
+		return;
+	}
+
+	if (!toolResult.ok) {
+		fail(
+			"Pi debug disabled: tool_result",
+			`hook invocation failed: ${toolResult.stderr?.slice(0, 200)}`,
+		);
+		rmSync(dir, { recursive: true, force: true });
+		return;
+	}
+
+	assertNotContains(
+		sessionResult.stderr,
+		"[scryrs]",
+		"Pi debug disabled: no hook debug lines on session_start",
+	);
+	assertNotContains(
+		toolResult.stderr,
+		"[scryrs]",
+		"Pi debug disabled: no hook debug lines on tool_result",
+	);
+	assertNotContains(
+		`${sessionResult.stderr}\n${toolResult.stderr}`,
+		"[scryrs-record]",
+		"Pi debug disabled: no record debug lines echoed",
+	);
+
+	rmSync(dir, { recursive: true, force: true });
+}
+
+// -----------------------------------------------------------------------
+// Test: Debug breadcrumbs
+// -----------------------------------------------------------------------
+async function testDebugBreadcrumbs() {
+	console.log(`\n\x1b[33m--- Pi: Debug Breadcrumbs ---\x1b[0m`);
+
+	const dir = tempDir();
+	const scryrsPath = SCRYRS_BIN;
+	const runner = createHookRunner(dir, scryrsPath);
+	const debugEnv = { SCRYRS_DEBUG: "1" };
+
+	const sessionResult = await runner.runSessionStart("debug-enabled", debugEnv);
+	if (!sessionResult.ok) {
+		fail(
+			"Pi debug: session_start",
+			`hook invocation failed: ${sessionResult.stderr?.slice(0, 200)}`,
+		);
+		rmSync(dir, { recursive: true, force: true });
+		return;
+	}
+
+	assertContains(
+		sessionResult.stderr,
+		"[scryrs] stage=hook_load",
+		"Pi debug: hook load breadcrumb",
+	);
+	assertContains(
+		sessionResult.stderr,
+		"[scryrs] stage=session_start",
+		"Pi debug: session_start breadcrumb",
+	);
+	assertContains(
+		sessionResult.stderr,
+		"[scryrs] stage=record_send trace_event=SessionStart",
+		"Pi debug: session_start record send breadcrumb",
+	);
+	assertContains(
+		sessionResult.stderr,
+		"[scryrs] stage=record_result trace_event=SessionStart",
+		"Pi debug: session_start record result breadcrumb",
+	);
+	assertContains(
+		sessionResult.stderr,
+		"[scryrs-record] stage=accepted",
+		"Pi debug: record stderr echoed for session_start",
+	);
+
+	const trackedResult = await runner.runToolResult(
+		"bash",
+		{ command: "cargo test" },
+		false,
+		{ envOverrides: debugEnv },
+	);
+	if (!trackedResult.ok) {
+		fail(
+			"Pi debug: tracked tool",
+			`hook invocation failed: ${trackedResult.stderr?.slice(0, 200)}`,
+		);
+		rmSync(dir, { recursive: true, force: true });
+		return;
+	}
+
+	assertContains(
+		trackedResult.stderr,
+		"[scryrs] stage=tool_result tool=bash tracked=true is_error=false input_keys=command",
+		"Pi debug: tracked tool breadcrumb",
+	);
+	assertContains(
+		trackedResult.stderr,
+		"[scryrs] stage=trace_mapped tool=bash trace_event=CommandExecuted",
+		"Pi debug: mapped trace breadcrumb",
+	);
+	assertContains(
+		trackedResult.stderr,
+		"[scryrs] stage=record_send trace_event=CommandExecuted tool=bash",
+		"Pi debug: tracked record send breadcrumb",
+	);
+	assertContains(
+		trackedResult.stderr,
+		"[scryrs] stage=record_result trace_event=CommandExecuted tool=bash",
+		"Pi debug: tracked record result breadcrumb",
+	);
+
+	const untrackedResult = await runner.runToolResult(
+		"web_search",
+		{ query: "debug search" },
+		false,
+		{ envOverrides: debugEnv },
+	);
+	if (!untrackedResult.ok) {
+		fail(
+			"Pi debug: untracked tool",
+			`hook invocation failed: ${untrackedResult.stderr?.slice(0, 200)}`,
+		);
+		rmSync(dir, { recursive: true, force: true });
+		return;
+	}
+
+	assertContains(
+		untrackedResult.stderr,
+		"[scryrs] stage=tool_result tool=web_search tracked=false is_error=false input_keys=query",
+		"Pi debug: untracked tool breadcrumb",
+	);
+
+	const missingFieldResult = await runner.runToolResult(
+		"read",
+		{ other: "value" },
+		false,
+		{ envOverrides: debugEnv },
+	);
+	if (!missingFieldResult.ok) {
+		fail(
+			"Pi debug: missing field",
+			`hook invocation failed: ${missingFieldResult.stderr?.slice(0, 200)}`,
+		);
+		rmSync(dir, { recursive: true, force: true });
+		return;
+	}
+
+	assertContains(
+		missingFieldResult.stderr,
+		"[scryrs] stage=missing_field tool=read wanted_field=path available_keys=other fallback=unknown",
+		"Pi debug: missing field breadcrumb",
+	);
+
+	const wireResult = await runner.runToolResult(
+		"bash",
+		{ command: "echo wire", secret: "hide-this" },
+		false,
+		{
+			envOverrides: { SCRYRS_DEBUG: "wire" },
+			content: "full content should stay out of default logs",
+			details: { hidden: "details should stay bounded" },
+		},
+	);
+	if (!wireResult.ok) {
+		fail(
+			"Pi debug: wire mode",
+			`hook invocation failed: ${wireResult.stderr?.slice(0, 200)}`,
+		);
+		rmSync(dir, { recursive: true, force: true });
+		return;
+	}
+
+	assertContains(
+		wireResult.stderr,
+		"[scryrs] stage=tool_input_wire tool=bash preview=command:echo wire",
+		"Pi debug: wire preview breadcrumb",
+	);
+	assertNotContains(
+		wireResult.stderr,
+		"full content should stay out of default logs",
+		"Pi debug: wire mode omits full content",
+	);
+
+	const nonZeroResult = await runner.runFailOpenNonZeroExit(
+		"read",
+		{ path: "/debug/nonzero.txt" },
+		debugEnv,
+	);
+	if (!nonZeroResult.ok) {
+		fail(
+			"Pi debug: non-zero record exit",
+			`hook invocation failed: ${nonZeroResult.stderr?.slice(0, 200)}`,
+		);
+		rmSync(dir, { recursive: true, force: true });
+		return;
+	}
+
+	const nonZeroParsed = parseFixtureOutput(nonZeroResult.stdout);
+	const nonZeroErrors = JSON.stringify(nonZeroParsed.errors || []);
+	assertContains(
+		nonZeroErrors,
+		"[scryrs] stage=record_result",
+		"Pi debug: non-zero exit result breadcrumb",
+	);
+	assertContains(
+		nonZeroErrors,
+		"[scryrs] stage=record_nonzero",
+		"Pi debug: non-zero exit breadcrumb",
+	);
+
+	const execFailureResult = await runner.runFailOpen(
+		"read",
+		{ path: "/debug/missing.txt" },
+		debugEnv,
+	);
+	if (!execFailureResult.ok) {
+		fail(
+			"Pi debug: exec failure",
+			`hook invocation failed: ${execFailureResult.stderr?.slice(0, 200)}`,
+		);
+		rmSync(dir, { recursive: true, force: true });
+		return;
+	}
+
+	const execFailureParsed = parseFixtureOutput(execFailureResult.stdout);
+	const execFailureErrors = JSON.stringify(execFailureParsed.errors || []);
+	assertContains(
+		execFailureErrors,
+		"[scryrs] stage=record_exec_error",
+		"Pi debug: exec failure breadcrumb",
+	);
+
+	const eventsDb = join(dir, ".scryrs", "scryrs.db");
+	const events = waitForEventCount(eventsDb, 4, 10000);
+	const untrackedEvents = events.filter((event) => event.tool_name === "web_search");
+	if (untrackedEvents.length === 0) {
+		pass("Pi debug: untracked tool still not persisted");
+	} else {
+		fail(
+			"Pi debug: untracked tool persistence",
+			`unexpected events: ${JSON.stringify(untrackedEvents)}`,
+		);
+	}
+
+	rmSync(dir, { recursive: true, force: true });
+}
+
 // -----------------------------------------------------------------------
 // Test: Successful capture — SessionStart + six tracked tools
 // -----------------------------------------------------------------------
@@ -482,7 +728,7 @@ async function testSuccessfulCapture() {
 	console.log(`\n\x1b[33m--- Pi: Successful Capture ---\x1b[0m`);
 
 	const dir = tempDir();
-	const scryrsPath = join(ROOT, "target", "release", "scryrs");
+	const scryrsPath = SCRYRS_BIN;
 	const runner = createHookRunner(dir, scryrsPath);
 
 	// 1. Emit SessionStart
@@ -672,7 +918,7 @@ async function testFailurePropagation() {
 	console.log(`\n\x1b[33m--- Pi: Failure Propagation ---\x1b[0m`);
 
 	const dir = tempDir();
-	const scryrsPath = join(ROOT, "target", "release", "scryrs");
+	const scryrsPath = SCRYRS_BIN;
 	const runner = createHookRunner(dir, scryrsPath);
 
 	const trResult = await runner.runToolResult(
@@ -777,7 +1023,7 @@ async function testFailOpenNonZeroExit() {
 	console.log(`\n\x1b[33m--- Pi: Fail-open (non-zero exit) ---\x1b[0m`);
 
 	const dir = tempDir();
-	const scryrsPath = join(ROOT, "target", "release", "scryrs");
+	const scryrsPath = SCRYRS_BIN;
 	const runner = createHookRunner(dir, scryrsPath);
 
 	const foResult = await runner.runFailOpenNonZeroExit("read", {
@@ -846,7 +1092,7 @@ async function testFailOpen() {
 	console.log(`\n\x1b[33m--- Pi: Fail-open ---\x1b[0m`);
 
 	const dir = tempDir();
-	const scryrsPath = join(ROOT, "target", "release", "scryrs");
+	const scryrsPath = SCRYRS_BIN;
 	const runner = createHookRunner(dir, scryrsPath);
 
 	const foResult = await runner.runFailOpen("read", { path: "/test.txt" });
@@ -912,7 +1158,7 @@ async function testUnlistedTools() {
 	console.log(`\n\x1b[33m--- Pi: Unlisted Tools ---\x1b[0m`);
 
 	const dir = tempDir();
-	const scryrsPath = join(ROOT, "target", "release", "scryrs");
+	const scryrsPath = SCRYRS_BIN;
 	const runner = createHookRunner(dir, scryrsPath);
 
 	const trResult = await runner.runToolResult(
@@ -963,7 +1209,7 @@ async function testRewriteCompatibility() {
 	console.log(`\n\x1b[33m--- Pi: Rewrite-tool Compatibility ---\x1b[0m`);
 
 	const dir = tempDir();
-	const scryrsPath = join(ROOT, "target", "release", "scryrs");
+	const scryrsPath = SCRYRS_BIN;
 	const runner = createHookRunner(dir, scryrsPath);
 
 	// 1. Emit SessionStart
@@ -1060,8 +1306,30 @@ async function testRewriteCompatibility() {
 		}
 	}
 
-	// 3. Assert scryrs.db contents (poll to avoid SessionStart fire-and-forget race)
 	const eventsDb = join(dir, ".scryrs", "scryrs.db");
+
+	// 3a. After simple command, assert it persisted as observed.
+	const afterSimple = waitForEventCount(eventsDb, 2, 15000);
+	const simplePersisted = afterSimple.find(
+		(e) =>
+			e.event_type === "CommandExecuted" &&
+			e.tool_name === "bash" &&
+			e.payload?.command === "rtk ls -la",
+	);
+	if (simplePersisted) {
+		pass("Pi RTK: simple command persisted as 'rtk ls -la'");
+		const shapeOk = assertEventShape(simplePersisted, "CommandExecuted", "bash");
+		if (shapeOk) {
+			pass("Pi RTK simple: envelope shape correct");
+		}
+	} else {
+		fail(
+			"Pi RTK: simple command",
+			`expected payload.command='rtk ls -la', got: ${JSON.stringify(afterSimple.map((e) => e.payload?.command))}`,
+		);
+	}
+
+	// 3b. Assert final scryrs.db contents (poll to avoid SessionStart fire-and-forget race)
 	const events = waitForEventCount(eventsDb, 3, 15000);
 
 	const bashEvents = events.filter(
@@ -1075,21 +1343,6 @@ async function testRewriteCompatibility() {
 		);
 	} else {
 		pass("Pi RTK: 2 Bash events persisted");
-	}
-
-	// Check simple RTK-prefixed command persisted as-is
-	const rtkSimple = bashEvents.find((e) => e.payload?.command === "rtk ls -la");
-	if (rtkSimple) {
-		pass("Pi RTK: simple command persisted as 'rtk ls -la'");
-		const shapeOk = assertEventShape(rtkSimple, "CommandExecuted", "bash");
-		if (shapeOk) {
-			pass("Pi RTK simple: envelope shape correct");
-		}
-	} else {
-		fail(
-			"Pi RTK: simple command",
-			`expected payload.command='rtk ls -la', got: ${JSON.stringify(bashEvents.map((e) => e.payload?.command))}`,
-		);
 	}
 
 	// Check compound rewritten command persisted exactly
@@ -1116,6 +1369,8 @@ async function testRewriteCompatibility() {
 // Main
 // -----------------------------------------------------------------------
 async function main() {
+	await testDebugDisabledQuiet();
+	await testDebugBreadcrumbs();
 	await testSuccessfulCapture();
 	await testRewriteCompatibility();
 	await testFailurePropagation();

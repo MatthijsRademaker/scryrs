@@ -1,8 +1,9 @@
 # scryrs Verification Suites
 
 This directory contains end-to-end verification fixtures that prove the scryrs
-reference hooks correctly feed real `scryrs record --stdin` persistence without
-changing agent-visible behavior.
+reference hooks correctly feed real scryrs persistence without changing
+agent-visible behavior. Claude Code uses `scryrs record --stdin`; Pi uses
+`scryrs record --file <PATH>` because Pi exec opens stdin as `/dev/null`.
 
 ## Architecture
 
@@ -53,17 +54,26 @@ Exercises `hooks/claude-code/scryrs-hook.mjs` against real `scryrs record --stdi
 
 #### `pi-hook-e2e.mjs`
 
-Loads `hooks/pi/index.ts` via `tsx` against a fake `ExtensionAPI` and exercises
-all six tracked Pi tools.
+Loads `hooks/pi/index.ts` via `tsx` against a fake `ExtensionAPI` whose
+`exec()` matches Pi's real semantics (`stdio: ["ignore", "pipe", "pipe"]`)
+and exercises all six tracked Pi tools.
 
 **What it proves:**
 
+- **Debug gating**: With `SCRYRS_DEBUG` unset the Pi hook emits no `[scryrs]`
+  breadcrumbs and echoes no `[scryrs-record]` child debug lines.
 - **SessionStart**: The `session_start` lifecycle event produces a
   `SessionStart` TraceEvent with correct envelope shape.
 - **Tool event capture**: All six tracked Pi tools (`read`, `bash`,
   `ast_grep_search`, `edit`, `write`, `lsp_navigation`) produce correctly
   mapped events (`FileOpened`, `CommandExecuted`, `SearchRun`, `EditMade`,
   `SymbolInspected`).
+- **Debug breadcrumbs**: With `SCRYRS_DEBUG=1` the fixture asserts hook-load,
+  `session_start`, tracked-tool, untracked-tool, missing-field, record-send,
+  record-result, non-zero-exit, and exec-failure breadcrumbs by presence rather
+  than exact ordering.
+- **Wire inspection**: With `SCRYRS_DEBUG=wire` the fixture asserts bounded
+  sanitized input previews without requiring full `content`/`details` dumps.
 - **Non-interference**: The handler returns `undefined` for every event —
   the original tool result is never modified.
 - **Failure propagation**: A failing `lsp_navigation` (`isError: true`)
@@ -90,9 +100,12 @@ them against the real `scryrs` binary.
 - **Claude Code installed hook**: The installed `scryrs-hook.mjs` is a valid
   Node.js module that returns `{continue: true}`, produces zero stdout/stderr,
   and persists events to `.scryrs/scryrs.db` via the real scryrs binary.
-- **Pi installed hook**: The installed `index.ts` is a valid TypeScript module
-  (transpiled via `tsx`) that registers a `tool_result` handler, returns
-  `undefined` (non-interference), and persists events to `.scryrs/scryrs.db`.
+- **Pi installed hook**: The installed `index.ts` is exercised inside the real
+  `pi` CLI process in print mode with a zero-network mock provider registered
+  via `-e ./mock-provider.ts`. This proves the actual Pi runtime discovers,
+  loads, and executes the installed hook, persists events to
+  `.scryrs/scryrs.db`, and emits debug breadcrumbs when `SCRYRS_DEBUG=1` is
+  enabled.
   **Version-gating:** The single-file `index.ts` sufficiency assumption has been
   verified against Pi versions that expect a single `index.ts` extension file
   without additional manifest, `package.json`, or `tsconfig` artifacts. If Pi
@@ -139,9 +152,9 @@ scripts/verify-trace-capture
 ### Run a specific harness
 
 ```bash
-scripts/verify-trace-capture --claude-only
-scripts/verify-trace-capture --pi-only
-scripts/verify-trace-capture --init-only
+scripts/verify-trace-capture --claude-only   # Claude source-hook fixture only
+scripts/verify-trace-capture --pi-only       # Pi source-hook fixture + real Pi-process installed-hook check
+scripts/verify-trace-capture --init-only     # Installed-hook checks only
 ```
 
 ### Run a single fixture directly (for debugging)
@@ -153,7 +166,19 @@ cargo build --release
 # Run the fixture (requires Node.js)
 node scripts/verification/claude-code-e2e.mjs
 node scripts/verification/pi-hook-e2e.mjs
+SCRYRS_DEBUG=1 node scripts/verification/pi-hook-e2e.mjs
 ```
+
+## Debug mode notes
+
+`SCRYRS_DEBUG` is opt-in and intended for development only.
+
+- `SCRYRS_DEBUG=1` enables bounded `[scryrs]` and `[scryrs-record]`
+  breadcrumbs.
+- `SCRYRS_DEBUG=wire` adds bounded sanitized previews of observed tool inputs.
+- `SCRYRS_DEBUG=raw` adds capped raw event previews for local troubleshooting.
+
+`wire` and `raw` can expose observed tool inputs. Keep them off in normal runs.
 
 ## Docker Image Compatibility
 

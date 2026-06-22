@@ -2,8 +2,9 @@
  * Installed-hook end-to-end verification.
  *
  * Runs `scryrs init --agent claude-code` and `scryrs init --agent pi` in
- * temporary consumer project directories, then loads and exercises the
- * installed hook artifacts against the real `scryrs` binary.
+ * temporary consumer project directories, then exercises the installed hook
+ * artifacts against the real `scryrs` binary. The Pi path boots the actual
+ * `pi` CLI with a zero-network mock provider inside a real print-mode run.
  *
  * Proves the init pipeline produces functional output — not just that files
  * were created. Distinguishes "structurally correct but semantically broken"
@@ -19,16 +20,17 @@
  *   - Real `scryrs` binary on PATH (built via `cargo build --release`)
  *   - Working directory is the repository root
  *
- * Usage: node scripts/verification/installed-hook-e2e.mjs
+ * Usage: node scripts/verification/installed-hook-e2e.mjs [--claude-only|--pi-only]
  */
 
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { pass, fail, summary, assert } from "./lib/assert.mjs";
+import { assertEventShape, readEventsDb } from "./lib/db.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -36,6 +38,7 @@ const ROOT = join(__dirname, "..", "..");
 
 // Resolve scryrs binary from PATH or fallback to target/release.
 function findScryrsBin() {
+	if (process.env.SCRYRS_BIN) return process.env.SCRYRS_BIN;
 	const releaseBin = join(ROOT, "target", "release", "scryrs");
 	if (existsSync(releaseBin)) return releaseBin;
 	return "scryrs";
@@ -43,6 +46,44 @@ function findScryrsBin() {
 
 const SCYRRS_BIN = findScryrsBin();
 const SCYRRS_DIR = dirname(SCYRRS_BIN);
+
+function findPiBin() {
+	return process.env.PI_BIN || "pi";
+}
+
+const PI_BIN = findPiBin();
+
+function parseMode(argv) {
+	let runClaude = true;
+	let runPi = true;
+	let flagCount = 0;
+
+	for (const arg of argv) {
+		if (arg === "--claude-only") {
+			runClaude = true;
+			runPi = false;
+			flagCount++;
+			continue;
+		}
+		if (arg === "--pi-only") {
+			runClaude = false;
+			runPi = true;
+			flagCount++;
+			continue;
+		}
+		throw new Error(
+			`unknown flag: ${arg}. Usage: node scripts/verification/installed-hook-e2e.mjs [--claude-only|--pi-only]`,
+		);
+	}
+
+	if (flagCount > 1) {
+		throw new Error(
+			"--claude-only and --pi-only are mutually exclusive",
+		);
+	}
+
+	return { runClaude, runPi };
+}
 
 // -----------------------------------------------------------------------
 // Temp directory helpers
@@ -52,6 +93,21 @@ function tempDir() {
 		tmpdir(),
 		`scryrs-init-e2e-${Date.now()}-${Math.random().toString(36).slice(2)}`,
 	);
+}
+
+function waitForEventCount(dbPath, expectedCount, timeoutMs = 5000) {
+	const start = Date.now();
+	while (Date.now() - start < timeoutMs) {
+		const events = readEventsDb(dbPath);
+		if (events.length >= expectedCount) {
+			return events;
+		}
+		const waitUntil = Date.now() + 200;
+		while (Date.now() < waitUntil) {
+			/* spin */
+		}
+	}
+	return readEventsDb(dbPath);
 }
 
 /**
@@ -227,6 +283,8 @@ async function testPiInstalled() {
 
 	const consumerDir = tempDir();
 	mkdirSync(consumerDir, { recursive: true });
+	const fakeHome = tempDir();
+	mkdirSync(fakeHome, { recursive: true });
 
 	try {
 		// 1. Run scryrs init
@@ -254,6 +312,16 @@ async function testPiInstalled() {
 			return;
 		}
 
+		const hookSource = readFileSync(hookPath, "utf-8");
+		assert(
+			hookSource.includes("scryrs record --file"),
+			"installed Pi hook uses record --file transport",
+		);
+		assert(
+			!hookSource.includes("scryrs record --stdin"),
+			"installed Pi hook no longer uses record --stdin transport",
+		);
+
 		// 3. Verify next-steps
 		assert(
 			initStdout.includes("scryrs Pi trace hook installed"),
@@ -264,165 +332,191 @@ async function testPiInstalled() {
 			"init stdout contains next steps",
 		);
 
-		// 4. Install tsx for TypeScript transpilation
-		console.log("  Installing tsx for Pi hook execution...");
-		try {
-			execSync("npm install tsx", {
-				cwd: consumerDir,
-				stdio: "pipe",
-				timeout: 60000,
-			});
-		} catch {
-			fail("tsx install for Pi hook", "npm install tsx failed");
-			return;
-		}
+		// 4. Prepare actual Pi-process fixture: installed hook + mock provider.
+		console.log("  Running actual Pi process with mock provider...");
+		writeFileSync(join(consumerDir, "README.md"), "# pi real-process fixture\n");
 
-		const tsxBin = join(consumerDir, "node_modules", ".bin", "tsx");
-		if (!existsSync(tsxBin)) {
-			fail("tsx binary not found", tsxBin);
-			return;
-		}
-
-		// 5. Exercise the hook via tsx using the pi-hook-e2e.mjs pattern
-		console.log("  Loading and exercising installed Pi hook...");
-		const hookWrapperPath = join(consumerDir, "hook-wrapper.mjs");
-		const scryrsDirPath = SCYRRS_DIR;
-
-		// Write a wrapper that follows the same pattern as pi-hook-e2e.mjs:
-		// createRequire to load the hook, provide a fake API that has on() and exec(),
-		// then fire a tool_result event through the registered handler.
+		const mockProviderPath = join(consumerDir, "mock-provider.ts");
 		writeFileSync(
-			hookWrapperPath,
+			mockProviderPath,
 			[
-				`import { createRequire } from "node:module";`,
-				`const require = createRequire(import.meta.url);`,
-				`const { spawnSync } = require("node:child_process");`,
+				`import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";`,
+				`import { createAssistantMessageEventStream, type AssistantMessage, type Context, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";`,
 				``,
-				`const hookPath = ${JSON.stringify(hookPath)};`,
-				``,
-				`// Fake ExtensionAPI matching what the Pi hook expects`,
-				`const fakeApi = {`,
-				`  handlers: {},`,
-				`  on(event, handler) {`,
-				`    this.handlers[event] = handler;`,
-				`  },`,
-				`  async exec(command, args, options) {`,
-				`    const input = options?.input ?? "";`,
-				`    const timeoutVal = options?.timeout ?? 5000;`,
-				`    const cwd = options?.cwd ?? process.cwd();`,
-				`    const result = spawnSync(command, args, {`,
-				`      input,`,
-				`      timeout: timeoutVal,`,
-				`      encoding: "utf-8",`,
-				`      stdio: ["pipe", "pipe", "pipe"],`,
-				`      cwd,`,
-				`      env: { ...process.env },`,
-				`    });`,
-				`    return {`,
-				`      stdout: result.stdout?.toString() || "",`,
-				`      stderr: result.stderr?.toString() || "",`,
-				`      code: result.status,`,
-				`      killed: result.signal !== null,`,
-				`    };`,
-				`  },`,
-				`};`,
-				``,
-				`// Load the hook module via tsx`,
-				`const hookModule = require(hookPath);`,
-				`const hook = hookModule.default;`,
-				``,
-				`if (typeof hook !== "function") {`,
-				`  console.log(JSON.stringify({ success: false, error: "hook is not a function, type=" + typeof hook }));`,
-				`  process.exit(1);`,
+				`function baseMessage(model: Model<string>, stopReason: AssistantMessage["stopReason"]): AssistantMessage {`,
+				`  return {`,
+				`    role: "assistant",`,
+				`    content: [],`,
+				`    api: model.api,`,
+				`    provider: model.provider,`,
+				`    model: model.id,`,
+				`    usage: {`,
+				`      input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,`,
+				`      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },`,
+				`    },`,
+				`    stopReason,`,
+				`    timestamp: Date.now(),`,
+				`  };`,
 				`}`,
 				``,
-				`// Walk through the event to exercise the handler`,
-				`const event = {`,
-				`  type: "tool_result",`,
-				`  toolName: "bash",`,
-				`  input: { command: "echo hello" },`,
-				`  isError: false,`,
-				`};`,
-				``,
-				`hook(fakeApi);`,
-				``,
-				`const handler = fakeApi.handlers["tool_result"];`,
-				`if (!handler) {`,
-				`  console.log(JSON.stringify({ success: false, error: "no tool_result handler registered" }));`,
-				`  process.exit(1);`,
+				`function streamSimple(model: Model<string>, context: Context, _options?: SimpleStreamOptions) {`,
+				`  const stream = createAssistantMessageEventStream();`,
+				`  queueMicrotask(() => {`,
+				`    const sawToolResult = context.messages.some((message) => message.role === "toolResult");`,
+				`    if (!sawToolResult) {`,
+				`      const partial = baseMessage(model, "toolUse");`,
+				`      const toolCall = { type: "toolCall" as const, id: "mock-read-1", name: "read", arguments: { path: "README.md" } };`,
+				`      const message: AssistantMessage = { ...partial, content: [toolCall] };`,
+				`      stream.push({ type: "start", partial });`,
+				`      stream.push({ type: "toolcall_start", contentIndex: 0, partial });`,
+				`      stream.push({ type: "toolcall_end", contentIndex: 0, toolCall, partial: message });`,
+				`      stream.push({ type: "done", reason: "toolUse", message });`,
+				`      stream.end(message);`,
+				`      return;`,
+				`    }`,
+				`    const partial = baseMessage(model, "stop");`,
+				`    const message: AssistantMessage = { ...partial, content: [{ type: "text", text: "done" }] };`,
+				`    stream.push({ type: "start", partial });`,
+				`    stream.push({ type: "text_start", contentIndex: 0, partial });`,
+				`    stream.push({ type: "text_end", contentIndex: 0, content: "done", partial: message });`,
+				`    stream.push({ type: "done", reason: "stop", message });`,
+				`    stream.end(message);`,
+				`  });`,
+				`  return stream;`,
 				`}`,
 				``,
-				`try {`,
-				`  const result = await handler(event);`,
-				`  console.log(JSON.stringify({ success: true, result: result }));`,
-				`  // Give scryrs record a moment to finish`,
-				`  await new Promise(r => setTimeout(r, 1500));`,
-				`  process.exit(0);`,
-				`} catch (e) {`,
-				`  console.log(JSON.stringify({ success: false, error: e.message }));`,
-				`  process.exit(1);`,
+				`export default function(pi: ExtensionAPI) {`,
+				`  pi.registerProvider("mock", {`,
+				`    name: "Mock Provider",`,
+				`    api: "mock-api",`,
+				`    baseUrl: "http://mock.invalid",`,
+				`    apiKey: "mock",`,
+				`    models: [{`,
+				`      id: "mock-tool-1",`,
+				`      name: "Mock Tool Model",`,
+				`      reasoning: false,`,
+				`      input: ["text"],`,
+				`      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },`,
+				`      contextWindow: 128000,`,
+				`      maxTokens: 4096,`,
+				`    }],`,
+				`    streamSimple,`,
+				`  });`,
 				`}`,
 			].join("\n"),
 		);
 
-		// Ensure .scryrs dir exists
 		mkdirSync(join(consumerDir, ".scryrs"), { recursive: true });
 
 		const env = {
 			...process.env,
-			PATH: `${scryrsDirPath}:${process.env.PATH || ""}`,
+			HOME: fakeHome,
+			PATH: `${SCYRRS_DIR}:${process.env.PATH || ""}`,
+			SCRYRS_DEBUG: "1",
 		};
 
-		let invokeResult;
+		let piStdout = "";
+		let piStderr = "";
 		try {
-			const stdout = execFileSync(tsxBin, [hookWrapperPath], {
-				env,
-				cwd: consumerDir,
-				timeout: 30000,
-				encoding: "utf-8",
-			}).trim();
-			invokeResult = JSON.parse(stdout);
+			const result = spawnSync(
+				PI_BIN,
+				[
+					"--approve",
+					"--no-session",
+					"--print",
+					"--no-skills",
+					"--no-prompt-templates",
+					"--no-themes",
+					"--no-context-files",
+					"--model",
+					"mock/mock-tool-1",
+					"--tools",
+					"read",
+					"-e",
+					"./mock-provider.ts",
+					"test",
+				],
+				{
+					env,
+					cwd: consumerDir,
+					timeout: 30000,
+					encoding: "utf-8",
+					stdio: ["ignore", "pipe", "pipe"],
+				},
+			);
+			piStdout = result.stdout?.toString() || "";
+			piStderr = result.stderr?.toString() || "";
+			if (result.status !== 0) {
+				throw Object.assign(new Error("pi process failed"), {
+					status: result.status,
+					signal: result.signal,
+					stderr: piStderr,
+					stdout: piStdout,
+				});
+			}
 		} catch (err) {
 			fail(
 				"Pi installed hook invocation succeeded",
-				`tsx process failed (exit ${err.status}): ${(err.stderr?.toString() || err.message).slice(0, 300)}`,
+				`pi process failed (exit ${err.status ?? "unknown"}): ${(err.stderr || err.message).slice(0, 400)}`,
 			);
 			return;
 		}
 
-		// 6. Assert hook was loadable
-		if (!invokeResult.success) {
-			fail(
-				"Pi installed hook is loadable",
-				invokeResult.error || "unknown error",
-			);
-			return;
-		}
-		pass("Pi installed hook is loadable");
-
-		// 7. Assert hook returns undefined (non-interference)
+		pass("Pi installed hook is loadable in real Pi process");
+		assert(piStdout.trim() === "done", `Pi print-mode stdout is done (got: ${JSON.stringify(piStdout.trim())})`);
 		assert(
-			invokeResult.result === undefined,
-			`Pi installed hook returns undefined (non-interference), got: ${JSON.stringify(invokeResult.result)}`,
+			piStderr.includes("[scryrs] stage=hook_load"),
+			"Pi installed hook emits hook-load debug breadcrumb",
+		);
+		assert(
+			piStderr.includes("[scryrs] stage=session_start"),
+			"Pi installed hook emits session_start debug breadcrumb",
+		);
+		assert(
+			piStderr.includes("[scryrs] stage=tool_result tool=read tracked=true"),
+			"Pi installed hook emits tool_result debug breadcrumb",
+		);
+		assert(
+			piStderr.includes("[scryrs] stage=record_result trace_event=FileOpened tool=read"),
+			"Pi installed hook emits FileOpened record_result breadcrumb",
+		);
+		assert(
+			piStderr.includes("[scryrs-record] stage=accepted"),
+			"Pi installed hook echoes record-side accepted breadcrumb",
 		);
 
-		// 8. Wait and verify events via scryrs hotspots
-		await new Promise((resolve) => setTimeout(resolve, 2000));
-		const report = verifyEventsPersisted(consumerDir);
-		assert(
-			report.count >= 1,
-			`Pi installed hook persisted events (analyzedEventCount=${report.count})`,
-		);
+		const dbPath = join(consumerDir, ".scryrs", "scryrs.db");
+		const events = waitForEventCount(dbPath, 2);
+		assert(events.length >= 2, `Pi installed hook persisted at least 2 events (got ${events.length})`);
 
-		if (report.count > 0) {
-			const firstEntry = report.events[0];
+		const sessionStart = events.find((event) => event.event_type === "SessionStart");
+		if (sessionStart) {
+			assertEventShape(sessionStart, "SessionStart");
 			assert(
-				firstEntry && firstEntry.subjectKind === "command",
-				`Pi persisted event subjectKind is command (got: ${firstEntry?.subjectKind})`,
+				sessionStart.payload?.type === "SessionStart" && sessionStart.outcome?.result === "Success",
+				"Pi installed hook persisted SessionStart envelope",
 			);
+		} else {
+			fail("Pi installed hook persisted SessionStart", "no SessionStart event found");
+		}
+
+		const fileOpened = events.find(
+			(event) => event.event_type === "FileOpened" && event.tool_name === "read",
+		);
+		if (fileOpened) {
+			assertEventShape(fileOpened, "FileOpened", "read");
+			assert(
+				fileOpened.payload?.type === "FileOpened" &&
+					fileOpened.payload?.path === "README.md" &&
+					fileOpened.outcome?.result === "Success",
+				"Pi installed hook persisted FileOpened envelope",
+			);
+		} else {
+			fail("Pi installed hook persisted FileOpened", "no FileOpened event found for read");
 		}
 	} finally {
 		rmSync(consumerDir, { recursive: true, force: true });
+		rmSync(fakeHome, { recursive: true, force: true });
 	}
 }
 
@@ -432,9 +526,16 @@ async function testPiInstalled() {
 async function main() {
 	console.log("scryrs installed-hook end-to-end verification");
 	console.log(`Binary: ${SCYRRS_BIN}`);
+	console.log(`Pi: ${PI_BIN}`);
 
-	await testClaudeCodeInstalled();
-	await testPiInstalled();
+	const mode = parseMode(process.argv.slice(2));
+
+	if (mode.runClaude) {
+		await testClaudeCodeInstalled();
+	}
+	if (mode.runPi) {
+		await testPiInstalled();
+	}
 
 	summary();
 }

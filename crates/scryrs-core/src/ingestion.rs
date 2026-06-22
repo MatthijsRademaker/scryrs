@@ -23,6 +23,18 @@ pub struct IngestionOutcome {
     pub rejected: Vec<Rejection>,
 }
 
+/// Accepted event paired with its 1-based physical input line number.
+pub struct AcceptedEvent {
+    pub line: usize,
+    pub event: TraceEvent,
+}
+
+/// Result of ingesting a JSONL input stream with accepted-line metadata.
+pub struct DetailedIngestionOutcome {
+    pub accepted: Vec<AcceptedEvent>,
+    pub rejected: Vec<Rejection>,
+}
+
 /// Read JSONL lines from `reader`, skip blank/whitespace-only lines,
 /// deserialize each non-empty line as a [`TraceEvent`], and return
 /// accepted events and structured rejections.
@@ -30,6 +42,19 @@ pub struct IngestionOutcome {
 /// Ingestion continues after per-line validation failures — a malformed
 /// line does not abort the stream.
 pub fn ingest_jsonl(reader: impl BufRead) -> io::Result<IngestionOutcome> {
+    let outcome = ingest_jsonl_detailed(reader)?;
+
+    Ok(IngestionOutcome {
+        accepted: outcome
+            .accepted
+            .into_iter()
+            .map(|entry| entry.event)
+            .collect(),
+        rejected: outcome.rejected,
+    })
+}
+
+pub fn ingest_jsonl_detailed(reader: impl BufRead) -> io::Result<DetailedIngestionOutcome> {
     let mut accepted = Vec::new();
     let mut rejected = Vec::new();
 
@@ -43,7 +68,10 @@ pub fn ingest_jsonl(reader: impl BufRead) -> io::Result<IngestionOutcome> {
         let mut json_de = serde_json::Deserializer::from_str(&line);
         match serde_path_to_error::deserialize::<_, TraceEvent>(&mut json_de) {
             Ok(event) => match event.validate() {
-                Ok(()) => accepted.push(event),
+                Ok(()) => accepted.push(AcceptedEvent {
+                    line: line_1based,
+                    event,
+                }),
                 Err(reason) => rejected.push(Rejection {
                     line: line_1based,
                     field: None,
@@ -68,7 +96,7 @@ pub fn ingest_jsonl(reader: impl BufRead) -> io::Result<IngestionOutcome> {
         }
     }
 
-    Ok(IngestionOutcome { accepted, rejected })
+    Ok(DetailedIngestionOutcome { accepted, rejected })
 }
 
 #[cfg(test)]

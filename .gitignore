@@ -32,22 +32,4 @@ node_modules/
 
 # Pi: installed dogfooding trace hook (canonical source is hooks/pi/index.ts)
 .pi/extensions/pi-trace/
-crates/scryrs-dashboard/frontend/dist/index.html
-crates/scryrs-dashboard/frontend/dist/assets/AboutView-Bj0N_nkc.js
-crates/scryrs-dashboard/frontend/dist/assets/Alert.vue_vue_type_script_setup_true_lang-CDrhfnsG.js
-crates/scryrs-dashboard/frontend/dist/assets/Badge.vue_vue_type_script_setup_true_lang-hsObLS6v.js
-crates/scryrs-dashboard/frontend/dist/assets/Button.vue_vue_type_script_setup_true_lang-DLgfoe1S.js
-crates/scryrs-dashboard/frontend/dist/assets/CardTitle-By4FGMLg.js
-crates/scryrs-dashboard/frontend/dist/assets/client-C6cHG2e0.js
-crates/scryrs-dashboard/frontend/dist/assets/EventsView-DHSxzDxK.js
-crates/scryrs-dashboard/frontend/dist/assets/hotspots-DmWTo8w-.js
-crates/scryrs-dashboard/frontend/dist/assets/HotspotsView-Btzz9B4S.js
-crates/scryrs-dashboard/frontend/dist/assets/index-BRP-B3Xn.css
-crates/scryrs-dashboard/frontend/dist/assets/index-CH69gpzl.js
-crates/scryrs-dashboard/frontend/dist/assets/NotFoundView-DcbI8nIx.js
-crates/scryrs-dashboard/frontend/dist/assets/SessionDetailView-BELOX0KG.js
-crates/scryrs-dashboard/frontend/dist/assets/sessions-DDueD-CL.js
-crates/scryrs-dashboard/frontend/dist/assets/SessionsView-K1co1vN5.js
-crates/scryrs-dashboard/frontend/dist/assets/SubjectDetailView-Cqrna3Fl.js
-crates/scryrs-dashboard/frontend/dist/assets/Table-CRiGRx-4.js
-crates/scryrs-dashboard/frontend/dist/assets/utils-DaT-yT0k.js
+**/dist/

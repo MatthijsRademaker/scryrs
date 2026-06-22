@@ -13,8 +13,9 @@
 #
 # Builds the real scryrs binary via Docker (Rust container) and drives both
 # Claude Code and Pi hook fixtures against it (Node container). Run this to
-# prove that reference hooks correctly feed scryrs record --stdin without
-# changing agent-visible behavior.
+# prove that reference hooks correctly feed real scryrs persistence without
+# changing agent-visible behavior. Claude Code uses `record --stdin`; Pi uses
+# `record --file <PATH>` because Pi exec opens stdin as /dev/null.
 #
 # Uses node:22 (Debian-based, glibc) so the Rust-compiled scryrs binary runs
 # without recompilation for musl.
@@ -22,7 +23,7 @@
 # Usage:
 #   scripts/verify-trace-capture              # run all fixtures
 #   scripts/verify-trace-capture --claude-only  # Claude Code only
-#   scripts/verify-trace-capture --pi-only       # Pi hook only
+#   scripts/verify-trace-capture --pi-only       # Pi source-hook + real Pi-process installed-hook
 #   scripts/verify-trace-capture --init-only     # installed-hook e2e only
 #
 # Prerequisites:
@@ -88,7 +89,7 @@ if $CLAUDE_ONLY; then
 elif $PI_ONLY; then
 	RUN_CLAUDE=false
 	RUN_PI=true
-	RUN_INIT=false
+	RUN_INIT=true
 elif $INIT_ONLY; then
 	RUN_CLAUDE=false
 	RUN_PI=false
@@ -99,15 +100,15 @@ fi
 # 1. Build scryrs binary (needed by both fixtures)
 # ---------------------------------------------------------------------------
 step "Building scryrs binary (cargo build --release)"
-run_rust cargo build --release
+run_rust bash -c 'cargo build --release && mkdir -p /workspace/.docker-fixtures && cp /workspace/target/release/scryrs /workspace/.docker-fixtures/scryrs'
 
 # Verify the binary exists
-SCYRRS_BIN="$ROOT/target/release/scryrs"
+SCYRRS_BIN="$ROOT/.docker-fixtures/scryrs"
 if [[ ! -x "$SCYRRS_BIN" ]]; then
 	echo "ERROR: scryrs binary not found at $SCYRRS_BIN after build" >&2
 	exit 1
 fi
-echo "  scryrs binary built at target/release/scryrs"
+echo "  scryrs binary built at .docker-fixtures/scryrs"
 
 CLAUDE_EXIT=0
 PI_EXIT=0
@@ -130,7 +131,8 @@ run_node --image "$FIXTURE_NODE_IMAGE" \
 if $RUN_CLAUDE; then
 	step "Running Claude Code E2E fixture"
 	run_node --image "$FIXTURE_NODE_IMAGE" \
-		-e "PATH=/workspace/target/release:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+		-e "PATH=/workspace/.docker-fixtures:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+		-e "SCRYRS_BIN=/workspace/.docker-fixtures/scryrs" \
 		-- \
 		node /workspace/scripts/verification/claude-code-e2e.mjs \
 		|| CLAUDE_EXIT=$?
@@ -147,7 +149,8 @@ fi
 if $RUN_PI; then
 	step "Running Pi E2E fixture"
 	run_node --image "$FIXTURE_NODE_IMAGE" \
-		-e "PATH=/workspace/target/release:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+		-e "PATH=/workspace/.docker-fixtures:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+		-e "SCRYRS_BIN=/workspace/.docker-fixtures/scryrs" \
 		-- \
 		node /workspace/scripts/verification/pi-hook-e2e.mjs \
 		|| PI_EXIT=$?
@@ -163,10 +166,18 @@ fi
 # ---------------------------------------------------------------------------
 if $RUN_INIT; then
 	step "Running installed-hook E2E fixture"
+	INIT_ARGS=()
+	if $PI_ONLY; then
+		INIT_ARGS+=(--pi-only)
+	fi
+	if $CLAUDE_ONLY; then
+		INIT_ARGS+=(--claude-only)
+	fi
 	run_node --image "$FIXTURE_NODE_IMAGE" \
-		-e "PATH=/workspace/target/release:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+		-e "PATH=/workspace/.docker-fixtures:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+		-e "SCRYRS_BIN=/workspace/.docker-fixtures/scryrs" \
 		-- \
-		node /workspace/scripts/verification/installed-hook-e2e.mjs \
+		node /workspace/scripts/verification/installed-hook-e2e.mjs "${INIT_ARGS[@]}" \
 		|| INIT_EXIT=$?
 	if [[ $INIT_EXIT -eq 0 ]]; then
 		echo "  Installed-hook fixture: PASSED"

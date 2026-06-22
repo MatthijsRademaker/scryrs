@@ -8,6 +8,53 @@ use scryrs_types::SCHEMA_VERSION;
 use crate::store_override;
 
 #[cfg(feature = "core")]
+const RECORD_DEBUG_PREFIX: &str = "[scryrs-record]";
+
+#[cfg(feature = "core")]
+const RECORD_DEBUG_PREVIEW_LIMIT: usize = 160;
+
+#[cfg(feature = "core")]
+fn record_debug_enabled() -> bool {
+    std::env::var("SCRYRS_DEBUG")
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+}
+
+#[cfg(feature = "core")]
+fn collapse_newlines(value: &str) -> String {
+    value.replace("\r\n", " ⏎ ").replace(['\n', '\r'], " ⏎ ")
+}
+
+#[cfg(feature = "core")]
+fn truncate_debug(value: &str) -> String {
+    let mut chars = value.chars();
+    let preview: String = chars.by_ref().take(RECORD_DEBUG_PREVIEW_LIMIT).collect();
+
+    if chars.next().is_some() {
+        format!("{preview}…({} bytes)", value.len())
+    } else {
+        preview
+    }
+}
+
+#[cfg(feature = "core")]
+fn preview_debug(value: &str) -> String {
+    truncate_debug(&collapse_newlines(value))
+}
+
+#[cfg(feature = "core")]
+fn write_debug(err: &mut impl Write, stage: &str, fields: &[(&str, String)]) {
+    let mut line = format!("{RECORD_DEBUG_PREFIX} stage={stage}");
+    for (key, value) in fields {
+        line.push(' ');
+        line.push_str(key);
+        line.push('=');
+        line.push_str(value);
+    }
+    let _ = writeln!(err, "{line}");
+}
+
+#[cfg(feature = "core")]
 pub(crate) fn execute_record<R: Read>(
     out: &mut impl Write,
     err: &mut impl Write,
@@ -15,12 +62,13 @@ pub(crate) fn execute_record<R: Read>(
     m: &ArgMatches,
 ) -> i32 {
     use std::fs::File;
-    use std::io::BufReader;
+    use std::io::Cursor;
 
-    use scryrs_core::{CANONICAL_STORE_PATH, EventStore, ingest_jsonl};
+    use scryrs_core::{CANONICAL_STORE_PATH, EventStore, ingest_jsonl_detailed};
 
     let use_stdin = m.get_flag("stdin");
     let file_path: Option<&String> = m.get_one::<String>("file");
+    let debug_enabled = record_debug_enabled();
 
     // Validate: exactly one of --stdin or --file must be specified.
     match (use_stdin, file_path) {
@@ -59,9 +107,15 @@ pub(crate) fn execute_record<R: Read>(
         }
     }
 
-    // Set up the input reader.
-    let reader: Box<dyn std::io::BufRead> = if use_stdin {
-        Box::new(BufReader::new(stdin))
+    let (raw_input, input_source) = if use_stdin {
+        let mut raw_input = String::new();
+        if let Err(e) = stdin.read_to_string(&mut raw_input) {
+            if writeln!(err, "scryrs record: I/O error while reading input: {e}").is_err() {
+                return 1;
+            }
+            return 2;
+        }
+        (raw_input, "stdin".to_string())
     } else {
         let path = match file_path {
             Some(p) => p,
@@ -73,7 +127,18 @@ pub(crate) fn execute_record<R: Read>(
             }
         };
         match File::open(path) {
-            Ok(f) => Box::new(BufReader::new(f)),
+            Ok(mut file) => {
+                let mut raw_input = String::new();
+                if let Err(e) = file.read_to_string(&mut raw_input) {
+                    if writeln!(err, "scryrs record: cannot read {path}: {e}").is_err()
+                        || writeln!(err, "See `scryrs --help`").is_err()
+                    {
+                        return 1;
+                    }
+                    return 2;
+                }
+                (raw_input, format!("file:{}", preview_debug(path)))
+            }
             Err(e) => {
                 if writeln!(err, "scryrs record: cannot read {path}: {e}").is_err()
                     || writeln!(err, "See `scryrs --help`").is_err()
@@ -85,8 +150,27 @@ pub(crate) fn execute_record<R: Read>(
         }
     };
 
+    if debug_enabled {
+        for (zero_based, line) in raw_input.lines().enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            write_debug(
+                err,
+                "received",
+                &[
+                    ("line", (zero_based + 1).to_string()),
+                    ("source", input_source.clone()),
+                    ("bytes", line.len().to_string()),
+                    ("preview", preview_debug(line)),
+                ],
+            );
+        }
+    }
+
     // Ingest.
-    let outcome = match ingest_jsonl(reader) {
+    let outcome = match ingest_jsonl_detailed(Cursor::new(raw_input.as_bytes())) {
         Ok(o) => o,
         Err(e) => {
             if writeln!(err, "scryrs record: I/O error while reading input: {e}").is_err() {
@@ -95,6 +179,47 @@ pub(crate) fn execute_record<R: Read>(
             return 2;
         }
     };
+
+    if debug_enabled {
+        for accepted in &outcome.accepted {
+            write_debug(
+                err,
+                "accepted",
+                &[
+                    ("line", accepted.line.to_string()),
+                    (
+                        "event_type",
+                        accepted.event.event_type.payload_type_str().to_string(),
+                    ),
+                    ("session_id", preview_debug(&accepted.event.session_id)),
+                    (
+                        "tool_name",
+                        accepted
+                            .event
+                            .tool_name
+                            .as_deref()
+                            .unwrap_or("none")
+                            .to_string(),
+                    ),
+                ],
+            );
+        }
+
+        for rejection in &outcome.rejected {
+            write_debug(
+                err,
+                "rejected",
+                &[
+                    ("line", rejection.line.to_string()),
+                    (
+                        "field",
+                        rejection.field.as_deref().unwrap_or("none").to_string(),
+                    ),
+                    ("reason", preview_debug(&rejection.reason)),
+                ],
+            );
+        }
+    }
 
     // Persist accepted events.
     let store_path = store_override::get().unwrap_or_else(|| CANONICAL_STORE_PATH.into());
@@ -113,6 +238,14 @@ pub(crate) fn execute_record<R: Read>(
         }
     };
 
+    if debug_enabled {
+        write_debug(
+            err,
+            "datastore_open",
+            &[("path", preview_debug(&store_path))],
+        );
+    }
+
     if let Err(e) = store.begin_transaction() {
         if writeln!(
             err,
@@ -125,12 +258,36 @@ pub(crate) fn execute_record<R: Read>(
         return 2;
     }
 
-    for event in &outcome.accepted {
-        if let Err(e) = store.append(event) {
+    for (index, accepted) in outcome.accepted.iter().enumerate() {
+        if let Err(e) = store.append(&accepted.event) {
             if writeln!(err, "scryrs record: cannot persist event: {e}").is_err() {
                 return 1;
             }
             return 2;
+        }
+
+        if debug_enabled {
+            write_debug(
+                err,
+                "inserted",
+                &[
+                    ("index", (index + 1).to_string()),
+                    (
+                        "event_type",
+                        accepted.event.event_type.payload_type_str().to_string(),
+                    ),
+                    ("session_id", preview_debug(&accepted.event.session_id)),
+                    (
+                        "tool_name",
+                        accepted
+                            .event
+                            .tool_name
+                            .as_deref()
+                            .unwrap_or("none")
+                            .to_string(),
+                    ),
+                ],
+            );
         }
     }
 
@@ -148,6 +305,34 @@ pub(crate) fn execute_record<R: Read>(
 
     let accepted = outcome.accepted.len();
     let rejected = outcome.rejected.len();
+
+    if debug_enabled {
+        write_debug(
+            err,
+            "transaction_commit",
+            &[
+                ("accepted", accepted.to_string()),
+                ("rejected", rejected.to_string()),
+            ],
+        );
+        write_debug(
+            err,
+            "summary",
+            &[
+                ("accepted", accepted.to_string()),
+                ("rejected", rejected.to_string()),
+                (
+                    "exit",
+                    if rejected > 0 {
+                        "rejections"
+                    } else {
+                        "success"
+                    }
+                    .to_string(),
+                ),
+            ],
+        );
+    }
 
     // Summary to stdout.
     let summary = format!(

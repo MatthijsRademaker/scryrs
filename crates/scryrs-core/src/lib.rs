@@ -5,7 +5,10 @@ pub mod query;
 pub mod scoring;
 pub mod store;
 
-pub use ingestion::{IngestionOutcome, Rejection, ingest_jsonl};
+pub use ingestion::{
+    AcceptedEvent, DetailedIngestionOutcome, IngestionOutcome, Rejection, ingest_jsonl,
+    ingest_jsonl_detailed,
+};
 pub use query::{QueryError, TraceQuery};
 pub use scoring::score_hotspots;
 pub use store::{CANONICAL_STORE_PATH, EventStore};

@@ -166,13 +166,19 @@ run_node() {
 
 	_pull_image_if_missing "$image"
 
-	docker_cmd run --rm \
-		-u "${uid}:${gid}" \
-		-v "$ROOT:/workspace" \
-		-w /workspace \
-		"${env_args[@]}" \
-		"$image" \
-		"$@"
+	local -a docker_args=(run --rm)
+	docker_args+=(-u "${uid}:${gid}")
+	docker_args+=(-v "$ROOT:/workspace")
+	docker_args+=(-w /workspace)
+	docker_args+=(-e HOME=/tmp)
+	docker_args+=(-e npm_config_cache=/tmp/.npm)
+	if ((${#env_args[@]} > 0)); then
+		docker_args+=("${env_args[@]}")
+	fi
+	docker_args+=("$image")
+	docker_args+=("$@")
+
+	docker_cmd "${docker_args[@]}"
 }
 
 # Print a header for a verification step.

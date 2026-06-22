@@ -7,6 +7,24 @@
  * @earendil-works/pi-coding-agent when the hook is installed inside Pi.
  */
 
+declare module "node:fs" {
+	export function mkdtempSync(prefix: string): string;
+	export function writeFileSync(
+		path: string,
+		data: string,
+		encoding?: string,
+	): void;
+	export function unlinkSync(path: string): void;
+}
+
+declare module "node:path" {
+	export function join(...parts: string[]): string;
+}
+
+declare module "node:os" {
+	export function tmpdir(): string;
+}
+
 declare module "@earendil-works/pi-coding-agent" {
 	export interface ExtensionAPI {
 		on(event: "session_start", handler: SessionStartHandler): void;
@@ -42,12 +60,17 @@ declare module "@earendil-works/pi-coding-agent" {
 		isError: boolean;
 	}
 
-	export interface ExtensionContext {
-		// intentionally minimal — the hook only uses ctx from the signature
+	export interface SessionManager {
+		getSessionId(): string;
 	}
 
+	export interface ExtensionContext {
+		sessionManager: SessionManager;
+	}
+
+	// Pi's exec() uses stdio: ["ignore", "pipe", "pipe"] — stdin
+	// cannot be written to, so input is not supported.
 	export interface ExecOptions {
-		input?: string;
 		timeout?: number;
 		signal?: AbortSignal;
 	}
@@ -59,3 +82,7 @@ declare module "@earendil-works/pi-coding-agent" {
 		killed: boolean;
 	}
 }
+
+declare const process: {
+	env: Record<string, string | undefined>;
+};

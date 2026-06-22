@@ -159,13 +159,15 @@ The hook SHALL wrap the entire subprocess invocation in try-catch. If `pi.exec` 
 
 The hook SHALL generate a unique session-scoped identifier on extension load and emit a `SessionStart` TraceEvent when the Pi `session_start` event fires. `SessionEnd` is explicitly deferred to a follow-up task.
 
-#### Scenario: Session_id is generated on extension load
-- **WHEN** the Pi extension factory function executes
-- **THEN** a UUID session identifier is generated via `crypto.randomUUID()` and stored in module scope
+#### Scenario: Session_id is resolved from Pi's SessionManager
+- **WHEN** Pi fires the `session_start` event
+- **THEN** the hook resolves `session_id` from `ctx.sessionManager.getSessionId()`
+- **AND** falls back to `crypto.randomUUID()` if `sessionManager` is unavailable
 
 #### Scenario: SessionStart is emitted on session_start
 - **WHEN** Pi fires the `session_start` event
-- **THEN** the hook emits a `SessionStart` TraceEvent with the generated `session_id`
+- **THEN** the hook resolves `session_id` from Pi's `SessionManager`
+- **AND** emits a `SessionStart` TraceEvent with that `session_id`
 - **AND** the event omits `tool_name` (lifecycle event)
 
 #### Scenario: SessionEnd is not emitted

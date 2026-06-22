@@ -86,6 +86,9 @@ fi
 
 echo "[scryrs-install] Building scryrs-cli (release, default features) ..."
 cd "$REPO_ROOT"
+# Touch entry point to force recompile — ensures the binary reflects
+# current source even when cargo's cache says nothing changed.
+touch crates/scryrs-cli/src/main.rs
 cargo build -p scryrs-cli --release --locked
 
 BUILT_BIN="$REPO_ROOT/target/release/scryrs"
