@@ -5,7 +5,7 @@
 
 use std::fs;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------
 // Harness registry — typed, deterministic, stable alphabetical order
@@ -95,7 +95,18 @@ pub fn execute_init(out: &mut impl Write, err: &mut impl Write, agent_name: &str
         }
     };
 
-    if is_scryrs_source_checkout(&cwd) {
+    let source_root = detect_scryrs_source_checkout(&cwd);
+
+    // Determine the target base directory.
+    // For Pi inside the scryrs source checkout: use the detected checkout root.
+    // For all other cases (consumer projects, Claude Code, etc.): use CWD.
+    let target_base: &Path = match (&source_root, agent_name) {
+        (Some(root), "pi") => root,
+        _ => &cwd,
+    };
+
+    // Harness-specific self-install policy.
+    if source_root.is_some() && agent_name != "pi" {
         let _ = writeln!(
             err,
             "scryrs init: refusing to install into the scryrs source repository"
@@ -135,7 +146,7 @@ pub fn execute_init(out: &mut impl Write, err: &mut impl Write, agent_name: &str
     // --- claude-code: settings.json collision check ---
 
     if entry.agent_name == "claude-code" {
-        let settings_path = Path::new(".claude/settings.json");
+        let settings_path = target_base.join(".claude/settings.json");
         if settings_path.exists() {
             let _ = writeln!(err, "scryrs init: .claude/settings.json already exists");
             let _ = writeln!(
@@ -153,14 +164,19 @@ pub fn execute_init(out: &mut impl Write, err: &mut impl Write, agent_name: &str
 
     // --- create target directory ---
 
-    if let Err(e) = fs::create_dir_all(entry.target_dir) {
-        let _ = writeln!(err, "scryrs init: cannot create {}: {e}", entry.target_dir);
+    let target_dir = target_base.join(entry.target_dir);
+    if let Err(e) = fs::create_dir_all(&target_dir) {
+        let _ = writeln!(
+            err,
+            "scryrs init: cannot create {}: {e}",
+            target_dir.display()
+        );
         return 1;
     }
 
     // --- collision check (target file already exists) ---
 
-    let target_path = Path::new(entry.target_dir).join(entry.target_filename);
+    let target_path = target_dir.join(entry.target_filename);
     if target_path.exists() {
         let _ = writeln!(err, "scryrs init: {} already exists", target_path.display());
         let _ = writeln!(err, "Remove the file manually and rerun scryrs init.");
@@ -192,14 +208,17 @@ pub fn execute_init(out: &mut impl Write, err: &mut impl Write, agent_name: &str
 
 /// Walk parent directories from `cwd` looking for the scryrs source checkout.
 ///
-/// Returns `true` when BOTH markers are found in the same ancestor directory:
+/// Returns `Some(root)` when BOTH markers are found in the same ancestor directory:
 /// 1. `Cargo.toml` exists and contains the string `scryrs-cli`, AND
 /// 2. `hooks/claude-code/` exists as a subdirectory.
+///
+/// The returned path is the directory containing both markers (the checkout root).
+/// Returns `None` when no matching ancestor directory is found.
 ///
 /// The dual-marker heuristic prevents false positives: a user project would
 /// need to both include scryrs-cli as a workspace member AND clone the
 /// hooks/claude-code/ directory structure.
-fn is_scryrs_source_checkout(cwd: &Path) -> bool {
+fn detect_scryrs_source_checkout(cwd: &Path) -> Option<PathBuf> {
     let mut current = Some(cwd);
 
     while let Some(dir) = current {
@@ -210,7 +229,7 @@ fn is_scryrs_source_checkout(cwd: &Path) -> bool {
             // Both structural markers present — check content.
             if let Ok(contents) = fs::read_to_string(&cargo_toml) {
                 if contents.contains("scryrs-cli") {
-                    return true;
+                    return Some(dir.to_path_buf());
                 }
             }
         }
@@ -218,7 +237,7 @@ fn is_scryrs_source_checkout(cwd: &Path) -> bool {
         current = dir.parent();
     }
 
-    false
+    None
 }
 
 // ---------------------------------------------------------------------------

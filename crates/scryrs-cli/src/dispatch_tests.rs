@@ -371,40 +371,40 @@ fn help_json_output_does_not_contain_placeholder_wording() {
     );
 }
 
-// --- Dashboard command tests (Phase 3 — planned, not yet implemented) ---
+// --- Dashboard command tests ---
 
 #[test]
-fn dashboard_is_recognized_not_unknown_command() {
-    let mut out = Vec::new();
-    let mut err = Vec::new();
-
-    assert_eq!(run_with_writers(["dashboard"], &mut out, &mut err), 2);
-    assert!(out.is_empty());
-    let err_str = String::from_utf8_lossy(&err);
-    assert!(
-        err_str.contains("scryrs dashboard: not yet implemented (Phase 3)"),
-        "dashboard must be recognized, not treated as unknown command, got: {err_str}"
-    );
-    assert!(
-        !err_str.contains("unknown command"),
-        "must not say 'unknown command'"
-    );
-}
-
-#[test]
-fn dashboard_with_flags_is_recognized() {
+fn dashboard_help_exits_0_and_lists_flags() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
     assert_eq!(
-        run_with_writers(["dashboard", "--port", "9090"], &mut out, &mut err),
+        run_with_writers(["dashboard", "--help"], &mut out, &mut err),
+        0
+    );
+    assert!(err.is_empty());
+    let help = String::from_utf8_lossy(&out);
+    assert!(help.contains("start local dashboard server"));
+    assert!(help.contains("--port <PORT>"));
+    assert!(help.contains("--bind <ADDR>"));
+    assert!(help.contains("--no-open"));
+    assert!(help.contains("--dev"));
+}
+
+#[test]
+fn dashboard_invalid_port_exits_2_without_starting_server() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(["dashboard", "--port", "0"], &mut out, &mut err),
         2
     );
     assert!(out.is_empty());
     let err_str = String::from_utf8_lossy(&err);
     assert!(
-        err_str.contains("scryrs dashboard: not yet implemented (Phase 3)"),
-        "dashboard --port must be recognized, got: {err_str}"
+        err_str.contains("invalid --port value '0'"),
+        "dashboard --port 0 must report validation error, got: {err_str}"
     );
 }
 

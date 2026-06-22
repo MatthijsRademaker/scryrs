@@ -60,6 +60,7 @@ Use feature-descriptive file names; avoid generic buckets like `utils`, `helpers
 
 - Prefer delegating to subagents
 - Prefer executable truth in `src/` when docs disagree.
+- For dashboard UI work in `crates/scryrs-dashboard/frontend/`, read `.pi/skills/shadcn-vue/SKILL.md` before adding or modifying components.
 
 ## Documentation Sources
 
@@ -73,5 +74,22 @@ Two separate documentation trees exist. They serve different audiences — do no
 ## Additional Rule Files
 
 - `.pi/rules/*` — project-specific guardrails. Read before modifying agent definitions, architecture docs, or runtime configuration.
+
+## Pi Hook Source Ownership
+
+This repository carries two copies of the Pi trace hook. They are not equal-weight artifacts.
+
+| Path | Role | Editable |
+| --- | --- | --- |
+| `hooks/pi/index.ts` | Canonical hook source | Yes — edit here |
+| `.pi/extensions/pi-trace/index.ts` | Installed runtime copy for local dogfooding | **No** — never edit directly |
+
+### Rules
+
+1. `hooks/pi/index.ts` is the **only** canonical source for the Pi trace hook.
+2. `.pi/extensions/pi-trace/index.ts` is a non-leading, non-canonical runtime artifact installed by `scryrs init --agent pi` for local dogfooding. It is gitignored.
+3. LLMs/agents **MUST NOT** edit `.pi/extensions/pi-trace/index.ts` directly.
+4. LLMs/agents **MUST NOT** treat the installed copy as the leading source or resolution target for hook logic.
+5. After editing `hooks/pi/index.ts`, refresh the installed copy by removing `.pi/extensions/pi-trace/index.ts` and re-running `scryrs init --agent pi`.
 
 **Important:** The frontmatter fields `modelEasy`, `modelModerate`, and `modelComplex` in `.pi/agents/*.md` are **live, active runtime configuration** — not dead code, not backwards-compat cruft, not stale config. They drive difficulty-based model routing at runtime (`resolveEffectiveModelRef` in `src/swarm-extension/extensions/index.ts`). Do not remove them under Rules 7 or 9; those rules apply to code, not to active runtime configuration that controls which AI model executes tasks. See `.pi/rules/agent-definition-fields.md` for the full contract.

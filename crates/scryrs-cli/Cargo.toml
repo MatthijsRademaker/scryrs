@@ -11,10 +11,11 @@ name = "scryrs"
 path = "src/main.rs"
 
 [features]
-default = ["core", "graph", "curator", "markdown", "runtime", "guardrails"]
+default = ["core", "dashboard", "graph", "curator", "markdown", "runtime", "guardrails"]
 full = ["default", "llm", "rspress"]
 guardrails = ["policy", "sandbox", "telemetry"]
 core = ["dep:scryrs-core"]
+dashboard = ["dep:scryrs-dashboard"]
 graph = ["dep:scryrs-graph"]
 curator = ["dep:scryrs-curator"]
 llm = ["dep:scryrs-llm"]
@@ -32,6 +33,7 @@ scryrs-adapter-markdown = { workspace = true, optional = true }
 scryrs-adapter-rspress = { workspace = true, optional = true }
 scryrs-core = { workspace = true, optional = true }
 scryrs-curator = { workspace = true, optional = true }
+scryrs-dashboard = { workspace = true, optional = true }
 scryrs-graph = { workspace = true, optional = true }
 scryrs-llm = { workspace = true, optional = true }
 scryrs-policy = { workspace = true, optional = true }

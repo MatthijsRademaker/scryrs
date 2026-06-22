@@ -1,6 +1,7 @@
 //! v0 CLI contract: `scryrs hotspots <PATH>`, `scryrs record --stdin|--file <PATH>`,
-//! `scryrs init --agent <NAME>`, and `scryrs dashboard` (Phase 3 — planned).
+//! `scryrs init --agent <NAME>`, and `scryrs dashboard`.
 
+mod dashboard;
 mod init;
 
 #[cfg(feature = "core")]

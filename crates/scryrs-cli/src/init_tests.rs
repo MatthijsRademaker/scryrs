@@ -213,10 +213,10 @@ fn init_pi_hook_file_collision_exits_2() {
     });
 }
 
-// --- 7.7: self-install detection ---
+// --- 7.7: self-install detection (Claude Code refused) ---
 
 #[test]
-fn init_self_install_detection_refuses() {
+fn init_self_install_detection_refuses_claude_code() {
     let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
     // Create a fake scryrs source checkout: Cargo.toml with scryrs-cli + hooks/claude-code/
     std::fs::write(
@@ -243,6 +243,144 @@ fn init_self_install_detection_refuses() {
         assert!(
             err_str.contains("source repo"),
             "must mention source repo, got: {err_str}"
+        );
+    });
+}
+
+// --- 7.7b: self-install detection (Pi allowed at source root) ---
+
+#[test]
+fn init_self_install_pi_allowed_at_source_root() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    // Create a fake scryrs source checkout.
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        "[workspace]\nmembers = [\"crates/scryrs-cli\"]\n",
+    )
+    .unwrap_or_else(|e| panic!("write Cargo.toml: {e}"));
+    std::fs::create_dir_all(dir.path().join("hooks/claude-code"))
+        .unwrap_or_else(|e| panic!("create_dir: {e}"));
+
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(["init", "--agent", "pi"], &mut out, &mut err),
+            0
+        );
+        assert!(
+            err.is_empty(),
+            "stderr must be empty for allowed Pi install, got: {}",
+            String::from_utf8_lossy(&err)
+        );
+
+        // File must be written at source root.
+        let hook_path = dir.path().join(".pi/extensions/pi-trace/index.ts");
+        assert!(
+            hook_path.exists(),
+            "hook file must exist at {}",
+            hook_path.display()
+        );
+        let content =
+            std::fs::read_to_string(&hook_path).unwrap_or_else(|e| panic!("read hook: {e}"));
+        assert!(!content.is_empty(), "hook file must not be empty");
+        assert!(
+            content.contains("ExtensionAPI"),
+            "hook must reference ExtensionAPI"
+        );
+    });
+}
+
+// --- 7.7c: Pi self-install from subdirectory resolves to source root ---
+
+#[test]
+fn init_self_install_pi_from_subdirectory_resolves_to_root() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    // Create a fake scryrs source checkout.
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        "[workspace]\nmembers = [\"crates/scryrs-cli\"]\n",
+    )
+    .unwrap_or_else(|e| panic!("write Cargo.toml: {e}"));
+    std::fs::create_dir_all(dir.path().join("hooks/claude-code"))
+        .unwrap_or_else(|e| panic!("create_dir: {e}"));
+
+    // Create a deeply nested subdirectory.
+    let subdir = dir.path().join("crates/scryrs-cli/src");
+    std::fs::create_dir_all(&subdir).unwrap_or_else(|e| panic!("create subdir: {e}"));
+
+    with_cwd(&subdir, || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(["init", "--agent", "pi"], &mut out, &mut err),
+            0
+        );
+        assert!(
+            err.is_empty(),
+            "stderr must be empty, got: {}",
+            String::from_utf8_lossy(&err)
+        );
+
+        // File must be at checkout root, not at CWD.
+        let root_hook_path = dir.path().join(".pi/extensions/pi-trace/index.ts");
+        assert!(
+            root_hook_path.exists(),
+            "hook file must exist at checkout root {}",
+            root_hook_path.display()
+        );
+
+        // Verify NO nested .pi/ tree exists under the subdirectory CWD.
+        let nested_pi = subdir.join(".pi");
+        assert!(
+            !nested_pi.exists(),
+            "no .pi/ tree must exist under subdirectory CWD {}",
+            nested_pi.display()
+        );
+    });
+}
+
+// --- 7.7d: Pi collision inside source checkout still exits 2 ---
+
+#[test]
+fn init_self_install_pi_collision_in_source_repo_exits_2() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    // Create a fake scryrs source checkout.
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        "[workspace]\nmembers = [\"crates/scryrs-cli\"]\n",
+    )
+    .unwrap_or_else(|e| panic!("write Cargo.toml: {e}"));
+    std::fs::create_dir_all(dir.path().join("hooks/claude-code"))
+        .unwrap_or_else(|e| panic!("create_dir: {e}"));
+
+    // Pre-create the target file to trigger collision.
+    std::fs::create_dir_all(dir.path().join(".pi/extensions/pi-trace"))
+        .unwrap_or_else(|e| panic!("create_dir: {e}"));
+    std::fs::write(
+        dir.path().join(".pi/extensions/pi-trace/index.ts"),
+        "existing",
+    )
+    .unwrap_or_else(|e| panic!("write: {e}"));
+
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(["init", "--agent", "pi"], &mut out, &mut err),
+            2
+        );
+        let err_str = String::from_utf8_lossy(&err);
+        assert!(
+            err_str.contains("already exists"),
+            "must report file collision, got: {err_str}"
+        );
+        assert!(
+            err_str.contains("Remove the file manually"),
+            "must include remediation, got: {err_str}"
         );
     });
 }
@@ -360,7 +498,7 @@ fn init_appears_in_help_json() {
     let doc: serde_json::Value =
         serde_json::from_str(&json_str).unwrap_or_else(|e| panic!("parse help-json: {e}"));
 
-    assert_eq!(doc["surfaceVersion"], "0.4.0");
+    assert_eq!(doc["surfaceVersion"], "0.5.0");
 
     let commands = doc["commands"]
         .as_array()

@@ -2,6 +2,7 @@ use std::io::{self, Read, Write};
 
 use clap::{Arg, ArgAction, Command};
 
+use crate::dashboard::{execute_dashboard, write_dashboard_help};
 use crate::help_json::write_cli_surface;
 use crate::help_text::write_help;
 use crate::hotspots::write_hotspots_json;
@@ -44,6 +45,10 @@ where
     // D5: Pre-clap --help-json handling (not a clap flag)
     if args.len() == 1 && args[0] == "--help-json" {
         return write_cli_surface(&mut out).map_or(1, |_| 0);
+    }
+
+    if args.len() == 2 && args[0] == "dashboard" && (args[1] == "--help" || args[1] == "-h") {
+        return write_dashboard_help(&mut out).map_or(1, |_| 0);
     }
 
     // Unknown command check before clap dispatch.
@@ -134,7 +139,7 @@ where
         )
         .subcommand(
             Command::new("dashboard")
-                .about("Start local dashboard server (Phase 3 — planned)")
+                .about("Start local dashboard server")
                 .disable_help_flag(true)
                 .disable_version_flag(true)
                 .arg(
@@ -200,22 +205,7 @@ where
                         init::execute_init(&mut out, &mut err, agent)
                     }
                 }
-                Some(("dashboard", _m)) => {
-                    // Phase 3 Dashboard — not yet implemented.
-                    // This placeholder will be replaced with
-                    // scryrs_dashboard::run(config) when the crate ships.
-                    if writeln!(
-                        err,
-                        "scryrs dashboard: not yet implemented (Phase 3)"
-                    )
-                    .is_err()
-                        || writeln!(err, "See the roadmap: scryrs --help").is_err()
-                    {
-                        1
-                    } else {
-                        2
-                    }
-                }
+                Some(("dashboard", m)) => execute_dashboard(&mut err, m),
                 // Bare invocation (no subcommand matched).
                 _ => write_help(&mut out).map_or(1, |_| 0),
             }

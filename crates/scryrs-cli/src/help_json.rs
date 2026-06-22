@@ -4,7 +4,7 @@ use serde_json::json;
 
 /// Version of the `--help-json` surface document format, independent of
 /// `SCHEMA_VERSION` which governs command output envelopes.
-const SURFACE_VERSION: &str = "0.4.0";
+const SURFACE_VERSION: &str = "0.5.0";
 
 pub(crate) fn cli_surface_doc() -> String {
     let doc = json!({
@@ -80,8 +80,7 @@ pub(crate) fn cli_surface_doc() -> String {
             },
             {
                 "name": "dashboard",
-                "description": "Start local dashboard server (Phase 3 — planned, not yet implemented)",
-                "status": "planned",
+                "description": "Start local dashboard server and open the browser dashboard",
                 "flags": [
                     {"name": "port", "short": "-p", "long": "--port", "type": "number", "default": 8080, "description": "TCP port to bind"},
                     {"name": "bind", "short": "-b", "long": "--bind", "type": "string", "default": "127.0.0.1", "description": "Bind address"},
@@ -90,7 +89,7 @@ pub(crate) fn cli_surface_doc() -> String {
                 ],
                 "output": {
                     "mimeType": "text/html",
-                    "description": "Vue.js SPA served over HTTP. REST API at GET /api/hotspots, GET /api/sessions, GET /api/events."
+                    "description": "Vue.js SPA served over HTTP. REST API at GET /api/hotspots, GET /api/sessions, GET /api/sessions/:sessionId, GET /api/events."
                 }
             }
         ],
@@ -103,7 +102,7 @@ pub(crate) fn cli_surface_doc() -> String {
         "exitCodes": {
             "0": "Success (hotspots: JSON written, including empty entries; record: all events accepted; init: hook installed; dashboard: server shut down cleanly)",
             "1": "Hotspots: storage error. Record: one or more events rejected, or I/O error writing output. Init: I/O error. Dashboard: port in use or artifact read error.",
-            "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file or store failure); init: unsupported harness, collision, or self-install refusal; dashboard: not yet implemented (Phase 3)"
+            "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file or store failure); init: unsupported harness, collision, or self-install refusal; dashboard: invalid flags."
         }
     });
     serde_json::to_string(&doc).unwrap_or_else(|_| "{}".into())

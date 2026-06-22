@@ -25,6 +25,9 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
       - name: Install Rust
         run: |
           rustup toolchain install 1.85.0 --profile minimal --component clippy,rustfmt
@@ -35,6 +38,13 @@ jobs:
 
       - name: Format
         run: cargo fmt --all --check
+
+      - name: Dashboard frontend
+        working-directory: crates/scryrs-dashboard/frontend
+        run: |
+          bun install --frozen-lockfile
+          bun run check
+          bun run build
 
       - name: Check
         run: cargo check --workspace --all-targets --all-features --locked

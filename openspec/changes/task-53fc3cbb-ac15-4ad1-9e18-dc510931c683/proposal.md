@@ -8,7 +8,7 @@ scryrs can record traces and materialize hotspot reports, but consuming this dat
 
 2. **New CLI command**: `scryrs dashboard` that starts a local HTTP server and opens a Vue.js dashboard SPA.
 
-3. **Vue.js dashboard application**: An SPA served by the CLI that visualizes hotspot data, session timelines, event distributions, and per-subject drill-downs. Built with clean component separation so graph/route visualizations can be dropped in during later phases.
+3. **Vue.js dashboard application**: An SPA served by the CLI that visualizes hotspot data, session timelines, event distributions, and per-subject drill-downs. Built with Vue 3, Vite, strict TypeScript, Bun, Tailwind CSS v4, shadcn-vue, Reka UI, lucide-vue, Vue Router, and Pinia, with typed hand-written REST clients and shared layout/components so graph/route visualizations can be dropped in during later phases.
 
 4. **Spec files**: Define the dashboard CLI contract (`cli-dashboard-command`), the dashboard frontend architecture (`dashboard-frontend-app`), and the Phase 3 goal definition on the roadmap (`dashboard-phase-goal`).
 
@@ -20,7 +20,7 @@ scryrs can record traces and materialize hotspot reports, but consuming this dat
 
 - `dashboard-phase-goal`: Defines Phase 3 on the roadmap — what the dashboard phase delivers, what it explicitly defers, and how it relates to surrounding phases.
 - `cli-dashboard-command`: The `scryrs dashboard` CLI surface — argument parsing, HTTP server lifecycle, artifact file serving contract.
-- `dashboard-frontend-app`: The Vue.js SPA architecture — component tree, data loading from `.scryrs/*.json` files, visualization scope, and extensibility points for future graph/route views.
+- `dashboard-frontend-app`: The Vue.js SPA architecture — Bun/Tailwind/shadcn-vue frontend stack, component tree, data loading from `.scryrs/*.json` files, typed fetch modules, visualization scope, and extensibility points for future graph/route views.
 
 ### Modified Capabilities
 
@@ -30,6 +30,6 @@ scryrs can record traces and materialize hotspot reports, but consuming this dat
 
 - **Roadmap update**: `.devagent/docs/docs/roadmap.mdx` — Phase 3 becomes Dashboard, Phase 4 becomes Graph and Route Manifests, etc. Scope guardrail #5 is removed or updated since dashboards are now a planned phase.
 - **New crate**: `crates/scryrs-dashboard/` — the `scryrs dashboard` CLI command and embedded SPA server.
-- **New frontend code**: `crates/scryrs-dashboard/frontend/` — Vue.js SPA source, built and embedded into the binary as static assets.
+- **New frontend code**: `crates/scryrs-dashboard/frontend/` — Vue.js SPA source built with Bun, Tailwind CSS v4, shadcn-vue, Reka UI, lucide-vue, Vue Router, Pinia, and embedded into the binary as static assets.
 - **No behavioral changes to existing crates**: `scryrs record`, `scryrs hotspots`, `scryrs init`, `--help`, `--help-json`, `--version`, exit codes, and all existing behavior remain identical. The `scryrs-cli` crate will gain a `scryrs-dashboard` dependency and delegate the `dashboard` subcommand in the implementation PR.
 - **Docs change**: `cli-v0-contract.md` updated to document the `dashboard` command contract.

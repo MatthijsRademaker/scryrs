@@ -6,6 +6,7 @@ members = [
   "crates/scryrs-cli",
   "crates/scryrs-core",
   "crates/scryrs-curator",
+  "crates/scryrs-dashboard",
   "crates/scryrs-graph",
   "crates/scryrs-llm",
   "crates/scryrs-policy",
@@ -47,6 +48,7 @@ scryrs-adapter-markdown = { path = "crates/scryrs-adapter-markdown" }
 scryrs-adapter-rspress = { path = "crates/scryrs-adapter-rspress" }
 scryrs-core = { path = "crates/scryrs-core" }
 scryrs-curator = { path = "crates/scryrs-curator" }
+scryrs-dashboard = { path = "crates/scryrs-dashboard" }
 scryrs-graph = { path = "crates/scryrs-graph" }
 scryrs-llm = { path = "crates/scryrs-llm" }
 scryrs-policy = { path = "crates/scryrs-policy" }

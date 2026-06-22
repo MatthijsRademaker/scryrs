@@ -13,6 +13,9 @@ run_rust cargo fmt
 step "cargo fmt --all --check"
 run_rust cargo fmt --all --check
 
+step "dashboard frontend check"
+(cd "$SCRIPT_DIR/../crates/scryrs-dashboard/frontend" && bun install --frozen-lockfile && bun run check && bun run build)
+
 step "cargo check --workspace --all-targets --all-features --locked"
 run_rust cargo check --workspace --all-targets --all-features --locked
 

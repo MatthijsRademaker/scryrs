@@ -15,7 +15,7 @@ The Phase 1 deterministic proxy-capture boundary is implemented:
 - `scryrs.json` defines the hook-interface and record-invocation manifest at the repository root.
 - Docker-backed fail-open verification (`scripts/verify-trace-capture`) exercises both hooks end-to-end against the real `scryrs` binary.
 
-Phase 2 hotspot materialization is delivered: `scryrs hotspots <PATH>` opens `.scryrs/scryrs.db` via `TraceQuery`, runs deterministic scoring with a documented weight table and six-key tie-break, emits a versioned `HotspotsReport` (schemaVersion 1.0.0) to stdout and `.scryrs/hotspots.json`, and handles empty/missing/corrupt stores with correct exit codes. E2E tests prove the full record → SQLite → hotspots → artifact pipeline. Phase 3+ features (graph, proposal, adapter, runtime, MCP, LLM) remain deferred per the delivery-phase ordering below. Phase 3 (Dashboard) is the next planned phase.
+Phase 2 hotspot materialization is delivered: `scryrs hotspots <PATH>` opens `.scryrs/scryrs.db` via `TraceQuery`, runs deterministic scoring with a documented weight table and six-key tie-break, emits a versioned `HotspotsReport` (schemaVersion 1.0.0) to stdout and `.scryrs/hotspots.json`, and handles empty/missing/corrupt stores with correct exit codes. E2E tests prove the full record → SQLite → hotspots → artifact pipeline. Phase 4+ features (graph, proposal, adapter, runtime, MCP, LLM) remain deferred per the delivery-phase ordering below. Phase 3 (Dashboard) adds the local visual browsing surface on top of hotspot artifacts.
 
 ## Phase Order
 
@@ -107,11 +107,11 @@ Required deliverables:
 
 - `scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]` CLI command that starts a local HTTP server and opens a Vue.js SPA in the default browser.
 - Local REST API serving `GET /api/hotspots` (from `.scryrs/hotspots.json`), `GET /api/sessions`, and `GET /api/events` (from `.scryrs/scryrs.db`).
-- Embedded Vue.js SPA built with Vue 3 + Vite + Pinia + Vue Router + Chart.js, compiled into the binary via `rust-embed`.
+- Embedded Vue.js SPA built with Vue 3 + Vite + strict TypeScript + Bun + Tailwind CSS v4 + shadcn-vue + Reka UI + lucide-vue + Pinia + Vue Router, compiled into the binary via `rust-embed`.
 - Hotspot report table view (sortable, ranked entries with score, session count, timestamps).
 - Per-subject drill-down view with event-type breakdown and session timeline.
 - Session list and detail views with scrollable event lists.
-- Event distribution chart grouped by event type, filterable by session.
+- Event distribution visualization grouped by event type, filterable by session.
 - Component architecture with extensible slots for future graph/route views.
 - Embedded SPA as static assets in the Rust binary (single-file deploy).
 - New crate `crates/scryrs-dashboard/` with `axum` + `tokio` HTTP server.
@@ -122,7 +122,7 @@ Accepted limitations:
 - No hosted or multi-user dashboard — this is local-only.
 - No authentication, no write API, no data mutation through the dashboard.
 - No real-time or streaming updates — the dashboard reads current artifact files on each API request.
-- SPA adds ~1–2 MB to binary size (acceptable for single-binary CLI tool).
+- SPA assets are embedded into the binary (acceptable for single-binary CLI tool).
 
 ## Phase 4 - Graph and Route Manifests
 
