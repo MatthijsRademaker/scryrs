@@ -7,13 +7,17 @@ const props = withDefaults(defineProps<{ variant?: "default" | "outline" | "ghos
   class: "",
 });
 
-const classes = computed(() => cn(
-  "inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50",
-  props.variant === "default" && "bg-primary text-primary-foreground hover:bg-primary/90",
-  props.variant === "outline" && "border bg-background hover:bg-accent hover:text-accent-foreground",
-  props.variant === "ghost" && "hover:bg-accent hover:text-accent-foreground",
-  props.class,
-));
+const classes = computed(() =>
+  cn(
+    "inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-[background-color,box-shadow,color] duration-200 ease-out outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:shadow-[0_0_18px_-2px_var(--glow-accent)] disabled:pointer-events-none disabled:opacity-50",
+    props.variant === "default" &&
+      "bg-primary text-primary-foreground hover:bg-primary/90 hover:shadow-[0_0_20px_-4px_var(--glow-accent)]",
+    props.variant === "outline" &&
+      "border border-border bg-transparent text-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-foreground",
+    props.variant === "ghost" && "text-foreground hover:bg-foreground/5",
+    props.class,
+  ),
+);
 </script>
 
 <template>

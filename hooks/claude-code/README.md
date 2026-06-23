@@ -6,7 +6,7 @@ This directory contains the scryrs reference hook for Claude Code — a thin Jav
 
 The hook (`scryrs-hook.mjs`) is a Claude Code PreToolUse hook module. It:
 
-1. **Intercepts** nine Claude Code tools: Read, Bash, Grep, Glob, Edit, Write, NotebookEdit, WebSearch, WebFetch.
+1. **Intercepts** eight Claude Code tools by default: Read, Grep, Glob, Edit, Write, NotebookEdit, WebSearch, WebFetch. **Bash is not captured by default** — it is re-enabled only when `SCRYRS_DEBUG` is set to a non-empty value.
 2. **Maps** each tool invocation to a scryrs `TraceEvent` with the canonical schema.
 3. **Forwards** the event as newline-delimited JSON to `scryrs record --stdin`.
 4. **Stays invisible** — the hook never alters the original tool's stdout, stderr, or exit status. It is a pure observer.
@@ -56,7 +56,9 @@ scripts/verify-trace-capture --claude-only
 This builds the real `scryrs` binary and exercises the hook against it in a
 Docker-backed environment (no host Node.js required). It verifies:
 
-- JSON shaping for all nine whitelisted tools
+- JSON shaping for all eight default whitelisted tools (Bash excluded)
+- Default mode: Bash is not captured
+- Debug mode (`SCRYRS_DEBUG=1`): Bash is captured as `CommandExecuted`
 - Event persistence to `.scryrs/scryrs.db` with canonical `TraceEvent` envelope shape
 - Non-interference: hook produces zero stdout/stderr
 - Fail-open: hook returns `{continue: true}` when scryrs is missing
@@ -73,9 +75,11 @@ logic without building the Rust binary.
 
 ## Rewrite-tool compatibility
 
-### Capture point: PreToolUse
+### Bash capture is debug-gated
 
-The Claude Code hook captures Bash commands from `tool_input.command` during the **PreToolUse** event — before the tool executes. Whatever command string the harness presents at the time the scryrs hook runs in the PreToolUse pipeline is recorded as `CommandExecuted.payload.command` exactly as observed.
+Bash is **not captured by default**. Set `SCRYRS_DEBUG` to any non-empty value to re-enable Bash tracing for diagnostic sessions.
+
+When Bash capture is enabled, the Claude Code hook captures Bash commands from `tool_input.command` during the **PreToolUse** event — before the tool executes. Whatever command string the harness presents at the time the scryrs hook runs in the PreToolUse pipeline is recorded as `CommandExecuted.payload.command` exactly as observed.
 
 ### Hook-order dependence
 
@@ -87,7 +91,7 @@ Co-installed rewrite hooks (e.g., RTK) **can change** what scryrs observes, depe
 
 Hook order is determined by the consumer's `.claude/settings.json` hook configuration. scryrs does not control or enforce hook ordering.
 
-### What is NOT guaranteed
+### What is NOT guaranteed (when Bash capture is enabled)
 
 - `CommandExecuted.payload.command` **is not guaranteed** to preserve the original agent-entered command. It records whichever command string PreToolUse presents when scryrs runs.
 - The single-string `CommandExecutedPayload` schema **cannot** preserve both original and rewritten commands in one event.
@@ -95,12 +99,13 @@ Hook order is determined by the consumer's `.claude/settings.json` hook configur
 
 ## Tool-to-Event Mapping
 
-The nine intercepted Claude Code tools map to scryrs event families as follows:
+Eight Claude Code tools are intercepted by default. Bash interception is debug-gated and only active when `SCRYRS_DEBUG` is set to a non-empty value.
+
+### Default intercepted tools
 
 | Claude Code Tool | TraceEvent `event_type` | Payload Field | Description |
 |---|---|---|---|
 | `Read` | `FileOpened` | `path` | File path from tool input |
-| `Bash` | `CommandExecuted` | `command` | Command string from tool input |
 | `Grep` | `SearchRun` | `query` | Search pattern from tool input |
 | `Glob` | `SearchRun` | `query` | Glob pattern from tool input |
 | `Edit` | `EditMade` | `target` | File path from tool input |
@@ -108,6 +113,12 @@ The nine intercepted Claude Code tools map to scryrs event families as follows:
 | `NotebookEdit` | `EditMade` | `target` | File path from tool input |
 | `WebSearch` | `SearchRun` | `query` | Search term from tool input |
 | `WebFetch` | `DocRetrieved` | `doc_ref` | URL from tool input |
+
+### Debug-only tool
+
+| Claude Code Tool | Capture mode | TraceEvent `event_type` | Payload Field | Description |
+|---|---|---|---|---|
+| `Bash` | debug-only (`SCRYRS_DEBUG`) | `CommandExecuted` | `command` | Command string from tool input |
 
 Each event carries `tool_name` set to the original Claude Code tool name (e.g., `"bash"`, `"web_search"`).
 

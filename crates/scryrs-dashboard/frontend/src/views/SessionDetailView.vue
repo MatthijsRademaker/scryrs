@@ -1,34 +1,114 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
 import { useRoute } from "vue-router";
-import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, EmptyState } from "@/shared/ui";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, ConstellationGraph, EmptyState, EventSparkline } from "@/shared/ui";
 import { useSessionStore } from "@/stores/sessions";
+import { colorForKey } from "@/shared/lib/viz";
 
 const route = useRoute();
 const store = useSessionStore();
 const sessionId = computed(() => String(route.params.sessionId));
+const shortId = computed(() => (sessionId.value.length > 18 ? `${sessionId.value.slice(0, 18)}…` : sessionId.value));
+
+const eventTypeCounts = computed(() => {
+  const counts: Record<string, number> = {};
+  for (const event of store.detail?.events ?? []) {
+    counts[event.eventType] = (counts[event.eventType] ?? 0) + 1;
+  }
+  return counts;
+});
+const constellationNodes = computed(() =>
+  Object.entries(eventTypeCounts.value).map(([type, count]) => ({ id: type, label: type, weight: count })),
+);
+
+// Real activity series: bucket event timestamps across the session's span.
+const sparkValues = computed(() => {
+  const times = (store.detail?.events ?? [])
+    .map((event) => Date.parse(event.timestamp))
+    .filter((t) => !Number.isNaN(t));
+  if (times.length === 0) return [store.detail?.events.length ?? 0];
+  const min = Math.min(...times);
+  const max = Math.max(...times);
+  if (max === min) return [times.length];
+  const bins = Math.min(16, Math.max(4, times.length));
+  const out = new Array(bins).fill(0);
+  for (const t of times) {
+    const idx = Math.min(bins - 1, Math.floor(((t - min) / (max - min)) * bins));
+    out[idx] += 1;
+  }
+  return out;
+});
+
 onMounted(() => { void store.loadSession(sessionId.value); });
-function payloadPreview(payload: unknown) { return JSON.stringify(payload)?.slice(0, 160) ?? "null"; }
+function payloadPreview(payload: unknown) { return JSON.stringify(payload)?.slice(0, 200) ?? "null"; }
 </script>
 <template>
   <div class="flex flex-col gap-6">
-    <Card>
-      <CardHeader><CardTitle>Session {{ sessionId }}</CardTitle><CardDescription>Scrollable event timeline and payload preview.</CardDescription></CardHeader>
-      <CardContent v-if="store.error"><EmptyState title="Session unavailable" :description="store.error" /></CardContent>
-      <CardContent v-else-if="store.detail" class="grid gap-4 md:grid-cols-3">
-        <div class="rounded-lg border bg-muted p-4"><div class="text-sm text-muted-foreground">Started</div><div class="font-medium">{{ store.detail.session.startedAt }}</div></div>
-        <div class="rounded-lg border bg-muted p-4"><div class="text-sm text-muted-foreground">Ended</div><div class="font-medium">{{ store.detail.session.endedAt ?? 'Active' }}</div></div>
-        <div class="rounded-lg border bg-muted p-4"><div class="text-sm text-muted-foreground">Events</div><div class="font-medium">{{ store.detail.session.eventCount }}</div></div>
-      </CardContent>
+    <header class="flex flex-col gap-1">
+      <h1 class="truncate font-mono text-2xl font-semibold tracking-tight" :title="sessionId">{{ shortId }}</h1>
+      <p class="text-sm text-muted-foreground">Event timeline and payload preview.</p>
+    </header>
+
+    <Card v-if="store.error">
+      <CardContent class="p-6"><EmptyState title="Session unavailable" :description="store.error" /></CardContent>
     </Card>
-    <Card v-if="store.detail">
-      <CardHeader><CardTitle>Events</CardTitle><CardDescription>Raw trace events captured for this session.</CardDescription></CardHeader>
-      <CardContent><div class="max-h-[36rem] overflow-auto rounded-lg border">
-        <div v-for="event in store.detail.events" :key="event.eventId" class="border-b p-4 last:border-b-0">
-          <div class="flex flex-wrap items-center gap-2"><Badge>{{ event.eventType }}</Badge><span class="text-sm text-muted-foreground">{{ event.timestamp }}</span><span class="text-sm">{{ event.subject ?? 'lifecycle' }}</span></div>
-          <pre class="mt-2 overflow-auto rounded-md bg-muted p-3 text-xs">{{ payloadPreview(event.payload) }}</pre>
+
+    <template v-else-if="store.detail">
+      <!-- Glass stat tiles -->
+      <section class="grid gap-4 md:grid-cols-3">
+        <div class="glass-surface rounded-xl p-4">
+          <div class="text-sm text-muted-foreground">Started</div>
+          <div class="mt-1 text-sm font-medium">{{ store.detail.session.startedAt }}</div>
         </div>
-      </div></CardContent>
-    </Card>
+        <div class="glass-surface rounded-xl p-4">
+          <div class="flex items-center gap-2 text-sm text-muted-foreground">
+            Ended
+            <span v-if="store.detail.session.endedAt === null" class="inline-flex items-center gap-1.5 text-primary">
+              <span class="size-1.5 rounded-full bg-primary pulse-dot"></span>active
+            </span>
+          </div>
+          <div class="mt-1 text-sm font-medium">{{ store.detail.session.endedAt ?? '—' }}</div>
+        </div>
+        <div class="glass-surface rounded-xl p-4">
+          <div class="text-sm text-muted-foreground">Events</div>
+          <div class="mt-1 flex items-center justify-between gap-2">
+            <span class="text-2xl font-semibold tabular-nums">{{ store.detail.session.eventCount }}</span>
+            <EventSparkline :values="sparkValues" :width="120" :height="32" />
+          </div>
+        </div>
+      </section>
+
+      <!-- Constellation of related event types -->
+      <Card v-if="constellationNodes.length">
+        <CardHeader><CardTitle>Event Constellation</CardTitle><CardDescription>Event types captured in this session; node glow scales with volume.</CardDescription></CardHeader>
+        <CardContent>
+          <ConstellationGraph :nodes="constellationNodes" :center-label="shortId" :height="260" />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Events</CardTitle><CardDescription>Raw trace events captured for this session.</CardDescription></CardHeader>
+        <CardContent>
+          <ul class="flex max-h-[36rem] flex-col gap-1.5 overflow-auto rounded-xl border border-border bg-card/20 p-2 font-mono text-xs">
+            <li
+              v-for="event in store.detail.events"
+              :key="event.eventId"
+              class="rounded-md border-l-2 bg-foreground/[0.02] px-3 py-2"
+              :style="{ borderLeftColor: colorForKey(event.eventType) }"
+            >
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span class="inline-flex items-center gap-1.5 font-medium" :style="{ color: colorForKey(event.eventType) }">
+                  <span class="size-1.5 rounded-full" :style="{ backgroundColor: colorForKey(event.eventType) }"></span>
+                  {{ event.eventType }}
+                </span>
+                <span class="text-muted-foreground">{{ event.timestamp }}</span>
+                <span class="text-foreground/80">{{ event.subject ?? 'lifecycle' }}</span>
+              </div>
+              <pre class="mt-1 overflow-hidden whitespace-pre-wrap break-all text-[0.7rem] text-muted-foreground">{{ payloadPreview(event.payload) }}</pre>
+            </li>
+          </ul>
+        </CardContent>
+      </Card>
+    </template>
   </div>
 </template>

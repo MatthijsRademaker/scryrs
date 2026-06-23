@@ -37,7 +37,6 @@
       "referenceSource": "hooks/claude-code/scryrs-hook.mjs",
       "interceptedTools": [
         "read",
-        "bash",
         "grep",
         "glob",
         "edit",
@@ -46,13 +45,18 @@
         "web_search",
         "web_fetch"
       ],
-      "_interceptedToolsNote": "Observational metadata — these are tool names observed by the hook, not a callable surface.",
+      "debugOnlyInterceptedTools": [
+        "bash"
+      ],
+      "_interceptedToolsNote": "Observational metadata — these are tool names observed by the hook, not a callable surface. debugOnlyInterceptedTools are only captured when SCRYRS_DEBUG is set to a non-empty value.",
       "capturedEventFamilies": [
         "FileOpened",
-        "CommandExecuted",
         "SearchRun",
         "EditMade",
         "DocRetrieved"
+      ],
+      "debugOnlyCapturedEventFamilies": [
+        "CommandExecuted"
       ],
       "lifecycle": "none",
       "capturedLifecycleEvents": [],
@@ -63,20 +67,24 @@
       "referenceSource": "hooks/pi/index.ts",
       "interceptedTools": [
         "read",
-        "bash",
         "ast_grep_search",
         "lsp_navigation",
         "edit",
         "write"
       ],
-      "_interceptedToolsNote": "Observational metadata — these are tool names observed by the hook, not a callable surface.",
+      "debugOnlyInterceptedTools": [
+        "bash"
+      ],
+      "_interceptedToolsNote": "Observational metadata — these are tool names observed by the hook, not a callable surface. debugOnlyInterceptedTools are only captured when SCRYRS_DEBUG is set to a non-empty value.",
       "capturedEventFamilies": [
         "FileOpened",
-        "CommandExecuted",
         "SearchRun",
         "EditMade",
         "SymbolInspected",
         "FailedLookup"
+      ],
+      "debugOnlyCapturedEventFamilies": [
+        "CommandExecuted"
       ],
       "lifecycle": "session_start_only",
       "capturedLifecycleEvents": [

@@ -31,12 +31,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const ROOT = join(__dirname, "..", "..");
 const HOOK_FILE = join(ROOT, "hooks", "claude-code", "scryrs-hook.mjs");
-const SCRYRS_BIN = process.env.SCRYRS_BIN || join(ROOT, "target", "release", "scryrs");
+const SCRYRS_BIN =
+	process.env.SCRYRS_BIN || join(ROOT, "target", "release", "scryrs");
 
 // -----------------------------------------------------------------------
 // Helper: invoke the hook as a subprocess
 // -----------------------------------------------------------------------
-function invokeHook(toolName, toolInput, workDir) {
+function invokeHook(toolName, toolInput, workDir, envOverrides = {}) {
 	const tmpDir = join(
 		tmpdir(),
 		`scryrs-cc-e2e-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -53,7 +54,7 @@ function invokeHook(toolName, toolInput, workDir) {
 
 	writeFileSync(scriptFile, code);
 
-	const env = { ...process.env };
+	const env = { ...process.env, ...envOverrides };
 	// Ensure scryrs is on PATH
 	const scryrsDir = dirname(SCRYRS_BIN);
 	env.PATH = `${scryrsDir}:${workDir || ""}:${env.PATH || ""}`;
@@ -89,7 +90,7 @@ function invokeHook(toolName, toolInput, workDir) {
 }
 
 // -----------------------------------------------------------------------
-// Test: JSON shaping — all nine tools against real scryrs
+// Test: JSON shaping — default observer-first tools against real scryrs
 // -----------------------------------------------------------------------
 async function testJsonShaping() {
 	console.log(
@@ -110,6 +111,7 @@ async function testJsonShaping() {
 		});
 	} catch {}
 
+	// Default observer-first tools (Bash excluded)
 	const tools = [
 		{
 			name: "read",
@@ -117,13 +119,6 @@ async function testJsonShaping() {
 			expectedType: "FileOpened",
 			payloadKey: "path",
 			payloadVal: "/src/main.rs",
-		},
-		{
-			name: "bash",
-			input: { command: "cargo build" },
-			expectedType: "CommandExecuted",
-			payloadKey: "command",
-			payloadVal: "cargo build",
 		},
 		{
 			name: "grep",
@@ -225,6 +220,140 @@ async function testJsonShaping() {
 }
 
 // -----------------------------------------------------------------------
+// Test: Default mode does NOT capture Bash
+// -----------------------------------------------------------------------
+async function testDefaultModeExcludesBash() {
+	console.log(
+		`\n\x1b[33m--- Claude Code: Default Mode Excludes Bash ---\x1b[0m`,
+	);
+
+	const tmpDir = join(tmpdir(), `scryrs-cc-e2e-nobash-${Date.now()}`);
+	mkdirSync(tmpDir, { recursive: true });
+
+	const realScryrs = SCRYRS_BIN;
+	try {
+		execFileSync(realScryrs, ["init"], {
+			cwd: tmpDir,
+			timeout: 5000,
+			stdio: "ignore",
+		});
+	} catch {}
+
+	// Invoke Bash hook path WITHOUT SCRYRS_DEBUG
+	const env = { ...process.env };
+	delete env.SCRYRS_DEBUG;
+	const { result } = invokeHook("bash", { command: "cargo build" }, tmpDir);
+
+	if (!result || !result.continue) {
+		fail("Claude Code no-bash: hook return", "did not return {continue:true}");
+		rmSync(tmpDir, { recursive: true, force: true });
+		return;
+	}
+	pass("Claude Code no-bash: hook returned {continue:true}");
+
+	// Assert no Bash event persisted
+	const eventsDb = join(tmpDir, ".scryrs", "scryrs.db");
+	const events = readEventsDb(eventsDb);
+	const bashEvents = events.filter((e) => e.event_type === "CommandExecuted");
+
+	if (bashEvents.length === 0) {
+		pass("Claude Code no-bash: no CommandExecuted event persisted");
+	} else {
+		fail(
+			"Claude Code no-bash",
+			`expected 0 Bash events, got ${bashEvents.length}`,
+		);
+	}
+
+	rmSync(tmpDir, { recursive: true, force: true });
+}
+
+// -----------------------------------------------------------------------
+// Test: Debug mode captures Bash as CommandExecuted
+// -----------------------------------------------------------------------
+async function testDebugModeCapturesBash() {
+	console.log(`\n\x1b[33m--- Claude Code: Debug Mode Captures Bash ---\x1b[0m`);
+
+	const tmpDir = join(tmpdir(), `scryrs-cc-e2e-debugbash-${Date.now()}`);
+	mkdirSync(tmpDir, { recursive: true });
+
+	const realScryrs = SCRYRS_BIN;
+	try {
+		execFileSync(realScryrs, ["init"], {
+			cwd: tmpDir,
+			timeout: 5000,
+			stdio: "ignore",
+		});
+	} catch {}
+
+	// Invoke Bash WITH SCRYRS_DEBUG=1, using RTK-prefixed command
+	const env = { ...process.env, SCRYRS_DEBUG: "1" };
+	const tmpInvokeDir = join(
+		tmpdir(),
+		`scryrs-cc-e2e-debug-invoke-${Date.now()}`,
+	);
+	mkdirSync(tmpInvokeDir, { recursive: true });
+	const scriptFile = join(tmpInvokeDir, "invoke-debug.mjs");
+
+	const code = [
+		`import hook from ${JSON.stringify(HOOK_FILE)};`,
+		`const input = { tool_name: "bash", tool_input: { command: "rtk ls -la" } };`,
+		`const result = await hook(input);`,
+		`console.log(JSON.stringify(result));`,
+	].join("\n");
+	writeFileSync(scriptFile, code);
+
+	const scryrsDir = dirname(SCRYRS_BIN);
+	const fullEnv = {
+		...env,
+		PATH: `${scryrsDir}:${env.PATH || ""}`,
+	};
+
+	try {
+		execFileSync("node", [scriptFile], {
+			env: fullEnv,
+			cwd: tmpDir,
+			timeout: 15000,
+			encoding: "utf-8",
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+	} catch {}
+	rmSync(tmpInvokeDir, { recursive: true, force: true });
+
+	// Assert Bash event persisted with correct payload
+	const eventsDb = join(tmpDir, ".scryrs", "scryrs.db");
+	const events = readEventsDb(eventsDb);
+	const bashEvents = events.filter(
+		(e) => e.event_type === "CommandExecuted" && e.tool_name === "bash",
+	);
+
+	if (bashEvents.length !== 1) {
+		fail(
+			"Claude Code debug-bash: count",
+			`expected 1 Bash event, got ${bashEvents.length}`,
+		);
+	} else {
+		pass("Claude Code debug-bash: 1 CommandExecuted event persisted");
+	}
+
+	const rtkEvent = bashEvents.find((e) => e.payload?.command === "rtk ls -la");
+	if (rtkEvent) {
+		pass("Claude Code debug-bash: payload.command is 'rtk ls -la'");
+		const shapeOk = assertEventShape(rtkEvent, "CommandExecuted", "bash");
+		if (shapeOk) {
+			pass("Claude Code debug-bash: envelope shape correct");
+		}
+	} else {
+		fail(
+			"Claude Code debug-bash: payload",
+			`expected 'rtk ls -la', got: ${JSON.stringify(bashEvents.map((e) => e.payload?.command))}`,
+		);
+	}
+
+	rmSync(tmpDir, { recursive: true, force: true });
+}
+
+// -----------------------------------------------------------------------
 // Test: Rewrite-tool compatibility — RTK-style Bash commands
 // -----------------------------------------------------------------------
 async function testRewriteCompatibility() {
@@ -244,9 +373,11 @@ async function testRewriteCompatibility() {
 		});
 	} catch {}
 
-	// Fixture: RTK-prefixed Bash command
+	// Fixture: RTK-prefixed Bash command (debug-gated)
 	{
-		const { result } = invokeHook("bash", { command: "rtk ls -la" }, tmpDir);
+		const { result } = invokeHook("bash", { command: "rtk ls -la" }, tmpDir, {
+			SCRYRS_DEBUG: "1",
+		});
 		if (!result || !result.continue) {
 			fail("Claude Code RTK: hook return", "did not return {continue:true}");
 		} else {
@@ -254,7 +385,7 @@ async function testRewriteCompatibility() {
 		}
 	}
 
-	// Fixture: compound rewritten Bash command
+	// Fixture: compound rewritten Bash command (debug-gated)
 	{
 		const { result } = invokeHook(
 			"bash",
@@ -263,6 +394,7 @@ async function testRewriteCompatibility() {
 					'echo "=== BACKEND ===" && rtk ls backend/api/ && rtk ls backend/cmd/',
 			},
 			tmpDir,
+			{ SCRYRS_DEBUG: "1" },
 		);
 		if (!result || !result.continue) {
 			fail(
@@ -664,6 +796,8 @@ async function testPassthrough() {
 // -----------------------------------------------------------------------
 async function main() {
 	await testJsonShaping();
+	await testDefaultModeExcludesBash();
+	await testDebugModeCapturesBash();
 	await testRewriteCompatibility();
 	await testNonInterference();
 	await testFailOpen();

@@ -6,7 +6,9 @@ This document defines what harness integrators must capture, how to invoke `scry
 
 ## Purpose and Boundaries
 
-scryrs is a **trace-collection CLI**. It ingests structured JSONL trace events from agent coding sessions and persists them for downstream hotspot analysis, graph building, and knowledge proposals. It is never a tool executor, proxy, MCP server, or agent-callable business tool.
+scryrs is a **trace-collection CLI** built with an observer-first philosophy. It ingests structured JSONL trace events from agent coding sessions and persists them for downstream hotspot analysis, graph building, and knowledge proposals. It is never a tool executor, proxy, MCP server, or agent-callable business tool.
+
+**Default capture scope:** scryrs observes stable harness-native tools by default (file reads, edits, search, symbol inspection, document fetch). Bash command capture is **not part of default product behavior** — it is debug-gated behind `SCRYRS_DEBUG`. This keeps trace data focused on high-signal hotspot evidence rather than noisy shell commands.
 
 | In scope | Out of scope |
 |----------|--------------|
@@ -47,14 +49,16 @@ The design rule is: **scryrs can fail, tools cannot.**
 
 ### Harness-specific semantics
 
-Rewrite-tool co-installation behaves differently across harnesses. Integrators must understand these differences:
+Rewrite-tool co-installation behaves differently across harnesses, and Bash capture is only active when `SCRYRS_DEBUG` is set to a non-empty value. Integrators must understand these differences:
 
 | Harness | Capture point | What the hook sees |
 |---------|---------------|--------------------|
-| **Pi** | `tool_result` (post-execution) | `event.input.command` from the `tool_result` event — reflects whatever command string the harness presents after execution completes. If an upstream rewrite extension mutated the `tool_call` input, and the harness propagates that mutation into `tool_result`, scryrs records the rewritten form. |
-| **Claude Code** | PreToolUse (pre-execution) | `tool_input.command` from the PreToolUse event — reflects whatever command string the harness presents at the time the scryrs hook runs in the PreToolUse pipeline. Co-installed rewrite hooks can change this value depending on hook order. |
+| **Pi** | `tool_result` (post-execution) | `event.input.command` from the `tool_result` event — reflects whatever command string the harness presents after execution completes. If an upstream rewrite extension mutated the `tool_call` input, and the harness propagates that mutation into `tool_result`, scryrs records the rewritten form. **Only active when `SCRYRS_DEBUG` is set.** |
+| **Claude Code** | PreToolUse (pre-execution) | `tool_input.command` from the PreToolUse event — reflects whatever command string the harness presents at the time the scryrs hook runs in the PreToolUse pipeline. Co-installed rewrite hooks can change this value depending on hook order. **Only active when `SCRYRS_DEBUG` is set.** |
 
 ### Limitations
+
+**Bash command capture is debug-gated.** No `CommandExecuted` events are emitted by default. Set `SCRYRS_DEBUG` to any non-empty value to re-enable Bash tracing for diagnostic sessions. When enabled, `CommandExecuted.payload.command` records the command string observed by the hook at capture time — scryrs never rewrites, normalizes, canonicalizes, or reconstructs original agent intent.
 
 - **Hotspot subjects remain fragmented** between rewritten and non-rewritten commands (e.g., `ls -la` and `rtk ls -la` are distinct subjects). Command canonicalization remains a known limitation not scheduled for any current roadmap phase.
 - **Pi mutation propagation** from `tool_call` input mutations through to `tool_result` is an empirical assumption. If not yet verified, this behavior is presented as a limitation rather than a guarantee.
@@ -273,8 +277,8 @@ Three integration tiers exist, offering different levels of coverage and requiri
 
 **Implemented harness coverage:**
 
-- **Pi** — implemented at `hooks/pi/index.ts`. Pi's `.pi/extensions/` directory provides native hook support. Captures `SessionStart` and six tool-result events.
-- **Claude Code** — implemented at `hooks/claude-code/scryrs-hook.mjs`. Claude Code's PreToolUse hook system provides tool-execution interception. PreToolUse-only; no lifecycle events.
+- **Pi** — implemented at `hooks/pi/index.ts`. Pi's `.pi/extensions/` directory provides native hook support. Captures `SessionStart` and five default tool-result events (read, ast_grep_search, lsp_navigation, edit, write). Bash is debug-gated via `SCRYRS_DEBUG`.
+- **Claude Code** — implemented at `hooks/claude-code/scryrs-hook.mjs`. Claude Code's PreToolUse hook system provides tool-execution interception. Captures eight default PreToolUse events (Read, Grep, Glob, Edit, Write, NotebookEdit, WebSearch, WebFetch). Bash is debug-gated via `SCRYRS_DEBUG`. PreToolUse-only; no lifecycle events.
 
 ### Tier 2: Plugin
 

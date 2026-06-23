@@ -566,8 +566,8 @@ async function testDebugBreadcrumbs() {
 
 	assertContains(
 		trackedResult.stderr,
-		"[scryrs] stage=tool_result tool=bash tracked=true is_error=false input_keys=command",
-		"Pi debug: tracked tool breadcrumb",
+		"[scryrs] stage=tool_result tool=bash tracked=false is_error=false input_keys=command",
+		"Pi debug: bash (debug-gated) breadcrumb",
 	);
 	assertContains(
 		trackedResult.stderr,
@@ -722,7 +722,7 @@ async function testDebugBreadcrumbs() {
 }
 
 // -----------------------------------------------------------------------
-// Test: Successful capture — SessionStart + six tracked tools
+// Test: Successful capture — SessionStart + five default tracked tools
 // -----------------------------------------------------------------------
 async function testSuccessfulCapture() {
 	console.log(`\n\x1b[33m--- Pi: Successful Capture ---\x1b[0m`);
@@ -743,7 +743,7 @@ async function testSuccessfulCapture() {
 	}
 	pass("Pi SessionStart: hook invoked without error");
 
-	// 2. Emit tool_result for each of the six tracked tools
+	// 2. Emit tool_result for each of the five default tracked tools
 	const tools = [
 		{
 			name: "read",
@@ -751,13 +751,6 @@ async function testSuccessfulCapture() {
 			expectedType: "FileOpened",
 			payloadKey: "path",
 			payloadVal: "/src/main.rs",
-		},
-		{
-			name: "bash",
-			input: { command: "cargo build" },
-			expectedType: "CommandExecuted",
-			payloadKey: "command",
-			payloadVal: "cargo build",
 		},
 		{
 			name: "ast_grep_search",
@@ -813,13 +806,13 @@ async function testSuccessfulCapture() {
 
 	// 3. Assert scryrs.db (poll to avoid SessionStart fire-and-forget race)
 	const eventsDb = join(dir, ".scryrs", "scryrs.db");
-	const events = waitForEventCount(eventsDb, 7, 5000);
+	const events = waitForEventCount(eventsDb, 6, 5000);
 
-	// Should have SessionStart + 6 tool events = 7
-	if (events.length < 7) {
+	// Should have SessionStart + 5 tool events = 6
+	if (events.length < 6) {
 		fail(
 			"Pi events count",
-			`expected at least 7 events (SessionStart + 6 tools), got ${events.length}`,
+			`expected at least 6 events (SessionStart + 5 tools), got ${events.length}`,
 		);
 	} else {
 		pass(`Pi events count: ${events.length} events`);
@@ -1224,11 +1217,12 @@ async function testRewriteCompatibility() {
 	}
 	pass("Pi RTK: SessionStart invoked without error");
 
-	// 2a. Simple RTK-prefixed Bash command via tool_result
+	// 2a. Simple RTK-prefixed Bash command via tool_result (debug-gated)
 	const simpleResult = await runner.runToolResult(
 		"bash",
 		{ command: "rtk ls -la" },
 		false,
+		{ envOverrides: { SCRYRS_DEBUG: "1" } },
 	);
 	if (!simpleResult.ok) {
 		fail(
@@ -1265,13 +1259,14 @@ async function testRewriteCompatibility() {
 		}
 	}
 
-	// 2b. Compound rewritten Bash command via tool_result
+	// 2b. Compound rewritten Bash command via tool_result (debug-gated)
 	const compoundCmd =
 		'echo "=== BACKEND ===" && rtk ls backend/api/ && rtk ls backend/cmd/';
 	const compoundResult = await runner.runToolResult(
 		"bash",
 		{ command: compoundCmd },
 		false,
+		{ envOverrides: { SCRYRS_DEBUG: "1" } },
 	);
 	if (!compoundResult.ok) {
 		fail(
@@ -1366,12 +1361,144 @@ async function testRewriteCompatibility() {
 }
 
 // -----------------------------------------------------------------------
+// Test: Default mode excludes Bash
+// -----------------------------------------------------------------------
+async function testDefaultModeExcludesBash() {
+	console.log(`\n\x1b[33m--- Pi: Default Mode Excludes Bash ---\x1b[0m`);
+
+	const dir = tempDir();
+	const scryrsPath = SCRYRS_BIN;
+	const runner = createHookRunner(dir, scryrsPath);
+
+	// No SCRYRS_DEBUG — bash should not be captured
+	const trResult = await runner.runToolResult(
+		"bash",
+		{ command: "cargo build" },
+		false,
+	);
+
+	if (!trResult.ok) {
+		fail(
+			"Pi default-no-bash",
+			`hook invocation failed: ${trResult.stderr?.slice(0, 200)}`,
+		);
+		rmSync(dir, { recursive: true, force: true });
+		return;
+	}
+
+	const parsed = parseFixtureOutput(trResult.stdout);
+
+	// Handler should return undefined (non-interference)
+	if (parsed.result !== undefined) {
+		fail(
+			"Pi default-no-bash: handler return",
+			`expected undefined, got ${JSON.stringify(parsed.result)}`,
+		);
+	} else {
+		pass("Pi default-no-bash: handler returned undefined (non-interference)");
+	}
+
+	// No CommandExecuted event should be persisted
+	const eventsDb = join(dir, ".scryrs", "scryrs.db");
+	const events = readEventsDb(eventsDb);
+	const bashEvents = events.filter(
+		(e) => e.event_type === "CommandExecuted",
+	);
+
+	if (bashEvents.length === 0) {
+		pass("Pi default-no-bash: no CommandExecuted event persisted");
+	} else {
+		fail(
+			"Pi default-no-bash",
+			`expected 0 Bash events, got ${bashEvents.length}`,
+		);
+	}
+
+	rmSync(dir, { recursive: true, force: true });
+}
+
+// -----------------------------------------------------------------------
+// Test: Debug mode captures Bash as CommandExecuted
+// -----------------------------------------------------------------------
+async function testDebugModeCapturesBash() {
+	console.log(`\n\x1b[33m--- Pi: Debug Mode Captures Bash ---\x1b[0m`);
+
+	const dir = tempDir();
+	const scryrsPath = SCRYRS_BIN;
+	const runner = createHookRunner(dir, scryrsPath);
+
+	// Emit Bash with SCRYRS_DEBUG=1
+	const trResult = await runner.runToolResult(
+		"bash",
+		{ command: "rtk ls -la" },
+		false,
+		{ envOverrides: { SCRYRS_DEBUG: "1" } },
+	);
+
+	if (!trResult.ok) {
+		fail(
+			"Pi debug-bash",
+			`hook invocation failed: ${trResult.stderr?.slice(0, 200)}`,
+		);
+		rmSync(dir, { recursive: true, force: true });
+		return;
+	}
+
+	const parsed = parseFixtureOutput(trResult.stdout);
+
+	if (parsed.result !== undefined) {
+		fail(
+			"Pi debug-bash: handler return",
+			`expected undefined, got ${JSON.stringify(parsed.result)}`,
+		);
+	} else {
+		pass("Pi debug-bash: handler returned undefined (non-interference)");
+	}
+
+	// Assert CommandExecuted event persisted
+	const eventsDb = join(dir, ".scryrs", "scryrs.db");
+	const events = readEventsDb(eventsDb);
+	const bashEvents = events.filter(
+		(e) => e.event_type === "CommandExecuted" && e.tool_name === "bash",
+	);
+
+	if (bashEvents.length !== 1) {
+		fail(
+			"Pi debug-bash: count",
+			`expected 1 Bash event, got ${bashEvents.length}`,
+		);
+	} else {
+		pass("Pi debug-bash: 1 CommandExecuted event persisted");
+	}
+
+	const rtkEvent = bashEvents.find(
+		(e) => e.payload?.command === "rtk ls -la",
+	);
+	if (rtkEvent) {
+		pass("Pi debug-bash: payload.command is 'rtk ls -la'");
+		const shapeOk = assertEventShape(rtkEvent, "CommandExecuted", "bash");
+		if (shapeOk) {
+			pass("Pi debug-bash: envelope shape correct");
+		}
+	} else {
+		fail(
+			"Pi debug-bash: payload",
+			`expected 'rtk ls -la', got: ${JSON.stringify(bashEvents.map((e) => e.payload?.command))}`,
+		);
+	}
+
+	rmSync(dir, { recursive: true, force: true });
+}
+
+// -----------------------------------------------------------------------
 // Main
 // -----------------------------------------------------------------------
 async function main() {
 	await testDebugDisabledQuiet();
 	await testDebugBreadcrumbs();
 	await testSuccessfulCapture();
+	await testDefaultModeExcludesBash();
+	await testDebugModeCapturesBash();
 	await testRewriteCompatibility();
 	await testFailurePropagation();
 	await testFailOpenNonZeroExit();

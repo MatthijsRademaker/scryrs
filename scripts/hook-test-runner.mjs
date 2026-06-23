@@ -107,7 +107,9 @@ function cleanup(dir) {
 // 3.2 JSON Shaping
 // -----------------------------------------------------------------------
 async function testJsonShaping() {
-	header("JSON Shaping — verify hook output shape for all nine tools");
+	header(
+		"JSON Shaping — verify hook output shape for all eight default tools (Bash excluded)",
+	);
 
 	// Create a fake scryrs that captures stdin to a file
 	const tmpDir = join(tmpdir(), `scryrs-hook-test-${Date.now()}`);
@@ -128,13 +130,6 @@ async function testJsonShaping() {
 			expectedType: "FileOpened",
 			payloadKey: "path",
 			payloadVal: "/src/main.rs",
-		},
-		{
-			name: "bash",
-			input: { command: "cargo build" },
-			expectedType: "CommandExecuted",
-			payloadKey: "command",
-			payloadVal: "cargo build",
 		},
 		{
 			name: "grep",

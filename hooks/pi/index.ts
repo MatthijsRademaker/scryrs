@@ -57,10 +57,11 @@ const DEBUG_PREVIEW_LIMIT = 200;
 
 type DebugMode = "off" | "debug" | "wire" | "raw";
 
-// — the six Pi tools this hook tracks —
+// — default observer-first Pi tools this hook tracks —
+// Bash is excluded from default capture; re-enabled only when SCRYRS_DEBUG
+// is set to a non-empty value (see tool_result handler).
 const TRACKED_TOOLS = new Set([
 	"read",
-	"bash",
 	"ast_grep_search",
 	"lsp_navigation",
 	"edit",
@@ -364,7 +365,11 @@ export default function (pi: ExtensionAPI) {
 			});
 		}
 
-		if (!tracked) {
+		// Bash is debug-gated: skip unless SCRYRS_DEBUG is set to a non-empty value.
+		const bashDebugEnabled =
+			toolName === "bash" && (process.env.SCRYRS_DEBUG ?? "").trim() !== "";
+
+		if (!tracked && !bashDebugEnabled) {
 			return undefined;
 		}
 

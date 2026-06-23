@@ -26,10 +26,11 @@ const SCHEMA_VERSION = "0.1.0";
 /** Maximum wall-clock time (ms) allowed for a single `scryrs record` invocation. */
 const SCRYRS_TIMEOUT_MS = 5000;
 
-/** Claude Code tools the hook intercepts. */
+/** Claude Code tools the hook intercepts by default (observer-first).
+ * Bash is excluded from default capture; re-enabled only when SCRYRS_DEBUG
+ * is set to a non-empty value (see default export). */
 const WHITELIST = new Set([
 	"read",
-	"bash",
 	"grep",
 	"glob",
 	"edit",
@@ -342,8 +343,12 @@ function forwardToScryrs(eventJson) {
 export default async function (input) {
 	const toolName = (input?.tool_name ?? "").toLowerCase();
 
+	// Bash is debug-gated: only intercept when SCRYRS_DEBUG is set to a non-empty value.
+	const bashDebugEnabled =
+		toolName === "bash" && (process.env.SCRYRS_DEBUG ?? "").trim() !== "";
+
 	// Pass through tools not in the whitelist — no trace event emitted.
-	if (!WHITELIST.has(toolName)) {
+	if (!WHITELIST.has(toolName) && !bashDebugEnabled) {
 		return { continue: true };
 	}
 

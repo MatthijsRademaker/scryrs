@@ -27,6 +27,12 @@ Phase 2 hotspot materialization is delivered: `scryrs hotspots <PATH>` opens `.s
 
 Key scope rule: **do not build later-suite features on placeholder ingest paths**. Every later phase depends on deterministic evidence collected by earlier phases.
 
+## Observer-First Product Boundary
+
+scryrs currently positions itself as an **observer-first hotspot detector** focused on stable, high-signal harness-native tool signals. Default trace capture covers file reads, edits, search/navigation, symbol inspection, and document retrieval. Bash command capture is **not default product behavior** — it is debug-gated behind `SCRYRS_DEBUG` to keep default trace data focused on actionable hotspot evidence rather than noisy shell commands.
+
+Future runtime optimizer/rewrite behavior (modeled on RTK-style command rewriting) is explicitly deferred to later phases. It may consume scryrs evidence once the observer-first foundation has proven itself, but it is **not current implementation scope**.
+
 ## First Usable Product Boundary
 
 First honest product cut is not "scryrs can publish docs." First honest cut is:
@@ -75,6 +81,7 @@ Hard non-goals for this phase (still deferred):
 - scryrs must not proxy tool execution itself.
 - scryrs must not become an MCP server or callable business tool.
 - hooks must not contain business logic beyond formatting plus subprocess delegation.
+- **Bash command capture is debug-gated.** Default trace scope covers stable native tools only (reads, edits, search/navigation, symbol inspection, document retrieval). Bash is excluded from default capture and re-enabled only via `SCRYRS_DEBUG`.
 
 ## Phase 2 - Hotspot Materialization ✅ Delivered
 
@@ -171,6 +178,16 @@ Required deliverables:
 - Stable reason strings pointing back to graph links, hotspot evidence, and approved docs outputs.
 
 This phase is when future agents should start reading less junk and loading more relevant context.
+
+## Future Direction: Runtime Optimizer (RTK-style Rewrite)
+
+A runtime optimizer/rewrite layer modeled on RTK-style command rewriting is a **later-phase optional capability**, not current implementation scope. The concept:
+
+- After observer-first evidence collection proves stable and actionable, downstream optimizer work could consume scryrs evidence to rewrite, optimize, or redirect agent commands.
+- This would be a separate phase building on Phase 7 (Runtime Retrieval) or beyond, run as an opt-in session feature rather than default behavior.
+- RTK-style command prefixes, compound commands, and rewrite semantics are understood limitations of the current `CommandExecutedPayload` schema. A future optimizer phase would require schema extensions, richer command metadata, and validated hook-order guarantees that are explicitly out of scope for current phases.
+
+This direction is documented as strategic intent only. No implementation, schema changes, or execution middleware should be built toward this direction until prior phases (observer capture → hotspots → dashboard → graph → proposals → adapters → runtime retrieval) are complete and stable.
 
 ## Phase 8 - Optional LLM Layer
 

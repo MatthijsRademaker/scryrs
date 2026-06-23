@@ -1,10 +1,12 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-@custom-variant dark (&:is(.dark *));
+/* Light theme is a secondary fallback; opt-in via `.light` on the root element. */
+@custom-variant light (&:is(.light *));
 
 @theme inline {
   --font-sans: Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -35,6 +37,9 @@
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-accent: var(--sidebar-accent);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-flame-from: var(--flame-from);
+  --color-flame-via: var(--flame-via);
+  --color-flame-to: var(--flame-to);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -42,21 +47,83 @@
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
+  --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+   Dark-first identity (default). Derived from the scryrs logo: a deep
+   midnight-navy field, glowing cyan constellation, and a warm flame heat.
+   ────────────────────────────────────────────────────────────────────────── */
 :root {
+  --background: oklch(0.16 0.03 256);
+  --foreground: oklch(0.96 0.012 247);
+  --card: oklch(0.22 0.032 256);
+  --card-foreground: var(--foreground);
+  --primary: oklch(0.72 0.15 233);
+  --primary-foreground: oklch(0.15 0.03 256);
+  --secondary: oklch(0.27 0.03 256);
+  --secondary-foreground: oklch(0.95 0.01 247);
+  --muted: oklch(0.25 0.026 256);
+  --muted-foreground: oklch(0.69 0.022 248);
+  --accent: oklch(0.72 0.15 233);
+  --accent-foreground: oklch(0.15 0.03 256);
+  --destructive: oklch(0.64 0.2 20);
+  --destructive-foreground: oklch(0.98 0.01 20);
+  --warning: oklch(0.8 0.15 75);
+  --warning-foreground: oklch(0.2 0.03 256);
+  --warning-soft: color-mix(in oklch, var(--warning) 22%, var(--card));
+  --success: oklch(0.74 0.16 158);
+  --success-foreground: oklch(0.16 0.03 256);
+  --success-soft: color-mix(in oklch, var(--success) 20%, var(--card));
+  --info: oklch(0.71 0.14 235);
+  --info-foreground: oklch(0.16 0.03 256);
+  --info-soft: color-mix(in oklch, var(--info) 20%, var(--card));
+  --border: oklch(0.7 0.04 250 / 0.16);
+  --input: oklch(0.7 0.04 250 / 0.22);
+  --ring: oklch(0.72 0.15 233);
+  --sidebar: oklch(0.18 0.03 257);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-accent: oklch(0.3 0.06 233);
+  --sidebar-accent-foreground: oklch(0.96 0.01 247);
+  --chart-1: var(--primary);
+  --chart-2: var(--info);
+  --chart-3: var(--success);
+  --chart-4: var(--warning);
+  --radius: 0.75rem;
+
+  /* Flame — reserved exclusively for hotspot heat. */
+  --flame-from: oklch(0.58 0.21 25);
+  --flame-via: oklch(0.72 0.2 55);
+  --flame-to: oklch(0.87 0.16 90);
+  --flame: linear-gradient(90deg, var(--flame-from), var(--flame-via) 55%, var(--flame-to));
+
+  /* Per-state glow colors (additive decoration only — never the sole state cue). */
+  --glow-accent: oklch(0.72 0.15 233 / 0.55);
+  --glow-hot: oklch(0.72 0.2 55 / 0.6);
+  --glow-ok: oklch(0.74 0.16 158 / 0.5);
+  --glow-err: oklch(0.64 0.2 20 / 0.5);
+
+  /* Ambient aurora echoing the logo's lens — one per view, behind content. */
+  --aurora-1: oklch(0.72 0.15 233 / 0.2);
+  --aurora-2: oklch(0.55 0.18 285 / 0.14);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Light theme — maintained, calmer fallback (not a second art direction).
+   ────────────────────────────────────────────────────────────────────────── */
+.light {
   --background: oklch(0.98 0.006 248);
   --foreground: oklch(0.18 0.026 258);
   --card: oklch(1 0 0);
   --card-foreground: var(--foreground);
-  --primary: oklch(0.45 0.13 250);
+  --primary: oklch(0.5 0.15 245);
   --primary-foreground: oklch(0.99 0 0);
   --secondary: oklch(0.94 0.012 248);
   --secondary-foreground: var(--foreground);
   --muted: oklch(0.93 0.01 248);
   --muted-foreground: oklch(0.47 0.026 258);
-  --accent: oklch(0.90 0.024 250);
-  --accent-foreground: var(--foreground);
+  --accent: oklch(0.5 0.15 245);
+  --accent-foreground: oklch(0.99 0 0);
   --destructive: oklch(0.58 0.21 25);
   --destructive-foreground: oklch(0.99 0 0);
   --warning: oklch(0.75 0.16 75);
@@ -68,18 +135,20 @@
   --info: oklch(0.58 0.16 245);
   --info-foreground: oklch(0.99 0 0);
   --info-soft: color-mix(in oklch, var(--info) 16%, var(--card));
-  --border: oklch(0.87 0.012 248);
-  --input: var(--border);
+  --border: oklch(0.55 0.02 258 / 0.22);
+  --input: oklch(0.55 0.02 258 / 0.3);
   --ring: var(--primary);
-  --sidebar: oklch(0.21 0.028 258);
-  --sidebar-foreground: oklch(0.96 0.004 248);
-  --sidebar-accent: oklch(0.28 0.034 258);
-  --sidebar-accent-foreground: var(--sidebar-foreground);
-  --chart-1: var(--primary);
-  --chart-2: var(--info);
-  --chart-3: var(--success);
-  --chart-4: var(--warning);
-  --radius: 0.75rem;
+  --sidebar: oklch(0.97 0.008 248);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-accent: oklch(0.9 0.04 245);
+  --sidebar-accent-foreground: var(--foreground);
+
+  --glow-accent: oklch(0.5 0.15 245 / 0.3);
+  --glow-hot: oklch(0.7 0.18 55 / 0.35);
+  --glow-ok: oklch(0.62 0.16 150 / 0.3);
+  --glow-err: oklch(0.58 0.21 25 / 0.3);
+  --aurora-1: oklch(0.6 0.14 245 / 0.1);
+  --aurora-2: oklch(0.7 0.12 285 / 0.08);
 }
 
 @layer base {
@@ -93,5 +162,106 @@
 
   a {
     @apply underline-offset-4;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Material & motion utilities. Glass surfaces convey elevation; the "scry"
+   entrance and glow are the shared motion vocabulary (~200–400ms, ease-out).
+   ────────────────────────────────────────────────────────────────────────── */
+@layer components {
+  /* Frosted-glass surface: translucent fill + blur + hairline + layered shadow.
+     Falls back to a solid-ish translucent fill where backdrop-filter is absent. */
+  .glass-surface {
+    background-color: color-mix(in oklch, var(--card) 72%, transparent);
+    border: 1px solid var(--border);
+    box-shadow:
+      inset 0 1px 0 0 oklch(1 0 0 / 0.05),
+      0 18px 44px -28px oklch(0 0 0 / 0.75);
+  }
+
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    .glass-surface {
+      background-color: color-mix(in oklch, var(--card) 58%, transparent);
+      -webkit-backdrop-filter: blur(16px) saturate(140%);
+      backdrop-filter: blur(16px) saturate(140%);
+    }
+  }
+
+  /* Single ambient aurora/lens glow — placed once behind a view's content. */
+  .aurora {
+    background-image:
+      radial-gradient(60% 50% at 78% 8%, var(--aurora-1), transparent 70%),
+      radial-gradient(50% 45% at 12% 0%, var(--aurora-2), transparent 70%);
+  }
+
+  /* Flame heat — exclusive to hotspot indicators. */
+  .bg-flame {
+    background-image: var(--flame);
+  }
+  .text-flame {
+    background-image: var(--flame);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Entrance + glow vocabulary. */
+  .scry-in {
+    animation: scry-in 280ms ease-out both;
+  }
+  .scry-glow {
+    animation:
+      scry-in 280ms ease-out both,
+      scry-glow 1100ms ease-out 1;
+  }
+}
+
+@keyframes scry-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scry-glow {
+  0% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+  28% {
+    box-shadow: 0 0 18px 1px var(--glow-accent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@keyframes scry-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 var(--glow-accent);
+  }
+  50% {
+    opacity: 0.65;
+    box-shadow: 0 0 0 4px oklch(0.72 0.15 233 / 0);
+  }
+}
+
+.pulse-dot {
+  animation: scry-pulse 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scry-in,
+  .scry-glow,
+  .pulse-dot,
+  * {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
   }
 }

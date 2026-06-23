@@ -18,8 +18,9 @@ Copy this directory (`hooks/pi/`) to one of Pi's trusted extension locations:
 
 Then reload Pi with `/reload` (or restart).
 
-Once installed every invocation of the six tracked Pi tools produces a
-corresponding entry in `.scryrs/scryrs.db` in the working directory.
+Once installed every invocation of the five default tracked Pi tools produces a
+corresponding entry in `.scryrs/scryrs.db` in the working directory. Bash
+tracing is opt-in via `SCRYRS_DEBUG` (see Debug logging below).
 
 ## Requirements
 
@@ -54,14 +55,23 @@ SCRYRS_DEBUG=wire node scripts/verification/pi-hook-e2e.mjs
 
 ## Tracked tools
 
+The hook captures five Pi tools by default (observer-first). Bash capture is **off by default** and re-enabled only when `SCRYRS_DEBUG` is set to a non-empty value.
+
+### Default tracked tools
+
 | Pi tool name | TraceEvent type | Payload type | Key field | Notes |
 |---|---|---|---|---|
 | `read` | `FileOpened` | `FileOpenedPayload` | `path` ← `event.input.path` | |
-| `bash` | `CommandExecuted` | `CommandExecutedPayload` | `command` ← `event.input.command` | |
 | `ast_grep_search` | `SearchRun` | `SearchRunPayload` | `query` ← `event.input?.query ?? "unknown"` | Defensive access (see below) |
 | `edit` | `EditMade` | `EditMadePayload` | `target` ← `event.input.path` | |
 | `write` | `EditMade` | `EditMadePayload` | `target` ← `event.input.path` | No `WriteMade` variant exists (see below) |
 | `lsp_navigation` | `SymbolInspected` (success) / `FailedLookup` (failure) | `SymbolInspectedPayload` / `FailedLookupPayload` | `name`/`subject` ← `event.input?.symbol ?? "unknown"` | Conditional on `event.isError` (see below) |
+
+### Debug-only tool
+
+| Pi tool name | Capture mode | TraceEvent type | Payload type | Key field | Notes |
+|---|---|---|---|---|---|
+| `bash` | debug-only (`SCRYRS_DEBUG`) | `CommandExecuted` | `CommandExecutedPayload` | `command` ← `event.input.command` | Not captured by default; set `SCRYRS_DEBUG=1` to enable |
 
 Events for any other tool are silently ignored.
 
@@ -95,16 +105,16 @@ Pi tool definitions** — Pi releases may rename tool arguments.
 
 ## Rewrite-tool compatibility
 
-### Capture point: `tool_result`
+### Bash capture is debug-gated
 
-The Pi hook captures Bash commands from `event.input.command` on `tool_result` — the post-execution event. Whatever command string the harness presents on `tool_result` is recorded as `CommandExecuted.payload.command` exactly as observed.
+Bash is **not captured by default**. Set `SCRYRS_DEBUG` to any non-empty value to re-enable Bash tracing for diagnostic sessions. When Bash capture is enabled, scryrs records `event.input.command` from `tool_result` — the post-execution event. Whatever command string the harness presents on `tool_result` is recorded as `CommandExecuted.payload.command` exactly as observed.
 
 This means:
 
 - If an upstream rewrite extension (e.g., RTK) transforms the `tool_call` input **and** the harness propagates that mutation into `tool_result`, scryrs records the rewritten form.
 - If the harness does **not** propagate `tool_call` mutations, scryrs records whatever command string `tool_result` carries — which may be the original agent-entered command.
 
-### Limitations
+### Limitations (when Bash capture is enabled)
 
 - **Mutation propagation is not verified.** Whether Pi propagates `tool_call` input mutations through to `tool_result` is an empirical question. Until confirmed, the observed-command behavior described above is a **limitation statement**, not a verified guarantee.
 - **Rewrite prefixes are persisted as-is.** Commands like `rtk ls -la` appear verbatim in traces. scryrs does not strip prefixes, normalize, or reconstruct original intent.
@@ -168,8 +178,10 @@ scripts/verify-trace-capture --pi-only
 This builds the real `scryrs` binary and verifies:
 
 - SessionStart lifecycle event emission and persistence
-- Tool event capture for all six tracked Pi tools with canonical
+- Tool event capture for all five default tracked Pi tools with canonical
   `TraceEvent` envelope shape
+- Default mode: Bash is not captured (observer-first)
+- Debug mode (`SCRYRS_DEBUG=1`): Bash is captured as `CommandExecuted`
 - Debug-disabled quiet behavior (`[scryrs]` and `[scryrs-record]` absent)
 - Debug-enabled breadcrumbs for hook load, session start, tracked/untracked
   tools, missing-field fallback, record send/result, and exec-failure paths
@@ -191,11 +203,13 @@ scripts/verify-trace-capture
 After installation, verify the hook works:
 
 1. Install the hook into Pi and restart.
-2. Invoke each of the six tracked tools (`read`, `bash`, `ast_grep_search`,
+2. Invoke each of the five default tracked tools (`read`, `ast_grep_search`,
    `lsp_navigation`, `edit`, `write`).
 3. Confirm `.scryrs/scryrs.db` contains a `SessionStart` event followed by
    the corresponding tool events.
-4. Move `scryrs` off `PATH` and invoke a tracked tool — confirm the tool result
+4. (Optional) Set `SCRYRS_DEBUG=1` and invoke `bash` — confirm a `CommandExecuted`
+   event is captured.
+5. Move `scryrs` off `PATH` and invoke a tracked tool — confirm the tool result
    is unchanged and `console.error` reports the scryrs failure.
 
 [scryrs-types]: ../../crates/scryrs-types/src/lib.rs
