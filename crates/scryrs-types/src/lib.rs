@@ -11,6 +11,11 @@ pub const SCHEMA_VERSION: &str = "0.1.0";
 /// `SCHEMA_VERSION` which governs trace event wire format.
 pub const HOTSPOT_SCHEMA_VERSION: &str = "1.0.0";
 
+/// Version for the live hotspot query response, independent of
+/// `SCHEMA_VERSION` (trace event wire format) and
+/// `HOTSPOT_SCHEMA_VERSION` (local report output).
+pub const LIVE_HOTSPOT_SCHEMA_VERSION: &str = "1.0.0";
+
 /// Suite component metadata used by feature-gated crates and CLI output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FeatureDescriptor {
@@ -226,7 +231,7 @@ pub struct FailedLookupPayload {
 
 /// Ranked hotspot entry carrying full evidence from deterministic analysis.
 #[allow(non_snake_case)]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HotspotEntry {
     pub rank: u32,
     pub subjectKind: String,
@@ -241,7 +246,7 @@ pub struct HotspotEntry {
 
 /// Per-event-type and per-outcome breakdown counts for a hotspot entry.
 #[allow(non_snake_case)]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HotspotCounts {
     pub eventType: HashMap<String, u32>,
     pub outcome: HashMap<String, u32>,
@@ -249,7 +254,7 @@ pub struct HotspotCounts {
 
 /// Ordered SQLite row ID references for all contributing events.
 #[allow(non_snake_case)]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HotspotEvidence {
     pub rowIds: Vec<u64>,
 }
@@ -278,6 +283,69 @@ pub struct RunMetadata {
     pub lastEventId: u64,
 }
 
+// --- Live hotspot server contract types (Phase 4) ---
+
+/// Versioned batch wrapper for trace events submitted to the live hotspot server.
+/// Carries submission-context identity fields and an array of per-event items.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerIngestEnvelope {
+    pub envelope_version: String,
+    pub repository_id: String,
+    pub workspace_id: String,
+    pub agent_id: String,
+    pub events: Vec<EnvelopeEvent>,
+}
+
+/// Per-event item within a `ServerIngestEnvelope`, pairing producer-scoped
+/// identity and timing metadata with the inner `TraceEvent`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EnvelopeEvent {
+    pub producer_event_id: String,
+    pub client_timestamp: String,
+    pub event: TraceEvent,
+}
+
+/// Acknowledgment status for a single event within a batch ingest response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventAckStatus {
+    /// First submission of this event — a new record was created.
+    Accepted,
+    /// Duplicate submission — already processed, no new record created.
+    Idempotent,
+}
+
+/// Per-event acknowledgment returned in `BatchIngestResponse`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventAck {
+    pub producer_event_id: String,
+    pub status: EventAckStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_event_id: Option<String>,
+    pub received_at: String,
+}
+
+/// JSON acknowledgment returned by `POST /v1/trace-events/batch`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BatchIngestResponse {
+    pub received_count: u64,
+    pub duplicate_count: u64,
+    pub events: Vec<EventAck>,
+    pub received_at: String,
+}
+
+/// Live hotspot query response envelope for `GET /v1/repositories/{id}/hotspots`.
+/// Separate from the local-only `HotspotsReport` — carries no filesystem-path fields.
+#[allow(non_snake_case)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LiveHotspotsResponse {
+    pub schemaVersion: String,
+    pub repository_id: String,
+    pub cursor: String,
+    pub generatedAt: String,
+    pub entries: Vec<HotspotEntry>,
+}
+
 /// Knowledge graph node placeholder.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphNode {
@@ -302,6 +370,20 @@ pub struct RouteHint {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn serialize_json<T: serde::Serialize>(value: &T) -> String {
+        match serde_json::to_string(value) {
+            Ok(json) => json,
+            Err(error) => panic!("serialize: {error}"),
+        }
+    }
+
+    fn deserialize_json<T: serde::de::DeserializeOwned>(json: &str) -> T {
+        match serde_json::from_str(json) {
+            Ok(value) => value,
+            Err(error) => panic!("deserialize: {error}"),
+        }
+    }
 
     #[test]
     fn schema_version_starts_at_initial_scaffold_version() {
@@ -985,14 +1067,339 @@ mod tests {
             Ok(v) => v,
             Err(e) => panic!("serialize: {e}"),
         };
-        // Can't deserialize because HotspotEntry only derives Serialize, not Deserialize.
-        // But we can verify the JSON is valid.
-        let _v: serde_json::Value = match serde_json::from_str(&json) {
+        let deserialized: HotspotEntry = match serde_json::from_str(&json) {
             Ok(v) => v,
-            Err(e) => panic!("valid JSON: {e}"),
+            Err(e) => panic!("deserialize: {e}"),
         };
+        assert_eq!(deserialized, original);
         assert!(json.contains("\"rank\":2"));
         assert!(json.contains("\"score\":1"));
         assert!(json.contains("\"rowIds\":[42]"));
+    }
+
+    // --- Live hotspot server contract types ---
+
+    fn make_sample_trace_event() -> TraceEvent {
+        TraceEvent {
+            schema_version: SCHEMA_VERSION.into(),
+            timestamp: "2026-06-24T10:00:00Z".into(),
+            session_id: "sess-1".into(),
+            event_type: TraceEventType::FileOpened,
+            tool_name: Some("read".into()),
+            payload: TraceEventPayload::FileOpened(FileOpenedPayload {
+                path: "src/main.rs".into(),
+            }),
+            outcome: Outcome::Success,
+        }
+    }
+
+    #[test]
+    fn server_ingest_envelope_round_trips() {
+        let inner_event = make_sample_trace_event();
+        let envelope = ServerIngestEnvelope {
+            envelope_version: "1.0.0".into(),
+            repository_id: "github.com/scryrs-project/scryrs".into(),
+            workspace_id: "ws-abc123".into(),
+            agent_id: "pi".into(),
+            events: vec![EnvelopeEvent {
+                producer_event_id: "evt-001".into(),
+                client_timestamp: "2026-06-24T10:00:05Z".into(),
+                event: inner_event.clone(),
+            }],
+        };
+        let json = serialize_json(&envelope);
+        let reconstructed: ServerIngestEnvelope = deserialize_json(&json);
+        assert_eq!(reconstructed, envelope);
+        assert_eq!(reconstructed.events[0].event, inner_event);
+    }
+
+    #[test]
+    fn envelope_event_round_trips_independent_of_inner_trace_event() {
+        let inner = make_sample_trace_event();
+        let env_event = EnvelopeEvent {
+            producer_event_id: "evt-002".into(),
+            client_timestamp: "2026-06-24T10:01:00Z".into(),
+            event: inner.clone(),
+        };
+        let json = serialize_json(&env_event);
+        let reconstructed: EnvelopeEvent = deserialize_json(&json);
+        assert_eq!(reconstructed, env_event);
+        // Inner TraceEvent round-trips unchanged.
+        assert_eq!(reconstructed.event, inner);
+    }
+
+    #[test]
+    fn batch_ingest_response_round_trips() {
+        let response = BatchIngestResponse {
+            received_count: 2,
+            duplicate_count: 1,
+            events: vec![
+                EventAck {
+                    producer_event_id: "evt-001".into(),
+                    status: EventAckStatus::Accepted,
+                    server_event_id: Some("srv-42".into()),
+                    received_at: "2026-06-24T10:00:07Z".into(),
+                },
+                EventAck {
+                    producer_event_id: "evt-001".into(),
+                    status: EventAckStatus::Idempotent,
+                    server_event_id: None,
+                    received_at: "2026-06-24T10:00:07Z".into(),
+                },
+                EventAck {
+                    producer_event_id: "evt-003".into(),
+                    status: EventAckStatus::Accepted,
+                    server_event_id: Some("srv-43".into()),
+                    received_at: "2026-06-24T10:00:07Z".into(),
+                },
+            ],
+            received_at: "2026-06-24T10:00:07Z".into(),
+        };
+        let json = serialize_json(&response);
+        let reconstructed: BatchIngestResponse = deserialize_json(&json);
+        assert_eq!(reconstructed, response);
+    }
+
+    #[test]
+    fn event_ack_status_serializes_as_snake_case() {
+        let ack = EventAck {
+            producer_event_id: "evt-001".into(),
+            status: EventAckStatus::Accepted,
+            server_event_id: None,
+            received_at: "2026-06-24T10:00:07Z".into(),
+        };
+        let json = serialize_json(&ack);
+        assert!(json.contains("\"status\":\"accepted\""));
+
+        let ack = EventAck {
+            producer_event_id: "evt-001".into(),
+            status: EventAckStatus::Idempotent,
+            server_event_id: None,
+            received_at: "2026-06-24T10:00:07Z".into(),
+        };
+        let json = serialize_json(&ack);
+        assert!(json.contains("\"status\":\"idempotent\""));
+    }
+
+    #[test]
+    fn event_ack_server_event_id_is_optional() {
+        let ack_without = EventAck {
+            producer_event_id: "evt-001".into(),
+            status: EventAckStatus::Accepted,
+            server_event_id: None,
+            received_at: "2026-06-24T10:00:07Z".into(),
+        };
+        let json = serialize_json(&ack_without);
+        assert!(!json.contains("server_event_id"));
+
+        let ack_with = EventAck {
+            producer_event_id: "evt-001".into(),
+            status: EventAckStatus::Accepted,
+            server_event_id: Some("srv-42".into()),
+            received_at: "2026-06-24T10:00:07Z".into(),
+        };
+        let json = serialize_json(&ack_with);
+        assert!(json.contains("server_event_id"));
+    }
+
+    #[test]
+    fn live_hotspots_response_round_trips() {
+        let mut event_type_counts = HashMap::new();
+        event_type_counts.insert("FileOpened".to_string(), 3u32);
+        let mut outcome_counts = HashMap::new();
+        outcome_counts.insert("success".to_string(), 3u32);
+
+        let entry = HotspotEntry {
+            rank: 1,
+            subjectKind: "file".to_string(),
+            subject: "src/main.rs".to_string(),
+            score: 15,
+            counts: HotspotCounts {
+                eventType: event_type_counts,
+                outcome: outcome_counts,
+            },
+            sessionCount: 2,
+            firstSeen: "2026-06-24T09:00:00Z".to_string(),
+            lastSeen: "2026-06-24T12:00:00Z".to_string(),
+            evidence: HotspotEvidence {
+                rowIds: vec![10, 20, 30],
+            },
+        };
+
+        let response = LiveHotspotsResponse {
+            schemaVersion: LIVE_HOTSPOT_SCHEMA_VERSION.into(),
+            repository_id: "github.com/scryrs-project/scryrs".into(),
+            cursor: "cursor-42".into(),
+            generatedAt: "2026-06-24T12:00:00Z".into(),
+            entries: vec![entry.clone()],
+        };
+
+        let json = serialize_json(&response);
+        let reconstructed: LiveHotspotsResponse = deserialize_json(&json);
+        assert_eq!(reconstructed, response);
+    }
+
+    #[test]
+    fn live_hotspots_response_no_filesystem_fields() {
+        let response = LiveHotspotsResponse {
+            schemaVersion: LIVE_HOTSPOT_SCHEMA_VERSION.into(),
+            repository_id: "github.com/scryrs-project/scryrs".into(),
+            cursor: "cursor-1".into(),
+            generatedAt: "2026-06-24T12:00:00Z".into(),
+            entries: vec![],
+        };
+        let json = serialize_json(&response);
+        // Must not contain local-filesystem fields.
+        assert!(!json.contains("repositoryPath"));
+        assert!(!json.contains("storePath"));
+    }
+
+    #[test]
+    fn live_hotspot_schema_version_is_independent() {
+        assert_eq!(LIVE_HOTSPOT_SCHEMA_VERSION, "1.0.0");
+        assert_ne!(LIVE_HOTSPOT_SCHEMA_VERSION, SCHEMA_VERSION);
+        // Live version is the same value as HOTSPOT_SCHEMA_VERSION but semantically independent.
+        assert_eq!(LIVE_HOTSPOT_SCHEMA_VERSION, HOTSPOT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn dedup_key_is_4_tuple_of_identity_fields() {
+        // Verify the four identity fields that compose the deduplication key exist.
+        let inner = make_sample_trace_event();
+        let env1 = ServerIngestEnvelope {
+            envelope_version: "1.0.0".into(),
+            repository_id: "repo-a".into(),
+            workspace_id: "ws-1".into(),
+            agent_id: "pi".into(),
+            events: vec![EnvelopeEvent {
+                producer_event_id: "evt-001".into(),
+                client_timestamp: "2026-06-24T10:00:00Z".into(),
+                event: inner.clone(),
+            }],
+        };
+
+        // Same 4-tuple — should be recognized as same key.
+        let env2_same_key = ServerIngestEnvelope {
+            envelope_version: "1.0.0".into(),
+            repository_id: "repo-a".into(),
+            workspace_id: "ws-1".into(),
+            agent_id: "pi".into(),
+            events: vec![EnvelopeEvent {
+                producer_event_id: "evt-001".into(),
+                client_timestamp: "2026-06-24T10:05:00Z".into(), // different timestamp does not change key
+                event: inner.clone(),
+            }],
+        };
+
+        // Different agent_id — different key.
+        let env3_diff_agent = ServerIngestEnvelope {
+            envelope_version: "1.0.0".into(),
+            repository_id: "repo-a".into(),
+            workspace_id: "ws-1".into(),
+            agent_id: "claude-code".into(),
+            events: vec![EnvelopeEvent {
+                producer_event_id: "evt-001".into(),
+                client_timestamp: "2026-06-24T10:00:00Z".into(),
+                event: inner.clone(),
+            }],
+        };
+
+        // Different repository_id — different key.
+        let env4_diff_repo = ServerIngestEnvelope {
+            envelope_version: "1.0.0".into(),
+            repository_id: "repo-b".into(),
+            workspace_id: "ws-1".into(),
+            agent_id: "pi".into(),
+            events: vec![EnvelopeEvent {
+                producer_event_id: "evt-001".into(),
+                client_timestamp: "2026-06-24T10:00:00Z".into(),
+                event: inner.clone(),
+            }],
+        };
+
+        // Same repository+workspace+agent, different producer_event_id — different key.
+        let env5_diff_producer = ServerIngestEnvelope {
+            envelope_version: "1.0.0".into(),
+            repository_id: "repo-a".into(),
+            workspace_id: "ws-1".into(),
+            agent_id: "pi".into(),
+            events: vec![EnvelopeEvent {
+                producer_event_id: "evt-002".into(),
+                client_timestamp: "2026-06-24T10:00:00Z".into(),
+                event: inner.clone(),
+            }],
+        };
+
+        // Matching 4-tuple should be equal across all identity fields.
+        assert_eq!(
+            env1.repository_id, env2_same_key.repository_id,
+            "same repository_id for same key"
+        );
+        assert_eq!(
+            env1.workspace_id, env2_same_key.workspace_id,
+            "same workspace_id for same key"
+        );
+        assert_eq!(
+            env1.agent_id, env2_same_key.agent_id,
+            "same agent_id for same key"
+        );
+        assert_eq!(
+            env1.events[0].producer_event_id, env2_same_key.events[0].producer_event_id,
+            "same producer_event_id for same key"
+        );
+
+        // Different agent_id produces different key.
+        assert_ne!(env1.agent_id, env3_diff_agent.agent_id);
+        // Different repository_id produces different key.
+        assert_ne!(env1.repository_id, env4_diff_repo.repository_id);
+        // Different producer_event_id produces different key.
+        assert_ne!(
+            env1.events[0].producer_event_id,
+            env5_diff_producer.events[0].producer_event_id
+        );
+    }
+
+    #[test]
+    fn server_ingest_envelope_with_empty_events_array() {
+        let envelope = ServerIngestEnvelope {
+            envelope_version: "1.0.0".into(),
+            repository_id: "repo-a".into(),
+            workspace_id: "ws-1".into(),
+            agent_id: "pi".into(),
+            events: vec![],
+        };
+        let json = serialize_json(&envelope);
+        let reconstructed: ServerIngestEnvelope = deserialize_json(&json);
+        assert_eq!(reconstructed, envelope);
+        assert!(reconstructed.events.is_empty());
+    }
+
+    #[test]
+    fn batch_ingest_response_empty_events() {
+        let response = BatchIngestResponse {
+            received_count: 0,
+            duplicate_count: 0,
+            events: vec![],
+            received_at: "2026-06-24T10:00:07Z".into(),
+        };
+        let json = serialize_json(&response);
+        let reconstructed: BatchIngestResponse = deserialize_json(&json);
+        assert_eq!(reconstructed, response);
+        assert!(reconstructed.events.is_empty());
+    }
+
+    #[test]
+    fn live_hotspots_response_with_empty_entries() {
+        let response = LiveHotspotsResponse {
+            schemaVersion: LIVE_HOTSPOT_SCHEMA_VERSION.into(),
+            repository_id: "unknown-repo".into(),
+            cursor: "cursor-0".into(),
+            generatedAt: "2026-06-24T12:00:00Z".into(),
+            entries: vec![],
+        };
+        let json = serialize_json(&response);
+        let reconstructed: LiveHotspotsResponse = deserialize_json(&json);
+        assert_eq!(reconstructed, response);
+        assert!(reconstructed.entries.is_empty());
     }
 }
