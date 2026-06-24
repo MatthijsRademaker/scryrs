@@ -73,4 +73,4 @@ For full container and runtime execution details, see the `runtime-environment.m
 
 ## Runtime Requirements
 
-After producing your review output, call the `report_review_outcome` tool with the `approved` or `needs_work` outcome value. This writes the structured outcome artifact required by the swarm runtime. This is a runtime requirement — always do this regardless of the output format.
+After producing your review output, call the `report_review_outcome` tool with `grade` only. Use the injected `DEV_SWARM_REVIEW_THRESHOLD` as the pass/fail boundary: grades greater than or equal to the threshold derive `approved`, lower grades derive `needs_work`. This writes the structured outcome artifact required by the swarm runtime. This is a runtime requirement — always do this regardless of the output format.

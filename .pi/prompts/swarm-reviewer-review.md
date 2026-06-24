@@ -19,7 +19,7 @@ Review the pull request associated with the current task and produce a merge rec
 1. If the task has a PR URL (in metadata or description), extract the PR number.
 2. Check merge status: `gh pr view <number> --json mergeable,mergeStateStatus`
    - If `mergeable` is `CONFLICTING` or `mergeStateStatus` contains `dirty` or `conflicting`:
-     Report `outcome: "needs_work"` with the specific conflict state. Do NOT approve.
+     Record the specific conflict state, grade below `DEV_SWARM_REVIEW_THRESHOLD`, and do NOT approve.
 3. Fetch the PR diff: `gh pr diff <number>`
 
 ## Review criteria
@@ -40,9 +40,11 @@ Review the pull request associated with the current task and produce a merge rec
 6. Check for merge conflicts via `gh pr view --json mergeable,mergeStateStatus`.
 7. Populate the `requirements_checked` array in the output — one entry per requirement.
 8. Post a review comment on the PR via:
+
    ```
    gh pr comment <number> --body "## Review Result: <APPROVED|NEEDS_WORK> ..."
    ```
+
 9. Produce the JSON output.
 
 ## Output format (MUST use this exact structure)
@@ -51,7 +53,6 @@ Your ENTIRE response must be a single valid JSON object. Do not write any text b
 
 ```json
 {
-  "outcome": "approved|needs_work",
   "feedback": "summary of the review assessment",
   "requirements_checked": [
     {
@@ -73,9 +74,10 @@ Your ENTIRE response must be a single valid JSON object. Do not write any text b
 }
 ```
 
-- `"outcome": "approved"` is valid ONLY when every stated requirement has `status: "satisfied"` or `"not_applicable"`. Any `"not_satisfied"` requirement forces `"needs_work"`.
-- Use `"outcome": "needs_work"` when changes are required before merging.
-- Merge conflicts are always `"outcome": "needs_work"` with severity `critical`.
+- The JSON output must not include an `outcome` property; binary review outcome is derived by the runtime from your tool grade.
+- Grade at or above `DEV_SWARM_REVIEW_THRESHOLD` only when every stated requirement has `status: "satisfied"` or `"not_applicable"`.
+- Use a grade below `DEV_SWARM_REVIEW_THRESHOLD` when changes are required before merging.
+- Merge conflicts always require a below-threshold grade with severity `critical`.
 - Always include both the `requirements_checked` array and the `issues` array, even if empty.
-- After producing the JSON output, call the `report_review_outcome` tool with `"approved"` or `"needs_work"`. This writes the structured outcome artifact required by the swarm runtime.
+- After producing the JSON output, call the `report_review_outcome` tool with `grade` only. This writes the structured outcome artifact required by the swarm runtime.
 - Post a review comment on the PR BEFORE producing your final JSON output.

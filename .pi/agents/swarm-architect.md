@@ -59,4 +59,4 @@ For full container and runtime execution details, see the `runtime-environment.m
 
 ## Runtime Requirements
 
-When running in a refinement context, call the `report_refinement_outcome` tool with `"finished"`. When running in a review context, call the `report_review_outcome` tool with `"approved"` or `"needs_work"`. This writes the structured outcome artifact required by the swarm runtime. This is a runtime requirement — always call the correct outcome tool for your current context.
+When running in a refinement context, call the `report_refinement_outcome` tool with `"finished"`. When running in a review context, call the `report_review_outcome` tool with `grade` only. Use the injected `DEV_SWARM_REVIEW_THRESHOLD` as the pass/fail boundary: grades greater than or equal to the threshold derive `approved`, lower grades derive `needs_work`. This writes the structured outcome artifact required by the swarm runtime. This is a runtime requirement — always call the correct outcome tool for your current context.
