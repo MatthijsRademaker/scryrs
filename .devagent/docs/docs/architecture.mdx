@@ -31,6 +31,7 @@ The LLM layer is not in the policy path. `crates/scryrs-llm` is an optional tran
 | `crates/scryrs-cli` | Main `scryrs` binary | Keeps user, CI, and agent command behavior in one feature-gated shell. |
 | `crates/scryrs-types` | Shared contracts | Prevents circular dependencies and keeps cross-crate data shapes explicit. |
 | `crates/scryrs-core` | Trace and hotspot foundation | Preserves standalone hotspot detection without docs-site assumptions. |
+| `crates/scryrs-server` | Central trace ingest server | Long-lived HTTP server for `POST /v1/trace-events/batch` with server-owned SQLite persistence and first-writer-wins idempotency. |
 | `crates/scryrs-graph` | Knowledge graph foundation | Owns routing graph concepts separate from trace collection. |
 | `crates/scryrs-curator` | Proposal foundation | Turns hotspots into reviewable docs, skill, decision, or memory proposals. |
 | `crates/scryrs-runtime` | Agent-side routing foundation | Helps future agents choose relevant context faster. |
@@ -48,7 +49,7 @@ The LLM layer is not in the policy path. `crates/scryrs-llm` is an optional tran
 
 ```text
 default
-= core + graph + curator + markdown + runtime + guardrails
+= core + graph + curator + markdown + runtime + guardrails + server
 
 guardrails
 = policy + sandbox + telemetry
@@ -122,14 +123,15 @@ Adapters depend on shared contracts and suite outputs. Core detection should nev
 | --- | --- | --- |
 | `scryrs-cli` | Comprehensive | CLI contract, record, init, hotspots integration |
 | `scryrs-core` | Comprehensive | Trace events, hotspot scoring |
-| `scryrs-types` | 24 | Serialization, type-level contracts |
+| `scryrs-server` | 14 | Config, time, store schema/ingest idempotency, RFC 3339 validation |
+| `scryrs-types` | 44 | Serialization, type-level contracts, server ingest envelope types |
 | `scryrs-curator` | 3 | `propose_from_hotspot`, title/rationale/edge cases |
 | `scryrs-sandbox` | 5 | `ToolPolicy::read_only`, `can_write` path matching |
 | Other scaffold crates | 1 each | Sentinel descriptor test only |
 
 ## Current Limitations
 
-- `scryrs hotspots` is production-level: it opens `.scryrs/scryrs.db` via `TraceQuery`, runs deterministic scoring with a documented weight table and six-key tie-break, emits a versioned `HotspotsReport` (schemaVersion 1.0.0) to stdout and `.scryrs/hotspots.json`, and handles empty/missing/corrupt stores with correct exit codes. The `scryrs record` and `scryrs init` commands are similarly production-grade with Docker-backed verification. Graph, curator, and adapter crates remain scaffold-level (sentinel descriptor tests only).
+- `scryrs hotspots` is production-level: it opens `.scryrs/scryrs.db` via `TraceQuery`, runs deterministic scoring with a documented weight table and six-key tie-break, emits a versioned `HotspotsReport` (schemaVersion 1.0.0) to stdout and `.scryrs/hotspots.json`, and handles empty/missing/corrupt stores with correct exit codes. The `scryrs record`, `scryrs init`, and `scryrs server` commands are similarly production-grade with Docker-backed verification. The `scryrs server` command runs a long-lived HTTP ingest endpoint (`POST /v1/trace-events/batch`) with server-owned SQLite persistence and first-writer-wins idempotency. Graph, curator, and adapter crates remain scaffold-level (sentinel descriptor tests only).
 - LikeC4 views on this page are high-level architecture projections, not exhaustive Cargo dependency graphs.
 - Rust toolchain is not installed in the current local environment, so cargo-backed verification is blocked until `rust-toolchain.toml` can be installed.
 - `tests/golden/`, `tests/integration/`, and `tests/llm/` are `.gitkeep` placeholder directories with no active test suites. These remain deferred until a real test suite is designed to occupy each directory. Adding tests to these directories before their purpose is defined would create untethered suites with no clear assertion boundary.

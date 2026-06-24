@@ -320,7 +320,12 @@ pub enum EventAckStatus {
 /// Per-event acknowledgment returned in `BatchIngestResponse`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventAck {
-    pub producer_event_id: String,
+    /// Zeroth-indexed position of this item in the request `events` array.
+    pub index: usize,
+    /// Producer-scoped event identifier; `None` only when the request item
+    /// could not supply one (malformed per-item decode).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub producer_event_id: Option<String>,
     pub status: EventAckStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_event_id: Option<String>,
@@ -332,8 +337,14 @@ pub struct EventAck {
 /// JSON acknowledgment returned by `POST /v1/trace-events/batch`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BatchIngestResponse {
-    pub received_count: u64,
+    /// Count of events accepted (first-writer-wins) in this batch.
+    pub accepted_count: u64,
+    /// Count of duplicate (idempotent) events in this batch.
     pub duplicate_count: u64,
+    /// Count of rejected events in this batch.
+    pub rejected_count: u64,
+    /// Count of accepted + idempotent items (backwards-compat field).
+    pub received_count: u64,
     pub events: Vec<EventAck>,
     pub received_at: String,
 }
@@ -1135,25 +1146,30 @@ mod tests {
     #[test]
     fn batch_ingest_response_round_trips() {
         let response = BatchIngestResponse {
-            received_count: 2,
+            accepted_count: 2,
             duplicate_count: 1,
+            rejected_count: 0,
+            received_count: 3,
             events: vec![
                 EventAck {
-                    producer_event_id: "evt-001".into(),
+                    index: 0,
+                    producer_event_id: Some("evt-001".into()),
                     status: EventAckStatus::Accepted,
                     server_event_id: Some("srv-42".into()),
                     error_reason: None,
                     received_at: "2026-06-24T10:00:07Z".into(),
                 },
                 EventAck {
-                    producer_event_id: "evt-001".into(),
+                    index: 1,
+                    producer_event_id: Some("evt-001".into()),
                     status: EventAckStatus::Idempotent,
                     server_event_id: None,
                     error_reason: None,
                     received_at: "2026-06-24T10:00:07Z".into(),
                 },
                 EventAck {
-                    producer_event_id: "evt-003".into(),
+                    index: 2,
+                    producer_event_id: Some("evt-003".into()),
                     status: EventAckStatus::Accepted,
                     server_event_id: Some("srv-43".into()),
                     error_reason: None,
@@ -1170,7 +1186,8 @@ mod tests {
     #[test]
     fn event_ack_status_serializes_as_snake_case() {
         let ack = EventAck {
-            producer_event_id: "evt-001".into(),
+            index: 0,
+            producer_event_id: Some("evt-001".into()),
             status: EventAckStatus::Accepted,
             error_reason: None,
             server_event_id: None,
@@ -1180,7 +1197,8 @@ mod tests {
         assert!(json.contains("\"status\":\"accepted\""));
 
         let ack = EventAck {
-            producer_event_id: "evt-001".into(),
+            index: 1,
+            producer_event_id: Some("evt-001".into()),
             status: EventAckStatus::Idempotent,
             error_reason: None,
             server_event_id: None,
@@ -1190,7 +1208,8 @@ mod tests {
         assert!(json.contains("\"status\":\"idempotent\""));
 
         let ack = EventAck {
-            producer_event_id: "evt-001".into(),
+            index: 2,
+            producer_event_id: Some("evt-001".into()),
             status: EventAckStatus::Rejected,
             error_reason: Some("invalid TraceEvent: missing session_id".into()),
             server_event_id: None,
@@ -1203,7 +1222,8 @@ mod tests {
     #[test]
     fn event_ack_server_event_id_is_optional() {
         let ack_without = EventAck {
-            producer_event_id: "evt-001".into(),
+            index: 0,
+            producer_event_id: Some("evt-001".into()),
             status: EventAckStatus::Accepted,
             error_reason: None,
             server_event_id: None,
@@ -1213,7 +1233,8 @@ mod tests {
         assert!(!json.contains("server_event_id"));
 
         let ack_with = EventAck {
-            producer_event_id: "evt-001".into(),
+            index: 0,
+            producer_event_id: Some("evt-001".into()),
             status: EventAckStatus::Accepted,
             error_reason: None,
             server_event_id: Some("srv-42".into()),
@@ -1398,8 +1419,10 @@ mod tests {
     #[test]
     fn batch_ingest_response_empty_events() {
         let response = BatchIngestResponse {
-            received_count: 0,
+            accepted_count: 0,
             duplicate_count: 0,
+            rejected_count: 0,
+            received_count: 0,
             events: vec![],
             received_at: "2026-06-24T10:00:07Z".into(),
         };
@@ -1427,7 +1450,8 @@ mod tests {
     #[test]
     fn event_ack_rejected_variant_round_trips() {
         let ack = EventAck {
-            producer_event_id: "evt-099".into(),
+            index: 0,
+            producer_event_id: Some("evt-099".into()),
             status: EventAckStatus::Rejected,
             server_event_id: None,
             error_reason: Some("invalid TraceEvent: missing session_id".into()),
@@ -1444,7 +1468,8 @@ mod tests {
     fn event_ack_rejected_variant_error_reason_is_optional() {
         // error_reason should be omitted when None
         let ack_no_reason = EventAck {
-            producer_event_id: "evt-099".into(),
+            index: 0,
+            producer_event_id: Some("evt-099".into()),
             status: EventAckStatus::Rejected,
             server_event_id: None,
             error_reason: None,
@@ -1455,7 +1480,8 @@ mod tests {
 
         // error_reason should be present when Some
         let ack_with_reason = EventAck {
-            producer_event_id: "evt-099".into(),
+            index: 1,
+            producer_event_id: Some("evt-099".into()),
             status: EventAckStatus::Rejected,
             server_event_id: None,
             error_reason: Some("validation failed".into()),
@@ -1463,5 +1489,146 @@ mod tests {
         };
         let json = serialize_json(&ack_with_reason);
         assert!(json.contains("error_reason"));
+    }
+
+    // --- Extended EventAck: index field ---
+
+    #[test]
+    fn event_ack_includes_request_index_in_serialization() {
+        let ack = EventAck {
+            index: 42,
+            producer_event_id: Some("evt-042".into()),
+            status: EventAckStatus::Accepted,
+            server_event_id: None,
+            error_reason: None,
+            received_at: "2026-06-24T10:00:07Z".into(),
+        };
+        let json = serialize_json(&ack);
+        assert!(
+            json.contains("\"index\":42"),
+            "serialized EventAck must include index field"
+        );
+    }
+
+    #[test]
+    fn event_ack_index_round_trips() {
+        let ack = EventAck {
+            index: 7,
+            producer_event_id: Some("evt-007".into()),
+            status: EventAckStatus::Accepted,
+            server_event_id: None,
+            error_reason: None,
+            received_at: "2026-06-24T10:00:07Z".into(),
+        };
+        let json = serialize_json(&ack);
+        let reconstructed: EventAck = deserialize_json(&json);
+        assert_eq!(reconstructed.index, 7);
+    }
+
+    // --- Extended EventAck: optional producer_event_id ---
+
+    #[test]
+    fn event_ack_with_absent_producer_event_id_serializes_without_it() {
+        let ack = EventAck {
+            index: 0,
+            producer_event_id: None,
+            status: EventAckStatus::Rejected,
+            server_event_id: None,
+            error_reason: Some("malformed request item".into()),
+            received_at: "2026-06-24T10:00:07Z".into(),
+        };
+        let json = serialize_json(&ack);
+        // The field "producer_event_id" must not appear as a JSON key.
+        // Parse to Value and check keys.
+        let parsed: serde_json::Value =
+            serde_json::from_str(&json).unwrap_or_else(|e| panic!("deserialize: {e}"));
+        let obj = parsed
+            .as_object()
+            .unwrap_or_else(|| panic!("expected JSON object"));
+        assert!(
+            !obj.contains_key("producer_event_id"),
+            "serialized JSON object must NOT have producer_event_id key when absent: {json}"
+        );
+    }
+
+    #[test]
+    fn event_ack_with_absent_producer_event_id_round_trips() {
+        let ack = EventAck {
+            index: 1,
+            producer_event_id: None,
+            status: EventAckStatus::Rejected,
+            server_event_id: None,
+            error_reason: Some("missing producer_event_id".into()),
+            received_at: "2026-06-24T10:00:07Z".into(),
+        };
+        let json = serialize_json(&ack);
+        let reconstructed: EventAck = deserialize_json(&json);
+        assert_eq!(reconstructed, ack);
+        assert!(reconstructed.producer_event_id.is_none());
+    }
+
+    // --- Extended BatchIngestResponse: accepted_count, rejected_count ---
+
+    #[test]
+    fn batch_ingest_response_includes_accepted_and_rejected_counts() {
+        let response = BatchIngestResponse {
+            accepted_count: 3,
+            duplicate_count: 1,
+            rejected_count: 2,
+            received_count: 4,
+            events: vec![
+                EventAck {
+                    index: 0,
+                    producer_event_id: Some("evt-001".into()),
+                    status: EventAckStatus::Accepted,
+                    server_event_id: Some("srv-1".into()),
+                    error_reason: None,
+                    received_at: "2026-06-24T10:00:07Z".into(),
+                },
+                EventAck {
+                    index: 1,
+                    producer_event_id: None,
+                    status: EventAckStatus::Rejected,
+                    server_event_id: None,
+                    error_reason: Some("invalid TraceEvent".into()),
+                    received_at: "2026-06-24T10:00:07Z".into(),
+                },
+            ],
+            received_at: "2026-06-24T10:00:07Z".into(),
+        };
+        let json = serialize_json(&response);
+        assert!(
+            json.contains("\"accepted_count\":3"),
+            "serialized BatchIngestResponse must include accepted_count"
+        );
+        assert!(
+            json.contains("\"duplicate_count\":1"),
+            "serialized BatchIngestResponse must include duplicate_count"
+        );
+        assert!(
+            json.contains("\"rejected_count\":2"),
+            "serialized BatchIngestResponse must include rejected_count"
+        );
+        assert!(
+            json.contains("\"received_count\":4"),
+            "serialized BatchIngestResponse must include received_count"
+        );
+    }
+
+    #[test]
+    fn batch_ingest_response_counts_round_trip() {
+        let response = BatchIngestResponse {
+            accepted_count: 5,
+            duplicate_count: 3,
+            rejected_count: 1,
+            received_count: 8,
+            events: vec![],
+            received_at: "2026-06-24T10:00:07Z".into(),
+        };
+        let json = serialize_json(&response);
+        let reconstructed: BatchIngestResponse = deserialize_json(&json);
+        assert_eq!(reconstructed, response);
+        assert_eq!(reconstructed.accepted_count, 5);
+        assert_eq!(reconstructed.rejected_count, 1);
     }
 }

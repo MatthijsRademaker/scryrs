@@ -21,7 +21,9 @@ COMMANDS\n\
       Install the scryrs trace hook for a supported agent harness.\n\
       Supported harnesses: claude-code, pi\n\
   scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]\n\
-      Start local dashboard server and open the browser dashboard.\n\n\
+      Start local dashboard server and open the browser dashboard.\n\
+  scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]\n\
+      Start the central trace ingest server for POST /v1/trace-events/batch.\n\n\
 RECORD OUTPUT\n\
   A single-line JSON summary on stdout:\n\
     {{\n\
@@ -64,15 +66,17 @@ EXAMPLES\n\
   scryrs init --agent claude-code\n\
   scryrs init --agent pi\n\
   scryrs dashboard\n\
-  scryrs dashboard --port 9090 --no-open\n\n\
+  scryrs dashboard --port 9090 --no-open\n\
+  scryrs server\n\
+  scryrs server --port 9091\n\n\
 OPTIONS\n\
   -h, --help       Print this help message and exit\n\
   -V, --version    Print version and exit\n\
   -hj, --help-json Print machine-readable CLI surface description and exit\n\n\
 EXIT CODES\n\
-  0    Success (hotspots: JSON written; record: all events accepted; init: hook installed; dashboard: server shut down cleanly; hook: always — fail-open, never blocks the harness)\n\
-  1    Hotspots: storage error. Record: rejected events or I/O error. Init: I/O error. Dashboard: port in use or artifact read error.\n\
-  2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file or store failure); init: unsupported harness, collision, or self-install refusal; dashboard: invalid flags or bind failure",
+  0    Success (hotspots: JSON written; record: all events accepted; init: hook installed; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)\n\
+  1    Hotspots: storage error. Record: rejected events or I/O error. Init: I/O error. Dashboard: port in use or artifact read error. Server: port in use or store error.\n\
+  2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file or store failure); init: unsupported harness, collision, or self-install refusal; dashboard: invalid flags or bind failure; server: invalid flags or bind failure",
         SCHEMA_VERSION, HOTSPOT_SCHEMA_VERSION
     )
 }

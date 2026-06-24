@@ -13,6 +13,7 @@ members = [
   "crates/scryrs-policy",
   "crates/scryrs-runtime",
   "crates/scryrs-sandbox",
+  "crates/scryrs-server",
   "crates/scryrs-telemetry",
   "crates/scryrs-types",
   "xtask",
@@ -56,5 +57,6 @@ scryrs-llm = { path = "crates/scryrs-llm" }
 scryrs-policy = { path = "crates/scryrs-policy" }
 scryrs-runtime = { path = "crates/scryrs-runtime" }
 scryrs-sandbox = { path = "crates/scryrs-sandbox" }
+scryrs-server = { path = "crates/scryrs-server" }
 scryrs-telemetry = { path = "crates/scryrs-telemetry" }
 scryrs-types = { path = "crates/scryrs-types" }
