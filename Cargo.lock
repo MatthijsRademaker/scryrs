@@ -817,7 +817,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
- "tower",
 ]
 
 [[package]]

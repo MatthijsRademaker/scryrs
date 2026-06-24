@@ -16,6 +16,7 @@ use serde::Serialize;
 
 use crate::Config;
 use crate::store::ServerStore;
+use crate::time::chrono_now;
 use scryrs_types::{BatchIngestResponse, EventAckStatus, ServerIngestEnvelope};
 
 #[derive(Clone)]
@@ -184,39 +185,4 @@ async fn ingest_batch(
     };
 
     (StatusCode::OK, Json(response)).into_response()
-}
-
-/// Return the current wall-clock time as an RFC 3339 string.
-/// Mirrors `store::chrono_now`.
-fn chrono_now() -> String {
-    use std::time::SystemTime;
-    let dur = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = dur.as_secs();
-    let days_since_epoch = secs / 86400;
-    let (year, month, day) = civil_from_days(days_since_epoch as i64);
-    let remaining = secs % 86400;
-    let hours = remaining / 3600;
-    let minutes = (remaining % 3600) / 60;
-    let seconds = remaining % 60;
-    format!("{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}Z")
-}
-
-fn civil_from_days(mut days: i64) -> (i64, u32, u32) {
-    days += 719468;
-    let era = if days >= 0 {
-        days / 146097
-    } else {
-        (days - 146096) / 146097
-    };
-    let doe = days - era * 146097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    (y, m as u32, d as u32)
 }

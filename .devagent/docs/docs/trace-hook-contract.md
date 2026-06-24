@@ -409,9 +409,9 @@ No reference hooks for other harnesses are planned at this time. Harness authors
 - [Product Roadmap](./roadmap.mdx) — delivery sequence including Phase 1 proxy capture and reference hook work.
 - [Architecture](./architecture.mdx) — crate topology and runtime flow.
 
-## Appendix: Remote Mode (Phase 4)
+## Appendix: Remote Mode (Foundation 02+)
 
-This appendix documents the remote ingestion contract for scryrs Phase 4 (Live Hotspot Server and Signals). Remote mode is a planned capability — the contract types are defined in `crates/scryrs-types` but no server runtime or CLI transport behavior exists yet. This appendix serves as a specification for future harness integrators and server implementers.
+This appendix documents the remote ingestion contract for the Live Hotspot Server. The server runtime (`scryrs server`) is implemented and production-grade as of Foundation 02. The contract types are defined in `crates/scryrs-types` and the server runtime lives in `crates/scryrs-server`. Automatic remote-mode activation from hooks (detecting `scryrs.json` config and switching to remote ingest) is deferred to a future task.
 
 ### Remote Ingestion Envelope
 
@@ -457,7 +457,7 @@ The server deduplicates events using a composite key of `(repository_id, workspa
 
 ### Remote vs Local Mode Separation
 
-Remote mode is **exclusive**, not additive. When remote ingest is explicitly configured (via `scryrs.json` or environment variable), the CLI:
+Remote mode is **exclusive**, not additive. When remote ingest is explicitly configured (via `scryrs.json` or environment variable) — a future integration task — the CLI:
 
 1. **Skips local storage** — events are submitted to the remote server and are NOT written to `.scryrs/scryrs.db`. No local SQLite store is opened or created.
 2. **Uses the server as the source of truth** — hotspot queries read from the server, not from local artifacts.
@@ -467,7 +467,7 @@ Remote mode is activated **only by explicit configuration**. It is never activat
 
 ### Implications for Harness Authors
 
-When remote mode is eventually implemented:
+When remote mode is active (currently: manual invocation via `scryrs server` + direct HTTP POST):
 
 - **Hook event formatting is unchanged.** Hooks continue to emit `TraceEvent` records exactly as they do in local mode. The remote transport layer in `scryrs record` wraps events in `ServerIngestEnvelope` automatically.
 - **Identity fields are supplied by the CLI, not by hooks.** Hooks do not need to know about `repository_id`, `workspace_id`, or `agent_id` — `scryrs record` derives these from repository metadata and configuration.

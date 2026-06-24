@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 pub mod server;
 pub mod store;
+pub(crate) mod time;
 
 /// Configuration for the central ingest server.
 #[derive(Clone, Debug, PartialEq, Eq)]

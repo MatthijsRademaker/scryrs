@@ -10,6 +10,8 @@ use std::path::Path;
 use rusqlite::{Connection, params};
 use scryrs_types::{EnvelopeEvent, EventAck, EventAckStatus, ServerIngestEnvelope};
 
+use crate::time::chrono_now;
+
 /// Current server store schema version (independent of local datastore version).
 const SERVER_STORE_SCHEMA_VERSION: i64 = 1;
 
@@ -177,6 +179,14 @@ impl ServerStore {
                 error_reason: None,
                 received_at: stored_at,
             },
+            InsertResult::SerializeError { error } => EventAck {
+                index,
+                producer_event_id: Some(item.producer_event_id.clone()),
+                status: EventAckStatus::Rejected,
+                server_event_id: None,
+                error_reason: Some(error),
+                received_at: received_at.to_string(),
+            },
         }
     }
 
@@ -188,9 +198,9 @@ impl ServerStore {
     ) -> InsertResult {
         let event_json = match serde_json::to_string(&item.event) {
             Ok(json) => json,
-            Err(_e) => {
-                return InsertResult::Duplicate {
-                    stored_at: received_at.to_string(),
+            Err(e) => {
+                return InsertResult::SerializeError {
+                    error: format!("TraceEvent serialization failed: {e}"),
                 };
             }
         };
@@ -272,6 +282,9 @@ enum InsertResult {
     Duplicate {
         stored_at: String,
     },
+    SerializeError {
+        error: String,
+    },
 }
 
 fn outcome_str(event: &scryrs_types::TraceEvent) -> &'static str {
@@ -284,8 +297,7 @@ fn outcome_str(event: &scryrs_types::TraceEvent) -> &'static str {
 /// Check whether `s` is valid RFC 3339.
 fn is_valid_rfc3339(s: &str) -> bool {
     // RFC 3339 requires at minimum: YYYY-MM-DDTHH:MM:SS followed by Z or offset.
-    // We accept any valid RFC 3339 format the chrono crate would parse.
-    // Since we don't depend on chrono directly, we do a structural check.
+    // We do a structural check without depending on chrono.
     if s.len() < 20 {
         return false;
     }
@@ -299,61 +311,40 @@ fn is_valid_rfc3339(s: &str) -> bool {
     {
         return false;
     }
-    // After seconds, must have Z or +/- offset.
+    // After seconds, must have Z, fractional seconds + Z/offset, or offset.
     let rest = &s[19..];
     if rest.is_empty() {
         return false;
     }
-    if rest.starts_with('Z') || rest.starts_with('+') || rest.starts_with('-') {
-        true
-    } else {
-        // Could be fractional seconds like ".123Z" — check for Z or +/- after decimal.
-        rest.contains('Z') || rest.contains('+') || rest.contains('-')
+    if rest == "Z" {
+        return true;
     }
+    if let Some(after_dot) = rest.strip_prefix('.') {
+        // Fractional seconds: .digits followed by Z or [+-]HH:MM
+        let digit_end = after_dot
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(after_dot.len());
+        if digit_end == 0 {
+            return false; // no digits after dot
+        }
+        let suffix = &after_dot[digit_end..];
+        return suffix == "Z" || is_offset(suffix);
+    }
+    is_offset(rest)
 }
 
-/// Return the current wall-clock time as an RFC 3339 string.
-fn chrono_now() -> String {
-    // We avoid a chrono dependency by formatting manually.
-    // For deterministic tests, this function can be mocked via a clock source;
-    // for now, we use std::time::SystemTime.
-    use std::time::SystemTime;
-    let dur = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = dur.as_secs();
-    // Simple UTC formatting: epoch-relative.
-    // In practice, replace with a proper time crate; this is adequate for the
-    // deterministic contract where tests control timestamps.
-    let days_since_epoch = secs / 86400;
-    // Compute date from days since epoch (simplified).
-    let (year, month, day) = civil_from_days(days_since_epoch as i64);
-    let remaining = secs % 86400;
-    let hours = remaining / 3600;
-    let minutes = (remaining % 3600) / 60;
-    let seconds = remaining % 60;
-    format!("{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}Z")
+/// Check whether `s` is a valid RFC 3339 time-zone offset: `[+-]HH:MM`.
+fn is_offset(s: &str) -> bool {
+    s.len() == 6
+        && (s.as_bytes()[0] == b'+' || s.as_bytes()[0] == b'-')
+        && s.as_bytes()[1].is_ascii_digit()
+        && s.as_bytes()[2].is_ascii_digit()
+        && s.as_bytes()[3] == b':'
+        && s.as_bytes()[4].is_ascii_digit()
+        && s.as_bytes()[5].is_ascii_digit()
 }
 
-/// Simplified civil date from days since Unix epoch (1970-01-01).
-/// Accurate enough for current timestamps; not a full calendar implementation.
-fn civil_from_days(mut days: i64) -> (i64, u32, u32) {
-    days += 719468; // shift from Unix epoch to 0000-03-01 (start of Gregorian cycle)
-    let era = if days >= 0 {
-        days / 146097
-    } else {
-        (days - 146096) / 146097
-    };
-    let doe = days - era * 146097; // day of era [0, 146096]
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // year of era [0, 399]
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // day of year [0, 365]
-    let mp = (5 * doy + 2) / 153; // month phase [0, 11]
-    let d = doy - (153 * mp + 2) / 5 + 1; // day of month [1, 31]
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    (y, m as u32, d as u32)
-}
+
 
 #[cfg(test)]
 mod tests {
