@@ -2,7 +2,7 @@ import ClientOnly from '../theme/ClientOnly';
 
 # Product Roadmap
 
-scryrs should ship in strict order: first become a deterministic trace-capture CLI that never interferes with tool results, then turn captured evidence into hotspot outputs, then expand into graph, proposal, adapter, and runtime products.
+scryrs should ship in strict order: first become a deterministic trace-capture CLI that never interferes with tool results, then turn captured evidence into hotspot outputs, then make those hotspots live and multi-agent aware, then expand into graph, proposal, adapter, and runtime products.
 
 ## Current Starting Point
 
@@ -15,7 +15,7 @@ The Phase 1 deterministic proxy-capture boundary is implemented:
 - `scryrs.json` defines the hook-interface and record-invocation manifest at the repository root.
 - Docker-backed fail-open verification (`scripts/verify-trace-capture`) exercises both hooks end-to-end against the real `scryrs` binary.
 
-Phase 2 hotspot materialization is delivered: `scryrs hotspots <PATH>` opens `.scryrs/scryrs.db` via `TraceQuery`, runs deterministic scoring with a documented weight table and six-key tie-break, emits a versioned `HotspotsReport` (schemaVersion 1.0.0) to stdout and `.scryrs/hotspots.json`, and handles empty/missing/corrupt stores with correct exit codes. E2E tests prove the full record → SQLite → hotspots → artifact pipeline. Phase 4+ features (graph, proposal, adapter, runtime, MCP, LLM) remain deferred per the delivery-phase ordering below. Phase 3 (Dashboard) adds the local visual browsing surface on top of hotspot artifacts.
+Phase 2 hotspot materialization is delivered: `scryrs hotspots <PATH>` opens `.scryrs/scryrs.db` via `TraceQuery`, runs deterministic scoring with a documented weight table and six-key tie-break, emits a versioned `HotspotsReport` (schemaVersion 1.0.0) to stdout and `.scryrs/hotspots.json`, and handles empty/missing/corrupt stores with correct exit codes. E2E tests prove the full record → SQLite → hotspots → artifact pipeline. Phase 3 (Dashboard) adds the local visual browsing surface on top of hotspot artifacts. The next roadmap step is Phase 4: live hotspot server mode, where multiple agents report trace evidence to one server-owned store, hotspot state updates on ingest, and clients query or subscribe to signals instead of scraping `.scryrs/hotspots.json`. Graph, proposal, adapter, runtime, MCP, and LLM features remain deferred per the delivery-phase ordering below.
 
 ## Phase Order
 
@@ -51,11 +51,12 @@ Until that exists, graph, proposal, and adapter work are downstream fiction.
 | 1. Deterministic proxy capture | Make scryrs usable as trace collector, not tool executor | `scryrs record`, local event store, `scryrs.json` hook manifest, reference Pi + Claude hooks, `scryrs init --agent`, fail-open verification | Graph building, docs generation, route explanation, LLM summaries |
 | 2. Hotspot materialization | Turn persisted traces into stable CLI outputs and files | Real `scryrs hotspots`, deterministic aggregation rules, stable JSON contract, optional file outputs like `.scryrs/hotspots.json` | Proposal engine, docs adapters, runtime retrieval |
 | 3. Dashboard | Make hotspot and session data visually browsable | `scryrs dashboard` CLI command, local HTTP server, embedded Vue.js SPA, hotspot table view, session timeline, event distribution chart, per-subject drill-down, extensible component architecture | Graph visualization, route exploration, hosted/multi-user dashboard, real-time updates, data mutation |
-| 4. Graph and route manifests | Convert hotspots plus docs structure into machine-readable routing data | `scryrs graph build`, graph schema, route manifest schema, evidence links from hotspot output to graph nodes | Human-facing doc proposals, adapter-specific publishing polish |
-| 5. Proposal engine | Produce reviewable docs / ADR / skill / memory proposals from evidence | `scryrs suggest-docs` or `scryrs propose`, proposal storage/inbox format, explicit review workflow | Silent auto-merge, autonomous doc rewrites |
-| 6. Publishing adapters | Publish reviewed knowledge into docs systems without making one mandatory | Markdown adapter first, then Rspress adapter, export paths for `llms.txt` and nested manifests | Framework-specific lock-in, dashboard-first work |
-| 7. Runtime retrieval | Help future agents load right context faster | `scryrs route explain`, route hints, retrieval-friendly exports, explainable reasons | Opaque ranking, hidden memory mutation |
-| 8. Optional LLM layer | Add explanation and drafting help outside deterministic policy path | Bounded `scryrs-llm` usage for ranking, summarization, patch drafting only | Using models for policy, ingest validation, or trace truth |
+| 4. Live hotspot server and signals | Turn local hotspot artifacts into shared multi-agent live state | Server ingest contract, server-owned SQLite writer, remote `scryrs record` transport, incremental hotspot accumulators, `HotspotSignal` query/stream APIs | Graph/proposal behavior, hosted multi-tenant product, auth, dashboard mutation, LLM interpretation |
+| 5. Graph and route manifests | Convert hotspots plus docs structure into machine-readable routing data | `scryrs graph build`, graph schema, route manifest schema, evidence links from hotspot output to graph nodes | Human-facing doc proposals, adapter-specific publishing polish |
+| 6. Proposal engine | Produce reviewable docs / ADR / skill / memory proposals from evidence | `scryrs suggest-docs` or `scryrs propose`, proposal storage/inbox format, explicit review workflow | Silent auto-merge, autonomous doc rewrites |
+| 7. Publishing adapters | Publish reviewed knowledge into docs systems without making one mandatory | Markdown adapter first, then Rspress adapter, export paths for `llms.txt` and nested manifests | Framework-specific lock-in, dashboard-first work |
+| 8. Runtime retrieval | Help future agents load right context faster | `scryrs route explain`, route hints, retrieval-friendly exports, explainable reasons | Opaque ranking, hidden memory mutation |
+| 9. Optional LLM layer | Add explanation and drafting help outside deterministic policy path | Bounded `scryrs-llm` usage for ranking, summarization, patch drafting only | Using models for policy, ingest validation, or trace truth |
 
 ## Phase 1 — Deterministic Proxy Capture
 
@@ -131,9 +132,31 @@ Accepted limitations:
 - No real-time or streaming updates — the dashboard reads current artifact files on each API request.
 - SPA assets are embedded into the binary (acceptable for single-binary CLI tool).
 
-## Phase 4 - Graph and Route Manifests
+## Phase 4 - Live Hotspot Server and Signals
 
-Only start this after dashboard and hotspot outputs stabilize. Otherwise graph schema will chase unstable evidence shapes.
+This is the next roadmap step after local hotspot and dashboard surfaces. The phase changes hotspot handling from a user-triggered batch artifact into shared live state: agents still emit deterministic `TraceEvent` evidence, but a long-lived server owns central ingestion, idempotency, incremental score state, and signal/query APIs.
+
+Required deliverables:
+
+- Versioned server ingest envelope around existing `TraceEvent` data with stable repository id, workspace id, agent id, producer event id, client timestamp, and server `received_at` semantics.
+- Server-owned SQLite write path so multiple agent containers report through one process instead of writing the same database file directly.
+- Remote `scryrs record` transport mode so Pi and Claude hooks can keep calling the CLI while the CLI chooses local SQLite or remote ingest from explicit configuration.
+- Incremental hotspot accumulator that applies the same deterministic weight table as batch `scryrs hotspots` and does not double-count duplicate producer events.
+- `HotspotSignal` records for threshold crossings, carrying subject kind, subject, score, delta, window, and evidence references.
+- Read/query APIs for current hotspots plus an SSE signal stream for live clients.
+- Artifact export remains available: `.scryrs/hotspots.json` can be produced from local or server state, but it is not the live source of truth.
+
+Accepted limitations:
+
+- No graph nodes, route manifests, proposal generation, adapters, runtime retrieval, or LLM interpretation.
+- No hosted multi-tenant SaaS product; this phase is a container/local-network server for multi-agent workspaces.
+- No authentication or authorization unless a later deployment story explicitly scopes it.
+- No dashboard mutation behavior; ingest is the only write API.
+- No websocket requirement; Server-Sent Events are sufficient for first live signals.
+
+## Phase 5 - Graph and Route Manifests
+
+Only start this after dashboard, hotspot outputs, and live hotspot server contracts stabilize. Otherwise graph schema will chase unstable evidence shapes.
 
 Required deliverables:
 
@@ -143,7 +166,7 @@ Required deliverables:
 
 This phase is where scryrs stops being only a recorder and starts becoming routing infrastructure.
 
-## Phase 5 - Proposal Engine
+## Phase 6 - Proposal Engine
 
 This phase turns evidence into reviewable change suggestions.
 
@@ -155,7 +178,7 @@ Required deliverables:
 
 Do not skip straight to automatic doc mutation. That would destroy trust.
 
-## Phase 6 - Publishing Adapters
+## Phase 7 - Publishing Adapters
 
 Adapters come after proposals because scryrs should publish approved knowledge, not invent source-of-truth content on its own.
 
@@ -167,7 +190,7 @@ Recommended order:
 
 Why: Markdown keeps product core honest. If adapter logic only works when tied to one docs framework, architecture has already drifted.
 
-## Phase 7 - Runtime Retrieval
+## Phase 8 - Runtime Retrieval
 
 Runtime work should consume prior artifacts, not bypass them.
 
@@ -184,12 +207,12 @@ This phase is when future agents should start reading less junk and loading more
 A runtime optimizer/rewrite layer modeled on RTK-style command rewriting is a **later-phase optional capability**, not current implementation scope. The concept:
 
 - After observer-first evidence collection proves stable and actionable, downstream optimizer work could consume scryrs evidence to rewrite, optimize, or redirect agent commands.
-- This would be a separate phase building on Phase 7 (Runtime Retrieval) or beyond, run as an opt-in session feature rather than default behavior.
+- This would be a separate phase building on Phase 8 (Runtime Retrieval) or beyond, run as an opt-in session feature rather than default behavior.
 - RTK-style command prefixes, compound commands, and rewrite semantics are understood limitations of the current `CommandExecutedPayload` schema. A future optimizer phase would require schema extensions, richer command metadata, and validated hook-order guarantees that are explicitly out of scope for current phases.
 
 This direction is documented as strategic intent only. No implementation, schema changes, or execution middleware should be built toward this direction until prior phases (observer capture → hotspots → dashboard → graph → proposals → adapters → runtime retrieval) are complete and stable.
 
-## Phase 8 - Optional LLM Layer
+## Phase 9 - Optional LLM Layer
 
 Model-backed features belong last because they are interpretation features, not truth-producing features.
 
@@ -213,10 +236,11 @@ If roadmap starts to sprawl, cut work using these rules:
 
 1. **No adapter-first work before real hotspots exist.**
 2. **No graph-first work before persisted event evidence exists.**
-3. **No runtime routing before graph outputs are stable.**
-4. **No LLM dependency in ingestion, policy, or scoring path.**
-5. **No dashboard or hosted analytics product before standalone CLI is useful.** ← satisfied as of Phase 2 delivery. The Phase 3 Dashboard is a local CLI dashboard, not a hosted analytics product. Hosted analytics remain deferred.
-6. **No hook implementation that rewrites tool outputs or agent semantics.**
+3. **No graph or route-manifest work before live hotspot contracts are stable.**
+4. **No runtime routing before graph outputs are stable.**
+5. **No LLM dependency in ingestion, policy, or scoring path.**
+6. **No dashboard or hosted analytics product before standalone CLI is useful.** ← satisfied as of Phase 2 delivery. The Phase 3 Dashboard is a local CLI dashboard, not a hosted analytics product. Hosted analytics remain deferred.
+7. **No hook implementation that rewrites tool outputs or agent semantics.**
 
 ## Suggested Near-Term Milestones
 
@@ -225,9 +249,10 @@ If roadmap starts to sprawl, cut work using these rules:
 | M1 - Proxy capture alpha | Install reference hook, record traces, verify fail-open non-interference |
 | M2 - Standalone hotspots beta | Record traces across sessions and produce real hotspot output from CLI |
 | M3 - Local dashboard beta | Start `scryrs dashboard`, browse hotspots, sessions, and events in a browser |
-| M4 - Routing data beta | Export graph and route manifests for downstream consumers |
-| M5 - Proposal loop beta | Generate reviewable docs and memory proposals from evidence |
-| M6 - Adapter suite beta | Publish approved knowledge into Markdown and Rspress surfaces |
+| M4 - Live hotspot server beta | Point multiple agents at one scryrs server and watch hotspot signals update without manually running `scryrs hotspots` |
+| M5 - Routing data beta | Export graph and route manifests for downstream consumers |
+| M6 - Proposal loop beta | Generate reviewable docs and memory proposals from evidence |
+| M7 - Adapter suite beta | Publish approved knowledge into Markdown and Rspress surfaces |
 
 ## Source-of-Truth Rules
 
