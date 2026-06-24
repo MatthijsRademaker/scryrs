@@ -9,7 +9,12 @@ export interface HotspotsReport {
   schemaVersion?: string;
   command?: string;
   generatedAt?: string;
+  repositoryPath?: string;
   entries: HotspotEntry[];
+}
+
+export interface DashboardMeta {
+  repositoryPath: string;
 }
 
 export interface HotspotEntry {
@@ -59,6 +64,10 @@ async function fetchJson<T>(url: string): Promise<T> {
     throw new ApiError(response.status, body.error ?? response.statusText);
   }
   return await response.json() as T;
+}
+
+export function fetchMeta(): Promise<DashboardMeta> {
+  return fetchJson<DashboardMeta>("/api/meta");
 }
 
 export function getHotspots(): Promise<HotspotsReport> {

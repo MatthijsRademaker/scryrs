@@ -1,10 +1,34 @@
 use crate::run_with_writers;
 use crate::test_support::with_cwd;
 
-// --- 7.1: init --agent claude-code writes hook file ---
+// --- 7.1: init --agent claude-code creates settings.json with native hook ---
+
+/// Parse `.claude/settings.json` under `base` into a JSON value.
+fn read_settings(base: &std::path::Path) -> serde_json::Value {
+    let path = base.join(".claude/settings.json");
+    let contents =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    serde_json::from_str(&contents).unwrap_or_else(|e| panic!("parse settings.json: {e}"))
+}
+
+/// Count occurrences of the native `scryrs hook claude-code` command across all
+/// PreToolUse hook entries.
+fn count_native_hook(settings: &serde_json::Value) -> usize {
+    settings["hooks"]["PreToolUse"]
+        .as_array()
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|e| e["hooks"].as_array())
+                .flatten()
+                .filter(|h| h["type"] == "command" && h["command"] == "scryrs hook claude-code")
+                .count()
+        })
+        .unwrap_or(0)
+}
 
 #[test]
-fn init_agent_claude_code_writes_hook_file() {
+fn init_agent_claude_code_creates_native_settings() {
     let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
     with_cwd(dir.path(), || {
         let mut out = Vec::new();
@@ -20,18 +44,135 @@ fn init_agent_claude_code_writes_hook_file() {
             String::from_utf8_lossy(&err)
         );
 
-        let hook_path = dir.path().join(".claude/hooks/scryrs-hook.mjs");
+        // The native command hook block is present exactly once.
+        let settings = read_settings(dir.path());
+        assert_eq!(count_native_hook(&settings), 1);
+
+        // No .mjs file is ever written.
         assert!(
-            hook_path.exists(),
-            "hook file must exist at {}",
-            hook_path.display()
+            !dir.path().join(".claude/hooks/scryrs-hook.mjs").exists(),
+            "no .mjs file must be written"
         );
-        let content =
-            std::fs::read_to_string(&hook_path).unwrap_or_else(|e| panic!("read hook: {e}"));
-        assert!(!content.is_empty(), "hook file must not be empty");
         assert!(
-            content.contains("PreToolUse"),
-            "hook must contain PreToolUse"
+            !dir.path().join(".claude/hooks").exists(),
+            "no .claude/hooks dir must be created"
+        );
+    });
+}
+
+#[test]
+fn init_agent_claude_code_is_idempotent() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        assert_eq!(
+            run_with_writers(["init", "--agent", "claude-code"], &mut out, &mut err),
+            0
+        );
+        let mut out2 = Vec::new();
+        let mut err2 = Vec::new();
+        assert_eq!(
+            run_with_writers(["init", "--agent", "claude-code"], &mut out2, &mut err2),
+            0
+        );
+        // Re-running does not duplicate the hook.
+        let settings = read_settings(dir.path());
+        assert_eq!(
+            count_native_hook(&settings),
+            1,
+            "re-run must not duplicate the hook"
+        );
+        // Next-step text is byte-identical across runs.
+        assert_eq!(out, out2, "next-step text must be deterministic");
+    });
+}
+
+// --- 7.1b: init scaffolds the .scryrs/ runtime store ---
+
+#[test]
+fn init_claude_code_scaffolds_scryrs_store() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(["init", "--agent", "claude-code"], &mut out, &mut err),
+            0
+        );
+        assert!(
+            err.is_empty(),
+            "stderr must be empty, got: {}",
+            String::from_utf8_lossy(&err)
+        );
+
+        // The runtime store and its .gitignore exist.
+        let db = dir.path().join(".scryrs/scryrs.db");
+        let gitignore = dir.path().join(".scryrs/.gitignore");
+        assert!(
+            db.exists(),
+            "scryrs.db must be scaffolded at {}",
+            db.display()
+        );
+        assert!(
+            gitignore.exists(),
+            ".scryrs/.gitignore must be scaffolded at {}",
+            gitignore.display()
+        );
+
+        // The .gitignore ignores trace data but keeps itself tracked.
+        let ignore =
+            std::fs::read_to_string(&gitignore).unwrap_or_else(|e| panic!("read gitignore: {e}"));
+        assert!(ignore.contains("!.gitignore"), "got: {ignore}");
+
+        // The db is a schema-initialized scryrs store (no rows yet).
+        let conn = rusqlite::Connection::open(&db).unwrap_or_else(|e| panic!("open db: {e}"));
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM trace_events", [], |r| r.get(0))
+            .unwrap_or_else(|e| panic!("query trace_events: {e}"));
+        assert_eq!(count, 0, "fresh store must have no events");
+
+        // stdout announces the scaffolded store.
+        let stdout = String::from_utf8_lossy(&out);
+        assert!(
+            stdout.contains(".scryrs/"),
+            "must mention .scryrs/, got: {stdout}"
+        );
+    });
+}
+
+#[test]
+fn init_pi_scaffolds_scryrs_store() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(["init", "--agent", "pi"], &mut out, &mut err),
+            0
+        );
+        assert!(dir.path().join(".scryrs/scryrs.db").exists());
+        assert!(dir.path().join(".scryrs/.gitignore").exists());
+    });
+}
+
+#[test]
+fn init_unknown_harness_does_not_scaffold() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(["init", "--agent", "unknown"], &mut out, &mut err),
+            2
+        );
+        // An unsupported harness must leave the filesystem untouched.
+        assert!(
+            !dir.path().join(".scryrs").exists(),
+            ".scryrs must not be created for an unsupported harness"
         );
     });
 }
@@ -102,16 +243,26 @@ fn init_agent_unknown_exits_2() {
     });
 }
 
-// --- 7.4: settings.json collision ---
+// --- 7.4: existing settings.json is merged, not clobbered ---
 
 #[test]
-fn init_claude_code_settings_json_collision_exits_2() {
+fn init_claude_code_merges_existing_settings() {
     let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    // Create .claude/settings.json before running init
+    // Pre-existing settings.json with an unrelated key and an unrelated hook.
     std::fs::create_dir_all(dir.path().join(".claude"))
         .unwrap_or_else(|e| panic!("create_dir: {e}"));
-    std::fs::write(dir.path().join(".claude/settings.json"), "{}")
-        .unwrap_or_else(|e| panic!("write: {e}"));
+    std::fs::write(
+        dir.path().join(".claude/settings.json"),
+        r#"{
+          "model": "claude-opus",
+          "hooks": {
+            "PreToolUse": [
+              { "matcher": "Bash", "hooks": [ { "type": "command", "command": "other-tool" } ] }
+            ]
+          }
+        }"#,
+    )
+    .unwrap_or_else(|e| panic!("write: {e}"));
 
     with_cwd(dir.path(), || {
         let mut out = Vec::new();
@@ -119,64 +270,25 @@ fn init_claude_code_settings_json_collision_exits_2() {
 
         assert_eq!(
             run_with_writers(["init", "--agent", "claude-code"], &mut out, &mut err),
-            2
-        );
-        let err_str = String::from_utf8_lossy(&err);
-        assert!(
-            err_str.contains("settings.json already exists"),
-            "must report settings.json collision, got: {err_str}"
-        );
-        assert!(
-            err_str.contains("not be installed"),
-            "must not claim hook source was installed, got: {err_str}"
-        );
-        assert!(
-            !err_str.contains("has been installed"),
-            "must not claim hook source was already installed, got: {err_str}"
-        );
-        assert!(
-            err_str.contains("PreToolUse"),
-            "must include JSON block instructions, got: {err_str}"
-        );
-
-        // Verify no mutation: hook file must NOT exist
-        let hook_path = dir.path().join(".claude/hooks/scryrs-hook.mjs");
-        assert!(
-            !hook_path.exists(),
-            "hook file must not be written on settings.json collision"
+            0,
+            "merge must succeed (not refuse), stderr: {}",
+            String::from_utf8_lossy(&err)
         );
     });
-}
 
-// --- 7.5: scryrs-hook.mjs collision ---
-
-#[test]
-fn init_claude_code_hook_file_collision_exits_2() {
-    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    // Create the target directory and file before running init
-    std::fs::create_dir_all(dir.path().join(".claude/hooks"))
-        .unwrap_or_else(|e| panic!("create_dir: {e}"));
-    std::fs::write(dir.path().join(".claude/hooks/scryrs-hook.mjs"), "existing")
-        .unwrap_or_else(|e| panic!("write: {e}"));
-
-    with_cwd(dir.path(), || {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        assert_eq!(
-            run_with_writers(["init", "--agent", "claude-code"], &mut out, &mut err),
-            2
-        );
-        let err_str = String::from_utf8_lossy(&err);
-        assert!(
-            err_str.contains("already exists"),
-            "must report file collision, got: {err_str}"
-        );
-        assert!(
-            err_str.contains("Remove the file manually"),
-            "must include remediation, got: {err_str}"
-        );
-    });
+    let settings = read_settings(dir.path());
+    // Unrelated key preserved.
+    assert_eq!(settings["model"], "claude-opus");
+    // Unrelated hook preserved.
+    let pre = settings["hooks"]["PreToolUse"]
+        .as_array()
+        .unwrap_or_else(|| panic!("PreToolUse must be array"));
+    assert!(
+        pre.iter().any(|e| e["hooks"][0]["command"] == "other-tool"),
+        "existing unrelated hook must be preserved"
+    );
+    // Native hook added exactly once.
+    assert_eq!(count_native_hook(&settings), 1);
 }
 
 // --- 7.6: pi/index.ts collision ---
@@ -498,7 +610,7 @@ fn init_appears_in_help_json() {
     let doc: serde_json::Value =
         serde_json::from_str(&json_str).unwrap_or_else(|e| panic!("parse help-json: {e}"));
 
-    assert_eq!(doc["surfaceVersion"], "0.5.0");
+    assert_eq!(doc["surfaceVersion"], "0.6.0");
 
     let commands = doc["commands"]
         .as_array()

@@ -10,8 +10,9 @@ The Phase 1 deterministic proxy-capture boundary is implemented:
 
 - `crates/scryrs-types/src/lib.rs` defines `TraceEvent` and related payload types.
 - `crates/scryrs-core/src/lib.rs` provides JSONL event ingestion with semantic validation, rejection diagnostics, and an append-only `.scryrs/scryrs.db` SQLite store.
-- `crates/scryrs-cli/src/lib.rs` exposes three commands: `scryrs record --stdin|--file <PATH>`, `scryrs hotspots <PATH>`, and `scryrs init --agent <NAME>` for installing reference hooks.
-- Reference hooks live at `hooks/pi/` (TypeScript extension) and `hooks/claude-code/` (JavaScript PreToolUse hook).
+- `crates/scryrs-cli/src/lib.rs` exposes `scryrs record --stdin|--file <PATH>`, `scryrs hotspots <PATH>`, `scryrs hook <harness>` (the harness integration entry point), and `scryrs init --agent <NAME>`.
+- `crates/scryrs-adapter-harness/` is the single source of truth for translating each harness's native tool event into a canonical `TraceEvent` (`claude-code` and `pi` adapters).
+- Claude Code integrates via the native `scryrs hook claude-code` command (no JavaScript); Pi integrates via a thin `hooks/pi/index.ts` shim that delegates to `scryrs hook pi`. The transport asymmetry is intentional — symmetry holds at the command and translation layers.
 - `scryrs.json` defines the hook-interface and record-invocation manifest at the repository root.
 - Docker-backed fail-open verification (`scripts/verify-trace-capture`) exercises both hooks end-to-end against the real `scryrs` binary.
 
@@ -67,9 +68,9 @@ Completed deliverables:
 - `scryrs record` CLI surface in `crates/scryrs-cli/src/lib.rs`.
 - Ingest and persistence path in `crates/scryrs-core/src/ingestion.rs`, `crates/scryrs-core/src/store.rs`.
 - Local append-only event store at `.scryrs/scryrs.db`.
-- `scryrs.json` manifest describing hook interface, intercepted events, and `scryrs record` invocation.
-- Reference hooks under `hooks/pi/` and `hooks/claude-code/`.
-- `scryrs init --agent <name>` installer for deterministic hook setup.
+- `scryrs.json` manifest describing the `scryrs hook`/`scryrs record` invocation contract and per-harness metadata.
+- `scryrs hook <harness>` command + `scryrs-adapter-harness` crate (native Claude Code transport; thin Pi `hooks/pi/index.ts` shim).
+- `scryrs init --agent <name>` installer (create/merge `.claude/settings.json` for Claude Code; write the Pi shim).
 - Docker-backed fail-open verification via `scripts/verify-trace-capture`.
 
 Accepted limitations:

@@ -4,7 +4,7 @@ use serde_json::json;
 
 /// Version of the `--help-json` surface document format, independent of
 /// `SCHEMA_VERSION` which governs command output envelopes.
-const SURFACE_VERSION: &str = "0.5.0";
+const SURFACE_VERSION: &str = "0.6.0";
 
 pub(crate) fn cli_surface_doc() -> String {
     let doc = json!({
@@ -62,6 +62,28 @@ pub(crate) fn cli_surface_doc() -> String {
                 }
             },
             {
+                "name": "hook",
+                "description": "Translate a harness's native tool event and record it (harness integration entry point; fail-open)",
+                "arguments": [
+                    {
+                        "name": "harness",
+                        "type": "string",
+                        "required": true,
+                        "values": ["claude-code", "pi"],
+                        "description": "Harness whose native event is being translated"
+                    }
+                ],
+                "modes": [
+                    {"name": "stdin", "flag": "--stdin", "description": "Read the harness event from stdin (default; used by Claude Code)"},
+                    {"name": "file", "flag": "--file", "value": "PATH", "description": "Read the harness event from PATH (used by the Pi shim)"}
+                ],
+                "failOpen": true,
+                "output": {
+                    "mimeType": "none",
+                    "description": "Writes nothing to stdout and always exits 0 (fail-open). Errors are appended to .scryrs/hooks/<harness>-warnings.log; the harness is never blocked."
+                }
+            },
+            {
                 "name": "init",
                 "description": "Install scryrs trace hook for a supported agent harness",
                 "arguments": [
@@ -100,7 +122,7 @@ pub(crate) fn cli_surface_doc() -> String {
         ],
         "rootBehavior": {"action": "help", "exitCode": 0},
         "exitCodes": {
-            "0": "Success (hotspots: JSON written, including empty entries; record: all events accepted; init: hook installed; dashboard: server shut down cleanly)",
+            "0": "Success (hotspots: JSON written, including empty entries; record: all events accepted; init: hook installed; dashboard: server shut down cleanly; hook: always — fail-open, never blocks the harness)",
             "1": "Hotspots: storage error. Record: one or more events rejected, or I/O error writing output. Init: I/O error. Dashboard: port in use or artifact read error.",
             "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file or store failure); init: unsupported harness, collision, or self-install refusal; dashboard: invalid flags."
         }

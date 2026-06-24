@@ -5,6 +5,7 @@ use clap::{Arg, ArgAction, Command};
 use crate::dashboard::{execute_dashboard, write_dashboard_help};
 use crate::help_json::write_cli_surface;
 use crate::help_text::write_help;
+use crate::hook::execute_hook;
 use crate::hotspots::write_hotspots_json;
 use crate::init;
 use crate::record::execute_record;
@@ -58,6 +59,7 @@ where
         let first = &args[0];
         if first != "hotspots"
             && first != "record"
+            && first != "hook"
             && first != "init"
             && first != "dashboard"
             && first != "--help"
@@ -79,6 +81,7 @@ where
     let attempted_command: Option<&str> = if !args.is_empty()
         && (args[0] == "hotspots"
             || args[0] == "record"
+            || args[0] == "hook"
             || args[0] == "init"
             || args[0] == "dashboard")
     {
@@ -120,6 +123,34 @@ where
                         .num_args(1)
                         .action(ArgAction::Set)
                         .help("Read JSONL events from PATH"),
+                ),
+        )
+        .subcommand(
+            Command::new("hook")
+                .about("Translate and record a harness's native tool event (fail-open)")
+                .disable_help_flag(true)
+                .disable_version_flag(true)
+                .arg(
+                    Arg::new("harness")
+                        .required(true)
+                        .value_name("HARNESS")
+                        .help("Harness name (claude-code or pi)"),
+                )
+                .arg(
+                    Arg::new("stdin")
+                        .long("stdin")
+                        .num_args(0)
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("file")
+                        .help("Read the harness event from stdin (default)"),
+                )
+                .arg(
+                    Arg::new("file")
+                        .long("file")
+                        .value_name("PATH")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Read the harness event from PATH"),
                 ),
         )
         .subcommand(
@@ -187,6 +218,13 @@ where
                     write_hotspots_json(&mut out, &mut err, path)
                 }
                 Some(("record", m)) => execute_record(&mut out, &mut err, &mut stdin, m),
+                Some(("hook", m)) => {
+                    let harness = m
+                        .get_one::<String>("harness")
+                        .map(|s| s.as_str())
+                        .unwrap_or("");
+                    execute_hook(&mut out, &mut err, &mut stdin, harness, m)
+                }
                 Some(("init", m)) => {
                     let agent = m
                         .get_one::<String>("agent")
@@ -220,6 +258,17 @@ where
             }
             // D4: Usage errors -> exit 2 with contract three-line format.
             clap::error::ErrorKind::MissingRequiredArgument => match attempted_command {
+                Some("hook") => {
+                    if writeln!(err, "scryrs hook: missing required HARNESS argument").is_err()
+                        || writeln!(err, "Usage: scryrs hook <HARNESS> [--stdin | --file <PATH>]")
+                            .is_err()
+                        || writeln!(err, "See `scryrs --help`").is_err()
+                    {
+                        1
+                    } else {
+                        2
+                    }
+                }
                 Some("init") => {
                     if writeln!(err, "scryrs init: missing required --agent argument").is_err()
                         || writeln!(err, "Usage: scryrs init --agent <NAME>").is_err()
@@ -253,6 +302,17 @@ where
             },
             clap::error::ErrorKind::TooManyValues | clap::error::ErrorKind::UnknownArgument => {
                 match attempted_command {
+                    Some("hook") => {
+                        if writeln!(err, "scryrs hook: unexpected argument").is_err()
+                            || writeln!(err, "Usage: scryrs hook <HARNESS> [--stdin | --file <PATH>]")
+                                .is_err()
+                            || writeln!(err, "See `scryrs --help`").is_err()
+                        {
+                            1
+                        } else {
+                            2
+                        }
+                    }
                     Some("dashboard") => {
                         if writeln!(err, "scryrs dashboard: unexpected argument").is_err()
                             || writeln!(err, "Usage: scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]").is_err()

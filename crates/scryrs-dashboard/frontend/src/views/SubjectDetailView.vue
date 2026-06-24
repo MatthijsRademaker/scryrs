@@ -3,11 +3,15 @@ import { computed, onMounted } from "vue";
 import { useRoute } from "vue-router";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, ConstellationGraph, EmptyState, EventTypeBar, FlameIndicator } from "@/shared/ui";
 import { useHotspotStore } from "@/stores/hotspots";
+import { useMetaStore } from "@/stores/meta";
+import { formatSubject } from "@/shared/lib/subject";
 
 const route = useRoute();
 const hotspots = useHotspotStore();
+const meta = useMetaStore();
 const subjectKind = computed(() => String(route.params.subjectKind));
 const subject = computed(() => String(route.params.subject));
+const display = computed(() => formatSubject(subject.value, meta.repositoryPath, subjectKind.value));
 const entry = computed(() => hotspots.entries.find((candidate) => candidate.subjectKind === subjectKind.value && candidate.subject === subject.value));
 const eventBreakdown = computed(() => Object.entries(entry.value?.counts.eventType ?? {}));
 const totalEvents = computed(() => eventBreakdown.value.reduce((sum, [, count]) => sum + count, 0));
@@ -18,6 +22,7 @@ const constellationNodes = computed(() =>
 
 onMounted(() => {
   if (!hotspots.report) void hotspots.load();
+  void meta.ensureLoaded();
 });
 </script>
 
@@ -50,7 +55,7 @@ onMounted(() => {
       <Card v-if="constellationNodes.length">
         <CardHeader><CardTitle>Evidence Constellation</CardTitle><CardDescription>Event types observed for this subject; node glow scales with volume.</CardDescription></CardHeader>
         <CardContent>
-          <ConstellationGraph :nodes="constellationNodes" :center-label="subject" :height="260" />
+          <ConstellationGraph :nodes="constellationNodes" :center-label="display.label" :height="260" />
         </CardContent>
       </Card>
 

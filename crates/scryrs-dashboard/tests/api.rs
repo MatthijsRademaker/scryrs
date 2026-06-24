@@ -92,13 +92,28 @@ fn populate_store(root: &std::path::Path) {
 }
 
 #[tokio::test]
+async fn meta_returns_repository_path() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+    let repo_root = dir.path().to_path_buf();
+
+    let response = router(config(repo_root.clone()))
+        .oneshot(request("/api/meta"))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_json(response).await;
+    assert_eq!(json["repositoryPath"], repo_root.to_string_lossy().as_ref());
+}
+
+#[tokio::test]
 async fn hotspots_returns_artifact_json() {
     let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
     std::fs::create_dir_all(dir.path().join(".scryrs"))
         .unwrap_or_else(|err| panic!("create .scryrs: {err}"));
     std::fs::write(
         dir.path().join(".scryrs").join("hotspots.json"),
-        r#"{"entries":[{"rank":1,"subject":"src/main.rs"}]}"#,
+        r#"{"repositoryPath":"/work/scryrs","entries":[{"rank":1,"subject":"src/main.rs"}]}"#,
     )
     .unwrap_or_else(|err| panic!("write hotspots: {err}"));
 
@@ -110,6 +125,8 @@ async fn hotspots_returns_artifact_json() {
     assert_eq!(response.status(), StatusCode::OK);
     let json = response_json(response).await;
     assert_eq!(json["entries"][0]["subject"], "src/main.rs");
+    // `/api/hotspots` serves the report file raw, so `repositoryPath` round-trips to the client.
+    assert_eq!(json["repositoryPath"], "/work/scryrs");
 }
 
 #[tokio::test]

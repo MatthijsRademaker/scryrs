@@ -13,9 +13,11 @@
 #
 # Builds the real scryrs binary via Docker (Rust container) and drives both
 # Claude Code and Pi hook fixtures against it (Node container). Run this to
-# prove that reference hooks correctly feed real scryrs persistence without
-# changing agent-visible behavior. Claude Code uses `record --stdin`; Pi uses
-# `record --file <PATH>` because Pi exec opens stdin as /dev/null.
+# prove that the native `scryrs hook <harness>` integration feeds real scryrs
+# persistence without changing agent-visible behavior. Claude Code pipes the
+# PreToolUse event to `scryrs hook claude-code` on stdin; the Pi shim forwards
+# the raw event to `scryrs hook pi --file <PATH>` (Pi exec opens stdin as
+# /dev/null). Tool→event translation lives in the scryrs-adapter-harness crate.
 #
 # Uses node:22 (Debian-based, glibc) so the Rust-compiled scryrs binary runs
 # without recompilation for musl.
@@ -118,12 +120,13 @@ INIT_EXIT=0
 # which also uses glibc. Alpine-based node images use musl and won't run the binary.
 FIXTURE_NODE_IMAGE="${FIXTURE_NODE_IMAGE:-node:22}"
 
-# Pre-install better-sqlite3 in the workspace so both fixtures can import it.
-step "Installing better-sqlite3 for fixture use"
+# Pre-install fixture deps: better-sqlite3 (read the store) and tsx (transpile
+# the Pi index.ts shim). The Claude Code path needs neither a hook file nor node.
+step "Installing fixture dependencies (better-sqlite3, tsx)"
 run_node --image "$FIXTURE_NODE_IMAGE" \
     -- \
-    npm install better-sqlite3 \
-    || { echo "ERROR: failed to install better-sqlite3" >&2; exit 1; }
+    npm install better-sqlite3 tsx \
+    || { echo "ERROR: failed to install fixture dependencies" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
 # 2. Claude Code fixture

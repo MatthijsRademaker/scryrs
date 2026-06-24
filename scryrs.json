@@ -12,13 +12,25 @@
     "NOT_tool_output_rewriter": "This manifest does not describe tool output rewriting, augmentation, or modification."
   },
 
+  "hook": {
+    "command": "scryrs",
+    "usage": "scryrs hook <harness>",
+    "harnesses": ["claude-code", "pi"],
+    "description": "Harness integration entry point. Accepts a harness's native tool event, translates it via the scryrs-adapter-harness crate, and persists it through the same canonical store as `scryrs record`. Always exits 0 with empty stdout (fail-open) and never blocks the harness.",
+    "input": {
+      "claude-code": "PreToolUse event JSON on stdin",
+      "pi": "raw tool_result/session_start event JSON via --file <PATH> (Pi exec opens stdin as /dev/null)"
+    },
+    "failOpen": "On any error (malformed input, unknown harness, translation failure, store error) the command exits 0, writes nothing to stdout, and appends a timestamped line to .scryrs/hooks/<harness>-warnings.log."
+  },
+
   "record": {
     "command": "scryrs",
     "args": ["record", "--stdin"],
-    "description": "Canonical hook ingestion path. Hooks pipe JSONL TraceEvent envelopes to scryrs record --stdin via stdin.",
+    "description": "Low-level canonical-JSONL ingestion primitive beneath `scryrs hook`. Accepts validated TraceEvent JSONL on stdin.",
     "alternateMode": {
       "flag": "--file <PATH>",
-      "description": "Available alternate ingestion mode for reading trace events from a file instead of stdin. Hooks currently use --stdin."
+      "description": "Available alternate ingestion mode for reading trace events from a file instead of stdin."
     },
     "outputContract": {
       "stdout": "Single-line JSON summary: {\"command\":\"record\",\"schemaVersion\":\"…\",\"accepted\":<count>,\"rejected\":<count>}.",
@@ -34,21 +46,21 @@
   "supported_harnesses": [
     {
       "harness": "claude-code",
-      "referenceSource": "hooks/claude-code/scryrs-hook.mjs",
+      "integration": "Native `scryrs hook claude-code` command hook configured in .claude/settings.json under PreToolUse as {\"type\":\"command\",\"command\":\"scryrs hook claude-code\"}. The PreToolUse event JSON is piped on stdin. No JavaScript, no node runtime, and no reference hook file.",
       "interceptedTools": [
-        "read",
-        "grep",
-        "glob",
-        "edit",
-        "write",
-        "notebookedit",
-        "web_search",
-        "web_fetch"
+        "Read",
+        "Grep",
+        "Glob",
+        "Edit",
+        "Write",
+        "NotebookEdit",
+        "WebSearch",
+        "WebFetch"
       ],
       "debugOnlyInterceptedTools": [
-        "bash"
+        "Bash"
       ],
-      "_interceptedToolsNote": "Observational metadata — these are tool names observed by the hook, not a callable surface. debugOnlyInterceptedTools are only captured when SCRYRS_DEBUG is set to a non-empty value.",
+      "_interceptedToolsNote": "Observational metadata — these are documented PascalCase Claude Code tool names observed by the hook, not a callable surface. debugOnlyInterceptedTools are only captured when SCRYRS_DEBUG is set to a non-empty value.",
       "capturedEventFamilies": [
         "FileOpened",
         "SearchRun",
@@ -60,11 +72,12 @@
       ],
       "lifecycle": "none",
       "capturedLifecycleEvents": [],
-      "limitations": "PreToolUse-only hook. Returns { continue: true } unconditionally (Success outcome). No SessionStart, SessionEnd, PostToolUse, or notification-level events are captured."
+      "limitations": "PreToolUse-only hook. Fires pre-execution, so every event carries outcome=Success. Fail-open is exit 0 with empty stdout. No SessionStart, SessionEnd, PostToolUse, or notification-level events are captured."
     },
     {
       "harness": "pi",
       "referenceSource": "hooks/pi/index.ts",
+      "integration": "Thin in-process extension (Pi loads a module rather than spawning a subprocess hook). The shim resolves session_id from Pi's SessionManager, serializes the raw tool_result/session_start event to a temp file, and delegates translation to `scryrs hook pi --file <tmp>`. It contains no tool→event mapping.",
       "interceptedTools": [
         "read",
         "ast_grep_search",
@@ -75,7 +88,7 @@
       "debugOnlyInterceptedTools": [
         "bash"
       ],
-      "_interceptedToolsNote": "Observational metadata — these are tool names observed by the hook, not a callable surface. debugOnlyInterceptedTools are only captured when SCRYRS_DEBUG is set to a non-empty value.",
+      "_interceptedToolsNote": "Observational metadata — these are lowercase Pi tool names observed by the shim, not a callable surface. debugOnlyInterceptedTools are only captured when SCRYRS_DEBUG is set to a non-empty value.",
       "capturedEventFamilies": [
         "FileOpened",
         "SearchRun",

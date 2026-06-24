@@ -8,6 +8,7 @@
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
     "check": "vue-tsc --noEmit",
+    "test": "vitest run",
     "shadcn:info": "bunx --bun shadcn-vue@latest info --json"
   },
   "dependencies": {
@@ -29,6 +30,7 @@
     "tw-animate-css": "^1.3.5",
     "typescript": "^5.8.3",
     "vite": "^6.3.5",
+    "vitest": "^3.0.5",
     "vue-tsc": "^2.2.10"
   }
 }

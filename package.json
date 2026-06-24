@@ -1,5 +1,8 @@
 {
   "dependencies": {
     "better-sqlite3": "^12.11.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.22.4"
   }
 }

@@ -1,12 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
 import { useRoute } from "vue-router";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, ConstellationGraph, EmptyState, EventSparkline } from "@/shared/ui";
+import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, ConstellationGraph, EmptyState, EventSparkline } from "@/shared/ui";
 import { useSessionStore } from "@/stores/sessions";
+import { useMetaStore } from "@/stores/meta";
 import { colorForKey } from "@/shared/lib/viz";
+import { formatSubject } from "@/shared/lib/subject";
+import type { TraceEventItem } from "@/shared/api/client";
 
 const route = useRoute();
 const store = useSessionStore();
+const meta = useMetaStore();
+
+function subjectDisplay(event: TraceEventItem) {
+  return formatSubject(event.subject, meta.repositoryPath, event.subjectKind);
+}
 const sessionId = computed(() => String(route.params.sessionId));
 const shortId = computed(() => (sessionId.value.length > 18 ? `${sessionId.value.slice(0, 18)}…` : sessionId.value));
 
@@ -39,7 +47,7 @@ const sparkValues = computed(() => {
   return out;
 });
 
-onMounted(() => { void store.loadSession(sessionId.value); });
+onMounted(() => { void store.loadSession(sessionId.value); void meta.ensureLoaded(); });
 function payloadPreview(payload: unknown) { return JSON.stringify(payload)?.slice(0, 200) ?? "null"; }
 </script>
 <template>
@@ -102,7 +110,11 @@ function payloadPreview(payload: unknown) { return JSON.stringify(payload)?.slic
                   {{ event.eventType }}
                 </span>
                 <span class="text-muted-foreground">{{ event.timestamp }}</span>
-                <span class="text-foreground/80">{{ event.subject ?? 'lifecycle' }}</span>
+                <span v-if="event.subject" class="inline-flex items-center gap-1.5 text-foreground/80" :title="subjectDisplay(event).full">
+                  <Badge v-if="subjectDisplay(event).isExternal" variant="warning" class="shrink-0">EXTERNAL</Badge>
+                  {{ subjectDisplay(event).label }}
+                </span>
+                <span v-else class="text-foreground/80">lifecycle</span>
               </div>
               <pre class="mt-1 overflow-hidden whitespace-pre-wrap break-all text-[0.7rem] text-muted-foreground">{{ payloadPreview(event.payload) }}</pre>
             </li>

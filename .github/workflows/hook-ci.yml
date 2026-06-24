@@ -4,15 +4,19 @@ on:
   pull_request:
     paths:
       - "hooks/**"
-      - "scripts/hook-test"
-      - "scripts/hook-test-runner.mjs"
+      - "crates/scryrs-adapter-harness/**"
+      - "crates/scryrs-cli/**"
+      - "scripts/verification/**"
+      - "scripts/verify-trace-capture"
       - ".github/workflows/hook-ci.yml"
   push:
     branches: [main]
     paths:
       - "hooks/**"
-      - "scripts/hook-test"
-      - "scripts/hook-test-runner.mjs"
+      - "crates/scryrs-adapter-harness/**"
+      - "crates/scryrs-cli/**"
+      - "scripts/verification/**"
+      - "scripts/verify-trace-capture"
       - ".github/workflows/hook-ci.yml"
 
 permissions:
@@ -26,10 +30,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: Hook tests
-        run: scripts/hook-test
+      - name: Build scryrs binary
+        run: cargo build --release -p scryrs-cli
+
+      - name: Install fixture dependencies
+        run: npm install better-sqlite3 tsx
+
+      - name: Claude Code E2E (native scryrs hook claude-code)
+        run: node scripts/verification/claude-code-e2e.mjs
+        env:
+          SCRYRS_BIN: ${{ github.workspace }}/target/release/scryrs
+
+      - name: Pi E2E (native scryrs hook pi + transport shim)
+        run: node scripts/verification/pi-hook-e2e.mjs
+        env:
+          SCRYRS_BIN: ${{ github.workspace }}/target/release/scryrs
+
+      - name: Installed-hook E2E (init create/merge + native commands)
+        run: node scripts/verification/installed-hook-e2e.mjs
+        env:
+          SCRYRS_BIN: ${{ github.workspace }}/target/release/scryrs

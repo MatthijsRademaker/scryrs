@@ -81,6 +81,12 @@ struct EventQuery {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct MetaResponse {
+    repository_path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionSummary {
     session_id: String,
     started_at: String,
@@ -120,6 +126,7 @@ pub fn router(config: Config) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/assets/*path", get(asset))
+        .route("/api/meta", get(meta))
         .route("/api/hotspots", get(hotspots))
         .route("/api/sessions", get(sessions))
         .route("/api/sessions/:session_id", get(session_detail))
@@ -167,6 +174,12 @@ fn open_browser(url: &str) {
         cmd
     };
     let _ = command.spawn();
+}
+
+async fn meta(State(state): State<Arc<AppState>>) -> Json<MetaResponse> {
+    Json(MetaResponse {
+        repository_path: state.config.repo_root.to_string_lossy().into_owned(),
+    })
 }
 
 async fn hotspots(State(state): State<Arc<AppState>>) -> Result<Response<Body>, ApiError> {

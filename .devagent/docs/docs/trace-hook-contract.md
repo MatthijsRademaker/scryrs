@@ -31,7 +31,17 @@ The following rules are non-negotiable. Every scryrs hook, regardless of integra
 
 ### Fail-open guarantee
 
-If a hook's invocation of `scryrs record` fails for any reason — process crash, pipe error, non-zero exit code, missing binary — the harness **must** proceed with the original tool execution normally. The original tool's stdout, stderr, and exit status are preserved unmodified. A scryrs failure is a tracing gap, not a tool-execution failure.
+scryrs failure is always a tracing gap, never a tool-execution failure. The
+harness **must** proceed with the original tool unmodified regardless of scryrs.
+
+- For the native `scryrs hook <harness>` command, fail-open means the command
+  **always exits 0 with empty stdout** and appends any error (malformed input,
+  unknown harness, translation failure, store error) to
+  `.scryrs/hooks/<harness>-warnings.log`. For Claude Code, exit 0 with no stdout
+  is the documented allow signal; if the `scryrs` binary is entirely absent,
+  Claude Code's own missing-command handling lets the tool proceed.
+- For the Pi shim, a failed `scryrs hook pi` invocation is logged via
+  `console.error` and does not alter the agent-visible tool result.
 
 The design rule is: **scryrs can fail, tools cannot.**
 
@@ -134,9 +144,33 @@ No implicit boundaries exist. A session is explicitly opened and closed. Consume
 {"schema_version":"0.1.0","timestamp":"2026-06-20T12:00:15Z","session_id":"sess-abc123","event_type":"SessionEnd","tool_name":null,"payload":{"type":"SessionEnd"},"outcome":{"result":"Success"}}
 ```
 
+## Harness Integration Transport: `scryrs hook <harness>`
+
+The harness-facing integration entry point is `scryrs hook <harness>`. It accepts
+a harness's **native** tool event, translates it into a canonical `TraceEvent`,
+and persists it through the same canonical store as `scryrs record`. Translation
+lives once, in the Rust `scryrs-adapter-harness` crate — never in JavaScript and
+never duplicated per harness.
+
+Transport differs by harness, and this asymmetry is intentional:
+
+| Harness | Transport | Input | Why |
+|---------|-----------|-------|-----|
+| **Claude Code** | Native `scryrs hook claude-code` command hook (no JavaScript, no node) | `PreToolUse` event JSON on **stdin** | Claude Code `command` hooks spawn a subprocess and pipe the event on stdin |
+| **Pi** | Thin in-process extension (`hooks/pi/index.ts`) delegating to `scryrs hook pi` | raw event via **`--file <PATH>`** | Pi loads a module rather than spawning a subprocess hook; its `exec()` opens stdin as `/dev/null` |
+
+The Pi shim resolves `session_id` from Pi's `SessionManager`, serializes the raw
+event, and calls `scryrs hook pi --file <tmp>`. It contains no tool→event mapping.
+
+`scryrs hook` **fails open**: it always exits 0 with empty stdout and appends any
+error to `.scryrs/hooks/<harness>-warnings.log` (this is the inverse of `record`'s
+1/2 exit policy).
+
 ## scryrs record Invocation Contract
 
-`scryrs record` is the **only ingestion endpoint**. There are exactly two invocation modes, and they are mutually exclusive.
+`scryrs record` is the low-level **canonical-JSONL ingestion primitive** beneath
+`scryrs hook`. There are exactly two invocation modes, and they are mutually
+exclusive.
 
 ### Supported modes
 
@@ -145,7 +179,9 @@ No implicit boundaries exist. A session is explicitly opened and closed. Consume
 | stdin pipe | `scryrs record --stdin` | Read newline-delimited `TraceEvent` JSON from stdin |
 | file read | `scryrs record --file <PATH>` | Read JSONL from a file |
 
-**No other ingestion paths exist.** scryrs has no socket, HTTP endpoint, IPC mechanism, pipe wrapper, or alternate command for trace ingestion.
+**The only ingestion surfaces are `scryrs hook <harness>` and `scryrs record`
+(`--stdin`/`--file`).** scryrs has no socket, HTTP endpoint, IPC mechanism, pipe
+wrapper, or other alternate command for trace ingestion.
 
 ### Output contract
 
@@ -267,18 +303,28 @@ Three integration tiers exist, offering different levels of coverage and requiri
 
 ### Tier 1: Full Hook
 
-**What it is:** A harness-native subprocess hook that runs after every tool execution. The hook formats the tool's metadata into `TraceEvent` JSON and invokes `scryrs record --stdin`.
+**What it is:** A harness integration that hands the harness's native tool event
+to `scryrs hook <harness>`, which translates it (via `scryrs-adapter-harness`)
+and persists it through the canonical store.
 
 **Guarantees:**
 
-- Automatic session demarcation (SessionStart/SessionEnd).
-- Full event coverage across all nine event families.
-- Fail-open by construction: hook runs as a subprocess *after* the tool, not as a proxy.
+- Automatic session demarcation where the harness exposes lifecycle events.
+- Full event coverage across the supported event families.
+- Fail-open by construction: `scryrs hook` always exits 0 and never blocks the tool.
 
 **Implemented harness coverage:**
 
-- **Pi** — implemented at `hooks/pi/index.ts`. Pi's `.pi/extensions/` directory provides native hook support. Captures `SessionStart` and five default tool-result events (read, ast_grep_search, lsp_navigation, edit, write). Bash is debug-gated via `SCRYRS_DEBUG`.
-- **Claude Code** — implemented at `hooks/claude-code/scryrs-hook.mjs`. Claude Code's PreToolUse hook system provides tool-execution interception. Captures eight default PreToolUse events (Read, Grep, Glob, Edit, Write, NotebookEdit, WebSearch, WebFetch). Bash is debug-gated via `SCRYRS_DEBUG`. PreToolUse-only; no lifecycle events.
+- **Pi** — a thin transport shim at `hooks/pi/index.ts`. Pi's `.pi/extensions/`
+  directory loads the module; the shim forwards raw `session_start`/`tool_result`
+  events to `scryrs hook pi --file`. The `pi` adapter captures `SessionStart` and
+  five default tool events (read, ast_grep_search, lsp_navigation, edit, write).
+  Bash is debug-gated via `SCRYRS_DEBUG`.
+- **Claude Code** — the native `scryrs hook claude-code` command hook (no
+  JavaScript file). Configured in `.claude/settings.json` under `PreToolUse`,
+  it receives the event on stdin. The `claude-code` adapter captures eight
+  default PreToolUse events (Read, Grep, Glob, Edit, Write, NotebookEdit,
+  WebSearch, WebFetch). Bash is debug-gated. PreToolUse-only; no lifecycle events.
 
 ### Tier 2: Plugin
 
@@ -310,26 +356,32 @@ This tier exists as a lowest-common-denominator fallback for harnesses with no h
 Hook installation is automated via `scryrs init --agent <name>`. Run the installer from the target project directory:
 
 ```bash
-scryrs init --agent claude-code  # install Claude Code hook
-scryrs init --agent pi           # install Pi hook
+scryrs init --agent claude-code  # merge native command hook into .claude/settings.json
+scryrs init --agent pi           # install the Pi transport shim
 ```
 
-The installer writes hook files to project-local directories, refuses to overwrite existing files, and provides deterministic next-step instructions on success.
+For Claude Code the installer create-or-merges `.claude/settings.json` with the
+native `scryrs hook claude-code` command hook (preserving unrelated keys, idempotent
+on re-run); it writes no hook file. For Pi it writes the slimmed `index.ts` shim to
+`.pi/extensions/pi-trace/`. Both print deterministic next-step instructions.
 
 ### Manual setup (alternative)
 
-1. **Install hook files:** Copy the reference hook source into the harness-specific location (see Reference Hooks below).
-2. **Ensure scryrs is on `$PATH`** — the hook subprocess must be able to invoke `scryrs record`.
-3. **Configure harness hook** — create or edit the harness's hook configuration to invoke scryrs after tool execution.
-4. **Create `scryrs.json`** at the repository root (optional, recommended).
-5. **Verify fail-open behavior** — confirm that scryrs failures do not block tool execution.
+1. **Ensure scryrs is on `$PATH`** — the harness must be able to invoke `scryrs hook <harness>`.
+2. **Configure the harness:** for Claude Code, add `{"type":"command","command":"scryrs hook claude-code"}` under `PreToolUse` in `.claude/settings.json`; for Pi, install the `hooks/pi/index.ts` shim into `.pi/extensions/pi-trace/`.
+3. **Create `scryrs.json`** at the repository root (optional, recommended).
+4. **Verify fail-open behavior** — confirm that scryrs failures do not block tool execution.
 
 ## Reference Hooks
 
-Reference hook implementations for Pi and Claude Code live under `hooks/`.
-
-- **Pi hook** — exists at `hooks/pi/`. A Pi extension (`index.ts`) that observes tool_result events for read, bash, ast_grep_search, lsp_navigation, edit, and write tools and forwards canonical TraceEvent JSONL to `scryrs record --stdin`. Session demarcation is automatic via session_start event. See `hooks/pi/README.md` for details.
-- **Claude Code hook** — exists at [`hooks/claude-code/`](https://github.com/scryrs-project/scryrs/blob/main/hooks/claude-code/scryrs-hook.mjs). A PreToolUse JavaScript hook that intercepts Read, Bash, Grep, Glob, Edit, Write, NotebookEdit, WebSearch, and WebFetch events and forwards canonical TraceEvent JSONL to `scryrs record --stdin`. See `hooks/claude-code/README.md` for installation and usage instructions.
+- **Pi shim** — a thin transport-only extension at `hooks/pi/index.ts`. It
+  forwards raw `session_start`/`tool_result` events to `scryrs hook pi --file`;
+  all tool→event translation lives in the Rust `pi` adapter. Session demarcation
+  is automatic via the `session_start` event. See `hooks/pi/README.md`.
+- **Claude Code** — the native `scryrs hook claude-code` command (no hook file).
+  Installed by merging the command hook into `.claude/settings.json`; the
+  `claude-code` adapter intercepts Read, Grep, Glob, Edit, Write, NotebookEdit,
+  WebSearch, WebFetch (Bash debug-gated). See `hooks/claude-code/README.md`.
 
 ### Claude Code Hook Limitations
 
@@ -337,16 +389,17 @@ The Claude Code hook is a **PreToolUse-only** hook. This creates specific limita
 
 - **Unconditional Success outcome:** PreToolUse hooks fire *before* tool execution. The real outcome (success or failure) cannot be determined. Every emitted event carries `outcome: Success` unconditionally. These are pre-execution metadata signals, not post-execution outcomes.
 - **No session lifecycle events:** PreToolUse hooks have no session-open or session-close trigger. No `SessionStart` or `SessionEnd` lifecycle events are emitted. Only subject-bearing tool events are produced.
-- **Per-process session IDs:** The hook generates a UUID v4 session ID once per hook process lifetime. If Claude Code exposes a session-scoped identifier via environment variables, the hook prefers that; otherwise it generates its own.
+- **Session IDs come from the payload:** the integration reads `session_id` directly from the `PreToolUse` payload (no per-process UUID, no `CLAUDE_SESSION_ID`-style environment variables). The trace store is resolved against the payload `cwd`.
 
 ### Claude Code Hook Fail-Open Warning Channel
 
-The Claude Code hook writes fail-open warnings to a dedicated log file outside agent context:
+The native `scryrs hook claude-code` command writes fail-open warnings to a
+dedicated log file outside agent context:
 
-- **Log file:** `.scryrs/hooks/claude-code-warnings.log` (resolved to an absolute path from the hook process working directory).
+- **Log file:** `.scryrs/hooks/claude-code-warnings.log` (resolved under the payload `cwd`).
 - **Format:** ISO-8601 timestamp followed by a human-readable reason.
-- **Warnings are never written to stdout or stderr** — the agent-visible tool output is unchanged.
-- **Scenarios that produce warnings:** `scryrs` binary not found on PATH, `scryrs record` exits non-zero, subprocess spawn error, stdin write failure.
+- **Warnings are never written to stdout or stderr** — the agent-visible tool output is unchanged; the command exits 0 regardless.
+- **Scenarios that produce warnings:** malformed event JSON, unknown harness routing, translation failure, trace store cannot be opened or written.
 
 No reference hooks for other harnesses are planned at this time. Harness authors targeting other platforms should follow the integration-tier matrix above and use the Pi/Claude Code hooks as reference patterns.
 

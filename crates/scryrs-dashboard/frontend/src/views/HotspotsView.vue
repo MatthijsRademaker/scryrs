@@ -17,9 +17,16 @@ import {
   Table,
 } from "@/shared/ui";
 import { useHotspotStore } from "@/stores/hotspots";
+import { useMetaStore } from "@/stores/meta";
+import { formatSubject } from "@/shared/lib/subject";
 import type { HotspotEntry } from "@/shared/api/client";
 
 const store = useHotspotStore();
+const meta = useMetaStore();
+
+function subjectDisplay(entry: HotspotEntry) {
+  return formatSubject(entry.subject, meta.repositoryPath, entry.subjectKind);
+}
 const sortKey = ref<keyof HotspotEntry>("rank");
 const sortAsc = ref(true);
 const columns: { key: keyof HotspotEntry; label: string }[] = [
@@ -52,7 +59,7 @@ function totalEvents(entry: HotspotEntry) {
   return Object.values(entry.counts.eventType).reduce((sum, count) => sum + count, 0);
 }
 
-onMounted(() => { void store.load(); });
+onMounted(() => { void store.load(); void meta.ensureLoaded(); });
 </script>
 
 <template>
@@ -86,10 +93,11 @@ onMounted(() => { void store.load(); });
           </div>
           <RouterLink
             :to="{ name: 'subject-detail', params: { subjectKind: entry.subjectKind, subject: entry.subject } }"
-            class="truncate text-lg font-semibold text-foreground no-underline transition-colors hover:text-primary"
+            class="flex items-center gap-1.5 truncate text-lg font-semibold text-foreground no-underline transition-colors hover:text-primary"
             :title="entry.subject"
           >
-            {{ entry.subject }}
+            <Badge v-if="subjectDisplay(entry).isExternal" variant="warning" class="shrink-0">EXTERNAL</Badge>
+            <span class="truncate">{{ subjectDisplay(entry).label }}</span>
           </RouterLink>
           <div class="flex items-end justify-between gap-3">
             <span class="text-flame text-3xl font-semibold tabular-nums">{{ entry.score }}</span>
@@ -127,7 +135,10 @@ onMounted(() => { void store.load(); });
               <tr v-for="entry in sortedEntries" :key="`${entry.subjectKind}:${entry.subject}`" class="border-t border-border transition-colors hover:bg-foreground/[0.03]">
                 <td class="px-3 py-2.5 font-mono tabular-nums text-muted-foreground">{{ entry.rank }}</td>
                 <td class="px-3 py-2.5">
-                  <RouterLink :to="{ name: 'subject-detail', params: { subjectKind: entry.subjectKind, subject: entry.subject } }" class="font-medium text-primary no-underline hover:underline">{{ entry.subject }}</RouterLink>
+                  <RouterLink :to="{ name: 'subject-detail', params: { subjectKind: entry.subjectKind, subject: entry.subject } }" class="inline-flex items-center gap-1.5 font-medium text-primary no-underline hover:underline" :title="entry.subject">
+                    <Badge v-if="subjectDisplay(entry).isExternal" variant="warning" class="shrink-0">EXTERNAL</Badge>
+                    <span>{{ subjectDisplay(entry).label }}</span>
+                  </RouterLink>
                   <div class="text-xs text-muted-foreground">{{ entry.subjectKind }}</div>
                   <div class="mt-1.5 max-w-44"><EventTypeBar :counts="entry.counts.eventType" /></div>
                 </td>

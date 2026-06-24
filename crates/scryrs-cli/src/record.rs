@@ -21,9 +21,7 @@ fn record_debug_enabled() -> bool {
 }
 
 #[cfg(feature = "core")]
-fn collapse_newlines(value: &str) -> String {
-    value.replace("\r\n", " ⏎ ").replace(['\n', '\r'], " ⏎ ")
-}
+use scryrs_adapter_harness::collapse_newlines;
 
 #[cfg(feature = "core")]
 fn truncate_debug(value: &str) -> String {

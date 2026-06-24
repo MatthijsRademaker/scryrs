@@ -1,27 +1,21 @@
 /**
  * scryrs Claude Code end-to-end verification fixture.
  *
- * Exercises hooks/claude-code/scryrs-hook.mjs against the real `scryrs record --stdin`
- * binary. Reuses JSON-shaping, fail-open, transparency, and pass-through test
- * logic from scripts/hook-test-runner.mjs.
+ * Drives the NATIVE `scryrs hook claude-code` subcommand by piping a real
+ * PreToolUse payload on stdin. There is no `.mjs` hook file and no `node` hook
+ * process — translation lives in the Rust `scryrs-adapter-harness` crate and is
+ * exercised through the shipped `scryrs` binary.
  *
  * Prerequisites:
- *   - Real `scryrs` binary on PATH (built via `cargo build --release`)
- *   - Working directory is the repository root
+ *   - Real `scryrs` binary (SCRYRS_BIN env, or target/release/scryrs)
  *
  * Usage: node scripts/verification/claude-code-e2e.mjs
  */
 
-import {
-	existsSync,
-	mkdirSync,
-	rmSync,
-	writeFileSync,
-	readFileSync,
-} from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { pass, fail, summary } from "./lib/assert.mjs";
@@ -30,783 +24,256 @@ import { readEventsDb, assertEventShape } from "./lib/db.mjs";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const ROOT = join(__dirname, "..", "..");
-const HOOK_FILE = join(ROOT, "hooks", "claude-code", "scryrs-hook.mjs");
 const SCRYRS_BIN =
 	process.env.SCRYRS_BIN || join(ROOT, "target", "release", "scryrs");
 
-// -----------------------------------------------------------------------
-// Helper: invoke the hook as a subprocess
-// -----------------------------------------------------------------------
-function invokeHook(toolName, toolInput, workDir, envOverrides = {}) {
-	const tmpDir = join(
-		tmpdir(),
-		`scryrs-cc-e2e-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-	);
-	mkdirSync(tmpDir, { recursive: true });
-	const scriptFile = join(tmpDir, "invoke.mjs");
+function freshDir(prefix) {
+	return mkdtempSync(join(tmpdir(), prefix));
+}
 
-	const code = [
-		`import hook from ${JSON.stringify(HOOK_FILE)};`,
-		`const input = { tool_name: ${JSON.stringify(toolName)}, tool_input: ${JSON.stringify(toolInput)} };`,
-		`const result = await hook(input);`,
-		`console.log(JSON.stringify(result));`,
-	].join("\n");
+/**
+ * Pipe a PreToolUse payload to `scryrs hook claude-code` on stdin.
+ * Returns { status, stdout, stderr }.
+ */
+function runHook(payload, { cwd, env = {} } = {}) {
+	const result = spawnSync(SCRYRS_BIN, ["hook", "claude-code"], {
+		input: typeof payload === "string" ? payload : JSON.stringify(payload),
+		cwd: cwd || ROOT,
+		env: { ...process.env, ...env },
+		encoding: "utf-8",
+		timeout: 15000,
+	});
+	return {
+		status: result.status,
+		stdout: result.stdout ?? "",
+		stderr: result.stderr ?? "",
+	};
+}
 
-	writeFileSync(scriptFile, code);
+function storeFor(dir) {
+	return join(dir, ".scryrs", "scryrs.db");
+}
 
-	const env = { ...process.env, ...envOverrides };
-	// Ensure scryrs is on PATH
-	const scryrsDir = dirname(SCRYRS_BIN);
-	env.PATH = `${scryrsDir}:${workDir || ""}:${env.PATH || ""}`;
-
-	try {
-		const stdout = execFileSync("node", [scriptFile], {
-			env,
-			cwd: workDir || process.cwd(),
-			timeout: 15000,
-			encoding: "utf-8",
-			stdio: ["ignore", "pipe", "pipe"],
-		}).trim();
-		rmSync(tmpDir, { recursive: true, force: true });
-		return { result: JSON.parse(stdout), exitCode: 0 };
-	} catch (err) {
-		rmSync(tmpDir, { recursive: true, force: true });
-		if (err.stdout) {
-			try {
-				return {
-					result: JSON.parse(err.stdout.toString().trim()),
-					exitCode: err.status || 1,
-				};
-			} catch {
-				return {
-					result: null,
-					exitCode: err.status || 1,
-					stderr: err.stderr?.toString() || "",
-				};
-			}
-		}
-		return { result: null, exitCode: err.status || 1, stderr: String(err) };
-	}
+function readWarningLog(dir) {
+	const p = join(dir, ".scryrs", "hooks", "claude-code-warnings.log");
+	return existsSync(p) ? readFileSync(p, "utf-8") : "";
 }
 
 // -----------------------------------------------------------------------
-// Test: JSON shaping — default observer-first tools against real scryrs
+// Test: tracked tools map to canonical events and persist under payload cwd
 // -----------------------------------------------------------------------
-async function testJsonShaping() {
-	console.log(
-		`\n\x1b[33m--- Claude Code: JSON Shaping (real scryrs) ---\x1b[0m`,
-	);
+function testTrackedTools() {
+	console.log("\n\x1b[33m--- Claude Code: tracked tools (native command) ---\x1b[0m");
 
-	const tmpDir = join(tmpdir(), `scryrs-cc-e2e-json-${Date.now()}`);
-	mkdirSync(tmpDir, { recursive: true });
-
-	const realScryrs = SCRYRS_BIN;
-
-	// Initialize scryrs in the temp dir
-	try {
-		execFileSync(realScryrs, ["init"], {
-			cwd: tmpDir,
-			timeout: 5000,
-			stdio: "ignore",
-		});
-	} catch {}
-
-	// Default observer-first tools (Bash excluded)
-	const tools = [
-		{
-			name: "read",
-			input: { file_path: "/src/main.rs" },
-			expectedType: "FileOpened",
-			payloadKey: "path",
-			payloadVal: "/src/main.rs",
-		},
-		{
-			name: "grep",
-			input: { pattern: "error handling" },
-			expectedType: "SearchRun",
-			payloadKey: "query",
-			payloadVal: "error handling",
-		},
-		{
-			name: "glob",
-			input: { pattern: "**/*.rs" },
-			expectedType: "SearchRun",
-			payloadKey: "query",
-			payloadVal: "**/*.rs",
-		},
-		{
-			name: "edit",
-			input: { file_path: "/src/lib.rs" },
-			expectedType: "EditMade",
-			payloadKey: "target",
-			payloadVal: "/src/lib.rs",
-		},
-		{
-			name: "write",
-			input: { file_path: "/src/new.rs" },
-			expectedType: "EditMade",
-			payloadKey: "target",
-			payloadVal: "/src/new.rs",
-		},
-		{
-			name: "notebookedit",
-			input: { file_path: "/notebook.ipynb" },
-			expectedType: "EditMade",
-			payloadKey: "target",
-			payloadVal: "/notebook.ipynb",
-		},
-		{
-			name: "web_search",
-			input: { searchTerm: "rust serde" },
-			expectedType: "SearchRun",
-			payloadKey: "query",
-			payloadVal: "rust serde",
-		},
-		{
-			name: "web_fetch",
-			input: { url: "https://example.com" },
-			expectedType: "DocRetrieved",
-			payloadKey: "doc_ref",
-			payloadVal: "https://example.com",
-		},
+	const cases = [
+		{ tool: "Read", input: { file_path: "/src/main.rs" }, type: "FileOpened" },
+		{ tool: "Grep", input: { pattern: "fn main" }, type: "SearchRun" },
+		{ tool: "Glob", input: { pattern: "**/*.rs" }, type: "SearchRun" },
+		{ tool: "WebSearch", input: { query: "rust traits" }, type: "SearchRun" },
+		{ tool: "Edit", input: { file_path: "/src/a.rs" }, type: "EditMade" },
+		{ tool: "Write", input: { file_path: "/src/b.rs" }, type: "EditMade" },
+		{ tool: "NotebookEdit", input: { notebook_path: "/n.ipynb" }, type: "EditMade" },
+		{ tool: "WebFetch", input: { url: "https://example.com" }, type: "DocRetrieved" },
 	];
 
-	// Invoke each tool through the hook, running in tmpDir
-	for (const tool of tools) {
-		const { result } = invokeHook(tool.name, tool.input, tmpDir);
-		if (!result || !result.continue) {
-			fail(
-				`Claude Code ${tool.name}: hook return`,
-				"did not return {continue:true}",
-			);
-			continue;
-		}
-		pass(`Claude Code ${tool.name}: hook returned {continue:true}`);
-	}
-
-	// Assert events persisted in the datastore (appended by each scryrs record invocation)
-	const eventsDb = join(tmpDir, ".scryrs", "scryrs.db");
-	const events = readEventsDb(eventsDb);
-
-	if (events.length !== tools.length) {
-		fail(
-			"events count",
-			`expected ${tools.length} events, got ${events.length}`,
-		);
-	} else {
-		pass(`events: ${events.length} events (matches ${tools.length} tools)`);
-	}
-
-	for (let i = 0; i < Math.min(events.length, tools.length); i++) {
-		const tool = tools[i];
-		const event = events[i];
-		const shapeOk = assertEventShape(event, tool.expectedType, tool.name);
-
-		if (
-			shapeOk &&
-			event.payload &&
-			event.payload[tool.payloadKey] === tool.payloadVal
-		) {
-			pass(`Claude Code ${tool.name}: event shape + payload correct`);
-		} else if (shapeOk) {
-			fail(
-				`Claude Code ${tool.name}: payload`,
-				`payload.${tool.payloadKey}=${event.payload?.[tool.payloadKey]} expected=${tool.payloadVal}`,
-			);
-		}
-	}
-
-	rmSync(tmpDir, { recursive: true, force: true });
-}
-
-// -----------------------------------------------------------------------
-// Test: Default mode does NOT capture Bash
-// -----------------------------------------------------------------------
-async function testDefaultModeExcludesBash() {
-	console.log(
-		`\n\x1b[33m--- Claude Code: Default Mode Excludes Bash ---\x1b[0m`,
-	);
-
-	const tmpDir = join(tmpdir(), `scryrs-cc-e2e-nobash-${Date.now()}`);
-	mkdirSync(tmpDir, { recursive: true });
-
-	const realScryrs = SCRYRS_BIN;
-	try {
-		execFileSync(realScryrs, ["init"], {
-			cwd: tmpDir,
-			timeout: 5000,
-			stdio: "ignore",
-		});
-	} catch {}
-
-	// Invoke Bash hook path WITHOUT SCRYRS_DEBUG
-	const env = { ...process.env };
-	delete env.SCRYRS_DEBUG;
-	const { result } = invokeHook("bash", { command: "cargo build" }, tmpDir);
-
-	if (!result || !result.continue) {
-		fail("Claude Code no-bash: hook return", "did not return {continue:true}");
-		rmSync(tmpDir, { recursive: true, force: true });
-		return;
-	}
-	pass("Claude Code no-bash: hook returned {continue:true}");
-
-	// Assert no Bash event persisted
-	const eventsDb = join(tmpDir, ".scryrs", "scryrs.db");
-	const events = readEventsDb(eventsDb);
-	const bashEvents = events.filter((e) => e.event_type === "CommandExecuted");
-
-	if (bashEvents.length === 0) {
-		pass("Claude Code no-bash: no CommandExecuted event persisted");
-	} else {
-		fail(
-			"Claude Code no-bash",
-			`expected 0 Bash events, got ${bashEvents.length}`,
-		);
-	}
-
-	rmSync(tmpDir, { recursive: true, force: true });
-}
-
-// -----------------------------------------------------------------------
-// Test: Debug mode captures Bash as CommandExecuted
-// -----------------------------------------------------------------------
-async function testDebugModeCapturesBash() {
-	console.log(`\n\x1b[33m--- Claude Code: Debug Mode Captures Bash ---\x1b[0m`);
-
-	const tmpDir = join(tmpdir(), `scryrs-cc-e2e-debugbash-${Date.now()}`);
-	mkdirSync(tmpDir, { recursive: true });
-
-	const realScryrs = SCRYRS_BIN;
-	try {
-		execFileSync(realScryrs, ["init"], {
-			cwd: tmpDir,
-			timeout: 5000,
-			stdio: "ignore",
-		});
-	} catch {}
-
-	// Invoke Bash WITH SCRYRS_DEBUG=1, using RTK-prefixed command
-	const env = { ...process.env, SCRYRS_DEBUG: "1" };
-	const tmpInvokeDir = join(
-		tmpdir(),
-		`scryrs-cc-e2e-debug-invoke-${Date.now()}`,
-	);
-	mkdirSync(tmpInvokeDir, { recursive: true });
-	const scriptFile = join(tmpInvokeDir, "invoke-debug.mjs");
-
-	const code = [
-		`import hook from ${JSON.stringify(HOOK_FILE)};`,
-		`const input = { tool_name: "bash", tool_input: { command: "rtk ls -la" } };`,
-		`const result = await hook(input);`,
-		`console.log(JSON.stringify(result));`,
-	].join("\n");
-	writeFileSync(scriptFile, code);
-
-	const scryrsDir = dirname(SCRYRS_BIN);
-	const fullEnv = {
-		...env,
-		PATH: `${scryrsDir}:${env.PATH || ""}`,
-	};
-
-	try {
-		execFileSync("node", [scriptFile], {
-			env: fullEnv,
-			cwd: tmpDir,
-			timeout: 15000,
-			encoding: "utf-8",
-			stdio: ["ignore", "pipe", "ignore"],
-		});
-	} catch {}
-	rmSync(tmpInvokeDir, { recursive: true, force: true });
-
-	// Assert Bash event persisted with correct payload
-	const eventsDb = join(tmpDir, ".scryrs", "scryrs.db");
-	const events = readEventsDb(eventsDb);
-	const bashEvents = events.filter(
-		(e) => e.event_type === "CommandExecuted" && e.tool_name === "bash",
-	);
-
-	if (bashEvents.length !== 1) {
-		fail(
-			"Claude Code debug-bash: count",
-			`expected 1 Bash event, got ${bashEvents.length}`,
-		);
-	} else {
-		pass("Claude Code debug-bash: 1 CommandExecuted event persisted");
-	}
-
-	const rtkEvent = bashEvents.find((e) => e.payload?.command === "rtk ls -la");
-	if (rtkEvent) {
-		pass("Claude Code debug-bash: payload.command is 'rtk ls -la'");
-		const shapeOk = assertEventShape(rtkEvent, "CommandExecuted", "bash");
-		if (shapeOk) {
-			pass("Claude Code debug-bash: envelope shape correct");
-		}
-	} else {
-		fail(
-			"Claude Code debug-bash: payload",
-			`expected 'rtk ls -la', got: ${JSON.stringify(bashEvents.map((e) => e.payload?.command))}`,
-		);
-	}
-
-	rmSync(tmpDir, { recursive: true, force: true });
-}
-
-// -----------------------------------------------------------------------
-// Test: Rewrite-tool compatibility — RTK-style Bash commands
-// -----------------------------------------------------------------------
-async function testRewriteCompatibility() {
-	console.log(
-		`\n\x1b[33m--- Claude Code: Rewrite-tool Compatibility ---\x1b[0m`,
-	);
-
-	const tmpDir = join(tmpdir(), `scryrs-cc-e2e-rtk-${Date.now()}`);
-	mkdirSync(tmpDir, { recursive: true });
-
-	const realScryrs = SCRYRS_BIN;
-	try {
-		execFileSync(realScryrs, ["init"], {
-			cwd: tmpDir,
-			timeout: 5000,
-			stdio: "ignore",
-		});
-	} catch {}
-
-	// Fixture: RTK-prefixed Bash command (debug-gated)
-	{
-		const { result } = invokeHook("bash", { command: "rtk ls -la" }, tmpDir, {
-			SCRYRS_DEBUG: "1",
-		});
-		if (!result || !result.continue) {
-			fail("Claude Code RTK: hook return", "did not return {continue:true}");
-		} else {
-			pass("Claude Code RTK: hook returned {continue:true}");
-		}
-	}
-
-	// Fixture: compound rewritten Bash command (debug-gated)
-	{
-		const { result } = invokeHook(
-			"bash",
-			{
-				command:
-					'echo "=== BACKEND ===" && rtk ls backend/api/ && rtk ls backend/cmd/',
-			},
-			tmpDir,
-			{ SCRYRS_DEBUG: "1" },
-		);
-		if (!result || !result.continue) {
-			fail(
-				"Claude Code compound RTK: hook return",
-				"did not return {continue:true}",
-			);
-		} else {
-			pass("Claude Code compound RTK: hook returned {continue:true}");
-		}
-	}
-
-	// Assert events are persisted with both commands exactly as observed
-	const eventsDb = join(tmpDir, ".scryrs", "scryrs.db");
-	const events = readEventsDb(eventsDb);
-
-	const bashEvents = events.filter(
-		(e) => e.event_type === "CommandExecuted" && e.tool_name === "bash",
-	);
-
-	if (bashEvents.length !== 2) {
-		fail(
-			"Claude Code RTK: events count",
-			`expected 2 Bash events, got ${bashEvents.length}`,
-		);
-	} else {
-		pass("Claude Code RTK: 2 Bash events persisted");
-	}
-
-	// Check simple RTK-prefixed command
-	const rtkSimple = bashEvents.find((e) => e.payload?.command === "rtk ls -la");
-	if (rtkSimple) {
-		pass("Claude Code RTK: simple command persisted as 'rtk ls -la'");
-	} else {
-		fail(
-			"Claude Code RTK: simple command",
-			`expected payload.command='rtk ls -la', got: ${JSON.stringify(bashEvents.map((e) => e.payload?.command))}`,
-		);
-	}
-
-	// Check compound rewritten command
-	const compoundExpected =
-		'echo "=== BACKEND ===" && rtk ls backend/api/ && rtk ls backend/cmd/';
-	const rtkCompound = bashEvents.find(
-		(e) => e.payload?.command === compoundExpected,
-	);
-	if (rtkCompound) {
-		pass("Claude Code RTK: compound command persisted exactly as observed");
-	} else {
-		fail(
-			"Claude Code RTK: compound command",
-			`expected payload.command='${compoundExpected}', got: ${JSON.stringify(bashEvents.map((e) => e.payload?.command))}`,
-		);
-	}
-
-	// RTK fixture should not change non-Bash coverage: verify other tools still work
-	{
-		const { result } = invokeHook(
-			"read",
-			{ file_path: "/src/main.rs" },
-			tmpDir,
-		);
-		if (!result || !result.continue) {
-			fail("Claude Code RTK: read hook", "did not return {continue:true}");
-		} else {
-			pass("Claude Code RTK: non-Bash tool (read) unaffected");
-		}
-	}
-
-	const allEvents = readEventsDb(eventsDb);
-	const readEvents = allEvents.filter(
-		(e) => e.event_type === "FileOpened" && e.tool_name === "read",
-	);
-	if (readEvents.length > 0) {
-		pass("Claude Code RTK: non-Bash events still persisted");
-	} else {
-		fail(
-			"Claude Code RTK: non-Bash events",
-			"no FileOpened event found for read",
-		);
-	}
-
-	// Non-interference: verify hook writes zero stdout/stderr for RTK commands
-	{
-		const niDir = join(tmpdir(), `scryrs-cc-e2e-rtk-ni-${Date.now()}`);
-		mkdirSync(niDir, { recursive: true });
+	for (const c of cases) {
+		const dir = freshDir("scryrs-cc-");
 		try {
-			execFileSync(realScryrs, ["init"], {
-				cwd: niDir,
-				timeout: 5000,
-				stdio: "ignore",
-			});
-		} catch {}
-
-		// Simple RTK-prefixed command
-		{
-			const scriptFile = join(niDir, "ni-simple.mjs");
-			const code = [
-				`import hook from ${JSON.stringify(HOOK_FILE)};`,
-				`const input = { tool_name: "bash", tool_input: { command: "rtk ls -la" } };`,
-				`const result = await hook(input);`,
-				`// result is not logged — hook should not write to stdout`,
-			].join("\n");
-			writeFileSync(scriptFile, code);
-			const env = {
-				...process.env,
-				PATH: `${niDir}:${process.env.PATH || ""}`,
-			};
-			try {
-				const stdoutResult = execFileSync("node", [scriptFile], {
-					env,
-					cwd: niDir,
-					timeout: 15000,
-					encoding: "utf-8",
-					stdio: ["ignore", "pipe", "pipe"],
-				});
-				if (!stdoutResult.trim())
-					pass("Claude Code RTK NI: simple command — hook stdout empty");
-				else
-					fail(
-						"Claude Code RTK NI: simple command stdout",
-						`unexpected: ${stdoutResult.slice(0, 200)}`,
-					);
-				pass("Claude Code RTK NI: simple command — hook stderr empty");
-			} catch (err) {
-				const stdout = err.stdout?.toString() || "";
-				const stderr = err.stderr?.toString() || "";
-				if (!stdout.trim())
-					pass("Claude Code RTK NI: simple command — hook stdout empty");
-				else
-					fail(
-						"Claude Code RTK NI: simple command stdout",
-						`unexpected: ${stdout.slice(0, 200)}`,
-					);
-				if (!stderr.trim())
-					pass("Claude Code RTK NI: simple command — hook stderr empty");
-				else
-					fail(
-						"Claude Code RTK NI: simple command stderr",
-						`unexpected: ${stderr.slice(0, 200)}`,
-					);
+			const r = runHook(
+				{ session_id: "abc123", cwd: dir, tool_name: c.tool, tool_input: c.input },
+				{ cwd: ROOT },
+			);
+			if (r.status !== 0) {
+				fail(`${c.tool}: exit 0`, `got ${r.status}, stderr=${r.stderr}`);
+				continue;
 			}
-		}
-
-		// Compound rewritten command
-		{
-			const scriptFile = join(niDir, "ni-compound.mjs");
-			const compoundCmd =
-				'echo "=== BACKEND ===" && rtk ls backend/api/ && rtk ls backend/cmd/';
-			const code = [
-				`import hook from ${JSON.stringify(HOOK_FILE)};`,
-				`const input = { tool_name: "bash", tool_input: { command: ${JSON.stringify(compoundCmd)} } };`,
-				`const result = await hook(input);`,
-				`// result is not logged — hook should not write to stdout`,
-			].join("\n");
-			writeFileSync(scriptFile, code);
-			const env = {
-				...process.env,
-				PATH: `${niDir}:${process.env.PATH || ""}`,
-			};
-			try {
-				const stdoutResult = execFileSync("node", [scriptFile], {
-					env,
-					cwd: niDir,
-					timeout: 15000,
-					encoding: "utf-8",
-					stdio: ["ignore", "pipe", "pipe"],
-				});
-				if (!stdoutResult.trim())
-					pass("Claude Code RTK NI: compound command — hook stdout empty");
-				else
-					fail(
-						"Claude Code RTK NI: compound command stdout",
-						`unexpected: ${stdoutResult.slice(0, 200)}`,
-					);
-				pass("Claude Code RTK NI: compound command — hook stderr empty");
-			} catch (err) {
-				const stdout = err.stdout?.toString() || "";
-				const stderr = err.stderr?.toString() || "";
-				if (!stdout.trim())
-					pass("Claude Code RTK NI: compound command — hook stdout empty");
-				else
-					fail(
-						"Claude Code RTK NI: compound command stdout",
-						`unexpected: ${stdout.slice(0, 200)}`,
-					);
-				if (!stderr.trim())
-					pass("Claude Code RTK NI: compound command — hook stderr empty");
-				else
-					fail(
-						"Claude Code RTK NI: compound command stderr",
-						`unexpected: ${stderr.slice(0, 200)}`,
-					);
+			if (r.stdout !== "") {
+				fail(`${c.tool}: empty stdout`, `got: ${JSON.stringify(r.stdout)}`);
+				continue;
 			}
-		}
+			pass(`${c.tool}: exit 0 with empty stdout`);
 
-		rmSync(niDir, { recursive: true, force: true });
+			// Event persisted under the payload cwd (D5), not under ROOT.
+			const events = readEventsDb(storeFor(dir));
+			if (events.length !== 1) {
+				fail(`${c.tool}: exactly one event under payload cwd`, `got ${events.length}`);
+				continue;
+			}
+			pass(`${c.tool}: one event persisted under payload cwd`);
+			if (assertEventShape(events[0], c.type, c.tool)) {
+				pass(`${c.tool}: canonical ${c.type} envelope`);
+			}
+			if (events[0].session_id === "abc123") {
+				pass(`${c.tool}: session_id from payload`);
+			} else {
+				fail(`${c.tool}: session_id from payload`, `got ${events[0].session_id}`);
+			}
+			if (events[0].outcome.result === "Success") {
+				pass(`${c.tool}: pre-exec outcome is Success`);
+			} else {
+				fail(`${c.tool}: outcome Success`, `got ${events[0].outcome.result}`);
+			}
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	}
-
-	rmSync(tmpDir, { recursive: true, force: true });
 }
 
 // -----------------------------------------------------------------------
-// Test: Non-interference — hook produces zero stdout/stderr
+// Test: store resolves against payload cwd, not the process cwd
 // -----------------------------------------------------------------------
-async function testNonInterference() {
-	console.log(`\n\x1b[33m--- Claude Code: Non-interference ---\x1b[0m`);
-
-	const tmpDir = join(tmpdir(), `scryrs-cc-e2e-ni-${Date.now()}`);
-	mkdirSync(tmpDir, { recursive: true });
-
-	const scriptFile = join(tmpDir, "transparency-test.mjs");
-	const code = [
-		`import hook from ${JSON.stringify(HOOK_FILE)};`,
-		`const input = { tool_name: "bash", tool_input: { command: "echo hello" } };`,
-		`const result = await hook(input);`,
-		`// result is not logged — hook should not write to stdout`,
-	].join("\n");
-	writeFileSync(scriptFile, code);
-
+function testStoreResolvesToPayloadCwd() {
+	console.log("\n\x1b[33m--- Claude Code: store resolves to payload cwd ---\x1b[0m");
+	const procDir = freshDir("scryrs-cc-proc-");
+	const payloadDir = freshDir("scryrs-cc-payload-");
 	try {
-		// Capture stdout and stderr separately (hook's own output, not scryrs')
-		const stdoutResult = execFileSync("node", [scriptFile], {
-			cwd: tmpDir,
-			timeout: 10000,
+		const r = runHook(
+			{
+				session_id: "s1",
+				cwd: payloadDir,
+				tool_name: "Read",
+				tool_input: { file_path: "/x.rs" },
+			},
+			{ cwd: procDir },
+		);
+		const inPayload = readEventsDb(storeFor(payloadDir)).length;
+		const inProc = readEventsDb(storeFor(procDir)).length;
+		if (r.status === 0 && inPayload === 1 && inProc === 0) {
+			pass("event written under payload cwd, not process cwd");
+		} else {
+			fail(
+				"store resolves to payload cwd",
+				`payload=${inPayload} proc=${inProc} status=${r.status}`,
+			);
+		}
+	} finally {
+		rmSync(procDir, { recursive: true, force: true });
+		rmSync(payloadDir, { recursive: true, force: true });
+	}
+}
+
+// -----------------------------------------------------------------------
+// Test: untracked tool persists nothing
+// -----------------------------------------------------------------------
+function testUntracked() {
+	console.log("\n\x1b[33m--- Claude Code: untracked tool pass-through ---\x1b[0m");
+	const dir = freshDir("scryrs-cc-untracked-");
+	try {
+		const r = runHook(
+			{ session_id: "s1", cwd: dir, tool_name: "TodoWrite", tool_input: {} },
+			{ cwd: ROOT },
+		);
+		const count = readEventsDb(storeFor(dir)).length;
+		if (r.status === 0 && count === 0) {
+			pass("untracked tool: exit 0 and no event persisted");
+		} else {
+			fail("untracked tool pass-through", `status=${r.status} count=${count}`);
+		}
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+// -----------------------------------------------------------------------
+// Test: Bash is debug-gated
+// -----------------------------------------------------------------------
+function testBashDebugGating() {
+	console.log("\n\x1b[33m--- Claude Code: Bash debug-gating ---\x1b[0m");
+
+	// Without SCRYRS_DEBUG → dropped.
+	const dirOff = freshDir("scryrs-cc-bash-off-");
+	try {
+		runHook(
+			{ session_id: "s1", cwd: dirOff, tool_name: "Bash", tool_input: { command: "ls" } },
+			{ cwd: ROOT, env: { SCRYRS_DEBUG: "" } },
+		);
+		const count = readEventsDb(storeFor(dirOff)).length;
+		if (count === 0) pass("Bash dropped when SCRYRS_DEBUG unset");
+		else fail("Bash debug-gating (off)", `got ${count} events`);
+	} finally {
+		rmSync(dirOff, { recursive: true, force: true });
+	}
+
+	// With SCRYRS_DEBUG → CommandExecuted.
+	const dirOn = freshDir("scryrs-cc-bash-on-");
+	try {
+		runHook(
+			{ session_id: "s1", cwd: dirOn, tool_name: "Bash", tool_input: { command: "cargo build" } },
+			{ cwd: ROOT, env: { SCRYRS_DEBUG: "1" } },
+		);
+		const events = readEventsDb(storeFor(dirOn));
+		if (events.length === 1 && events[0].event_type === "CommandExecuted") {
+			pass("Bash captured as CommandExecuted when SCRYRS_DEBUG set");
+		} else {
+			fail("Bash debug-gating (on)", `got ${JSON.stringify(events)}`);
+		}
+	} finally {
+		rmSync(dirOn, { recursive: true, force: true });
+	}
+}
+
+// -----------------------------------------------------------------------
+// Test: fail-open — malformed stdin and unwritable store both exit 0 + log
+// -----------------------------------------------------------------------
+function testFailOpen() {
+	console.log("\n\x1b[33m--- Claude Code: fail-open ---\x1b[0m");
+
+	// Malformed JSON on stdin.
+	const dirBad = freshDir("scryrs-cc-malformed-");
+	try {
+		const r = spawnSync(SCRYRS_BIN, ["hook", "claude-code"], {
+			input: "this is not json",
+			cwd: dirBad,
+			env: { ...process.env },
 			encoding: "utf-8",
-			stdio: ["ignore", "pipe", "pipe"],
-		});
-		if (!stdoutResult.trim()) {
-			pass("Claude Code non-interference: hook stdout empty");
-		} else {
-			fail(
-				"Claude Code non-interference: stdout",
-				`unexpected: ${stdoutResult.slice(0, 200)}`,
-			);
-		}
-		pass("Claude Code non-interference: hook stderr empty");
-	} catch (err) {
-		const stdout = err.stdout?.toString() || "";
-		const stderr = err.stderr?.toString() || "";
-		if (!stdout.trim()) {
-			pass("Claude Code non-interference: hook stdout empty");
-		} else {
-			fail(
-				"Claude Code non-interference: stdout",
-				`unexpected: ${stdout.slice(0, 200)}`,
-			);
-		}
-		if (!stderr.trim()) {
-			pass("Claude Code non-interference: hook stderr empty");
-		} else {
-			fail(
-				"Claude Code non-interference: stderr",
-				`unexpected: ${stderr.slice(0, 200)}`,
-			);
-		}
-	}
-
-	rmSync(tmpDir, { recursive: true, force: true });
-}
-
-// -----------------------------------------------------------------------
-// Test: Fail-open — scryrs missing
-// -----------------------------------------------------------------------
-async function testFailOpen() {
-	console.log(
-		`\n\x1b[33m--- Claude Code: Fail-open (scryrs missing) ---\x1b[0m`,
-	);
-
-	const tmpDir = join(tmpdir(), `scryrs-cc-e2e-fo-${Date.now()}`);
-	mkdirSync(tmpDir, { recursive: true });
-
-	// Create a script that invokes the hook with PATH explicitly set
-	// to exclude scryrs (only the empty dir and standard system paths).
-	const scriptFile = join(tmpDir, "invoke-failopen.mjs");
-	const code = [
-		`import hook from ${JSON.stringify(HOOK_FILE)};`,
-		`const input = { tool_name: "read", tool_input: { file_path: "/x.txt" } };`,
-		`const result = await hook(input);`,
-		`console.log(JSON.stringify(result));`,
-	].join("\n");
-	writeFileSync(scriptFile, code);
-
-	// Set PATH to standard system dirs only — explicitly exclude /workspace/target/release
-	const env = {
-		...process.env,
-		PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-	};
-
-	let result, stderr;
-	try {
-		const stdout = execFileSync("node", [scriptFile], {
-			env,
-			cwd: tmpDir,
 			timeout: 15000,
-			encoding: "utf-8",
-			stdio: ["ignore", "pipe", "pipe"],
-		}).trim();
-		result = JSON.parse(stdout);
-	} catch (err) {
-		if (err.stdout) {
-			try {
-				result = JSON.parse(err.stdout.toString().trim());
-			} catch {
-				result = null;
-			}
-		}
-		stderr = err.stderr?.toString() || "";
-	}
-
-	if (!result || !result.continue) {
-		fail(
-			"Claude Code fail-open",
-			"did not return {continue:true} when scryrs missing",
-		);
-	} else {
-		pass("Claude Code fail-open: returned {continue:true}");
-	}
-
-	if (stderr && stderr.trim()) {
-		fail(
-			"Claude Code fail-open: stderr",
-			`hook wrote to stderr: ${stderr.slice(0, 100)}`,
-		);
-	} else {
-		pass("Claude Code fail-open: no stderr output");
-	}
-
-	// Check warning log was created (relative to tmpDir cwd)
-	const warningLog = join(
-		tmpDir,
-		".scryrs",
-		"hooks",
-		"claude-code-warnings.log",
-	);
-	if (existsSync(warningLog)) {
-		const logContent = readFileSync(warningLog, "utf-8");
-		if (logContent.trim().length > 0) {
-			pass("Claude Code fail-open: warning logged to claude-code-warnings.log");
-		} else {
-			fail("Claude Code fail-open: warning log", "log exists but is empty");
-		}
-	} else {
-		fail("Claude Code fail-open: warning log", "no warning log created");
-	}
-
-	rmSync(tmpDir, { recursive: true, force: true });
-}
-
-// -----------------------------------------------------------------------
-// Test: Pass-through — unlisted tools produce no events
-// -----------------------------------------------------------------------
-async function testPassthrough() {
-	console.log(
-		`\n\x1b[33m--- Claude Code: Pass-through (unlisted tools) ---\x1b[0m`,
-	);
-
-	const tmpDir = join(tmpdir(), `scryrs-cc-e2e-pt-${Date.now()}`);
-	mkdirSync(tmpDir, { recursive: true });
-
-	const realScryrs = SCRYRS_BIN;
-	try {
-		execFileSync(realScryrs, ["init"], {
-			cwd: tmpDir,
-			timeout: 5000,
-			stdio: "ignore",
 		});
-	} catch {}
-
-	const { result } = invokeHook(
-		"task",
-		{ description: "do something" },
-		tmpDir,
-	);
-
-	if (!result || !result.continue) {
-		fail("Claude Code pass-through: task", "unlisted tool was blocked");
-	} else {
-		pass("Claude Code pass-through: task: hook returned {continue:true}");
+		const log = readWarningLog(dirBad);
+		if (r.status === 0 && (r.stdout ?? "") === "" && log.includes("malformed JSON")) {
+			pass("malformed stdin: exit 0, empty stdout, warning logged");
+		} else {
+			fail(
+				"malformed stdin fail-open",
+				`status=${r.status} stdout=${JSON.stringify(r.stdout)} log=${JSON.stringify(log)}`,
+			);
+		}
+	} finally {
+		rmSync(dirBad, { recursive: true, force: true });
 	}
 
-	// No event should be written for Task
-	const eventsDb = join(tmpDir, ".scryrs", "scryrs.db");
-	const events = readEventsDb(eventsDb);
-	const taskEvents = events.filter((e) => e.tool_name === "task");
-	if (taskEvents.length > 0) {
-		fail(
-			"Claude Code pass-through: task",
-			`unlisted tool produced ${taskEvents.length} trace event(s)`,
+	// Unwritable store: the warning-log dir (payload cwd) stays writable, but
+	// the db path is blocked by pre-creating <cwd>/.scryrs/scryrs.db AS A
+	// DIRECTORY so EventStore::open cannot create the database file there.
+	const cwdDir = freshDir("scryrs-cc-failopen-cwd-");
+	try {
+		mkdirSync(join(cwdDir, ".scryrs", "scryrs.db"), { recursive: true });
+		const r = runHook(
+			{ session_id: "s1", cwd: cwdDir, tool_name: "Read", tool_input: { file_path: "/a.rs" } },
+			{ cwd: ROOT },
 		);
-	} else {
-		pass("Claude Code pass-through: task: no event captured for unlisted tool");
+		const log = readWarningLog(cwdDir);
+		if (
+			r.status === 0 &&
+			(log.includes("cannot open store") || log.includes("cannot append"))
+		) {
+			pass("unwritable store: exit 0 and warning logged");
+		} else {
+			fail("unwritable store fail-open", `status=${r.status} log=${JSON.stringify(log)}`);
+		}
+	} finally {
+		rmSync(cwdDir, { recursive: true, force: true });
 	}
-
-	rmSync(tmpDir, { recursive: true, force: true });
 }
 
 // -----------------------------------------------------------------------
 // Main
 // -----------------------------------------------------------------------
-async function main() {
-	await testJsonShaping();
-	await testDefaultModeExcludesBash();
-	await testDebugModeCapturesBash();
-	await testRewriteCompatibility();
-	await testNonInterference();
-	await testFailOpen();
-	await testPassthrough();
+console.log("scryrs Claude Code E2E — native `scryrs hook claude-code`");
+console.log(`Binary: ${SCRYRS_BIN}`);
 
-	summary();
-}
-
-main().catch((err) => {
-	console.error("Claude Code E2E fixture crashed:", err);
-	process.exit(2);
-});
+testTrackedTools();
+testStoreResolvesToPayloadCwd();
+testUntracked();
+testBashDebugGating();
+testFailOpen();
+summary();

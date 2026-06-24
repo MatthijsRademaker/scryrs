@@ -689,6 +689,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "scryrs-adapter-harness"
+version = "0.1.0"
+dependencies = [
+ "scryrs-types",
+ "serde_json",
+]
+
+[[package]]
 name = "scryrs-adapter-markdown"
 version = "0.1.0"
 dependencies = [
@@ -709,6 +717,7 @@ dependencies = [
  "clap",
  "insta",
  "rusqlite",
+ "scryrs-adapter-harness",
  "scryrs-adapter-markdown",
  "scryrs-adapter-rspress",
  "scryrs-core",

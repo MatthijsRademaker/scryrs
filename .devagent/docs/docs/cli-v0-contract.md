@@ -275,10 +275,12 @@ All error messages and human-facing diagnostics are written to stderr.
 
 **Installation targets:**
 
-- `claude-code`: Writes `.claude/hooks/scryrs-hook.mjs` relative to CWD.
-- `pi`: Writes `.pi/extensions/pi-trace/index.ts` relative to CWD.
+- `claude-code`: Create-or-merges `.claude/settings.json` (relative to CWD) with the native command hook `{"type":"command","command":"scryrs hook claude-code"}` under `PreToolUse`. No hook file is written.
+- `pi`: Writes `.pi/extensions/pi-trace/index.ts` (the transport shim) relative to CWD.
 
-**Collision behavior:** If the target file or `.claude/settings.json` (for Claude Code) already exists, the installer exits 2 with remediation instructions. It never overwrites existing files.
+**Runtime store scaffolding:** Before installing the hook, `init` eagerly scaffolds the `.scryrs/` runtime directory (relative to the resolved target base): a schema-initialized `.scryrs/scryrs.db` and a `.scryrs/.gitignore` that excludes runtime trace data from version control. This makes setup visible immediately and lets `scryrs hotspots` / `scryrs dashboard` succeed (returning an empty report) before any events are recorded; the hook still creates the store lazily as a fallback. Scaffolding is idempotent — an existing store is opened, never clobbered, and an existing `.gitignore` is preserved. It runs only after the harness name is validated, so an unsupported harness leaves the filesystem untouched.
+
+**Collision behavior:** For `claude-code`, the installer merges into an existing `.claude/settings.json` — preserving unrelated keys and existing hooks, idempotent on re-run (the hook appears exactly once). For `pi`, if the target file already exists the installer exits 2 with remediation instructions rather than overwriting.
 
 **Self-install guard:** The installer refuses to run inside the scryrs source repository (detected via dual-marker heuristic).
 

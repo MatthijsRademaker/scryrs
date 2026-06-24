@@ -1,9 +1,17 @@
 # scryrs Verification Suites
 
-This directory contains end-to-end verification fixtures that prove the scryrs
-reference hooks correctly feed real scryrs persistence without changing
-agent-visible behavior. Claude Code uses `scryrs record --stdin`; Pi uses
-`scryrs record --file <PATH>` because Pi exec opens stdin as `/dev/null`.
+This directory contains end-to-end verification fixtures that prove the native
+`scryrs hook <harness>` integration feeds real scryrs persistence without
+changing agent-visible behavior.
+
+- **Claude Code** pipes the `PreToolUse` event JSON to `scryrs hook claude-code`
+  on stdin. There is no `.mjs` hook file and no node hook process.
+- **Pi** loads a thin in-process `index.ts` shim that forwards the raw event to
+  `scryrs hook pi --file <PATH>` (Pi's `exec()` opens stdin as `/dev/null`).
+
+All tool→`TraceEvent` translation lives once, in the Rust
+`scryrs-adapter-harness` crate. The fixtures exercise the shipped `scryrs`
+binary, never repository hook-translation source.
 
 ## Architecture
 
@@ -12,10 +20,11 @@ scripts/verification/
 ├── README.md                  # This file
 ├── lib/
 │   ├── assert.mjs             # pass/fail/assert helpers + summary
-│   └── jsonl.mjs              # readJsonl, assertEventShape
-├── claude-code-e2e.mjs        # Claude Code source-hook fixture
-├── pi-hook-e2e.mjs            # Pi source-hook fixture
-└── installed-hook-e2e.mjs     # Installed-hook e2e fixture
+│   ├── db.mjs                 # readEventsDb, assertEventShape (SQLite)
+│   └── pi-shim-driver.mjs     # loads hooks/pi/index.ts via tsx with a mock Pi
+├── claude-code-e2e.mjs        # native `scryrs hook claude-code` (cross-harness)
+├── pi-hook-e2e.mjs            # native `scryrs hook pi` + transport shim
+└── installed-hook-e2e.mjs     # `scryrs init` create/merge + native commands
 ```
 
 ### Entrypoint
@@ -24,9 +33,10 @@ scripts/verification/
 
 1. Builds the real `scryrs` binary via `cargo build --release` in a Rust
    Docker container.
-2. Runs the Claude Code source-hook fixture against it in a Node.js Docker container.
-3. Runs the Pi source-hook fixture against it in the same container.
-4. Runs the installed-hook e2e fixture to validate init output.
+2. Installs fixture deps (`better-sqlite3`, `tsx`) in a Node.js Docker container.
+3. Runs the Claude Code fixture against the binary.
+4. Runs the Pi fixture (native command + transport shim) against the binary.
+5. Runs the installed-hook fixture to validate `scryrs init` output.
 
 No host Node.js is required — all execution happens inside Docker containers.
 
@@ -34,93 +44,60 @@ No host Node.js is required — all execution happens inside Docker containers.
 
 #### `claude-code-e2e.mjs`
 
-Exercises `hooks/claude-code/scryrs-hook.mjs` against real `scryrs record --stdin`.
+Pipes real `PreToolUse` payloads to `scryrs hook claude-code` on stdin.
 
 **What it proves:**
 
-- **JSON shaping**: All nine whitelisted Claude Code tools produce correctly
-  shaped `TraceEvent` JSON with canonical envelope fields (`schema_version`,
-  `timestamp`, `session_id`, `event_type`, `tool_name`, `payload` with `type`
-  tag, `outcome`).
-- **Persistence**: Events are persisted to `.scryrs/scryrs.db` by the real
-  scryrs binary.
-- **Non-interference**: The hook subprocess writes zero bytes to stdout and
-  zero bytes to stderr.
-- **Fail-open**: When scryrs is not on PATH, the hook returns
-  `{continue: true}` and writes a timestamped warning to
-  `.scryrs/hooks/claude-code-warnings.log`.
-- **Pass-through**: Tools not in the whitelist (e.g., Task) produce no
-  trace events.
+- **Mapping**: Each tracked PascalCase tool (`Read`, `Grep`, `Glob`,
+  `WebSearch`, `Edit`, `Write`, `NotebookEdit`, `WebFetch`) maps to the correct
+  canonical `TraceEvent` family, with `outcome = Success` (PreToolUse is
+  pre-execution) and `session_id` taken from the payload.
+- **Store location**: Events persist under the payload `cwd`, not the spawned
+  process's working directory.
+- **Pass-through**: Untracked tools (e.g. `TodoWrite`) produce no event.
+- **Bash debug-gating**: `Bash` is dropped unless `SCRYRS_DEBUG` is non-empty,
+  in which case it maps to `CommandExecuted`.
+- **Fail-open**: Malformed stdin and an unwritable store each exit 0 with empty
+  stdout and append a line to `.scryrs/hooks/claude-code-warnings.log`.
 
 #### `pi-hook-e2e.mjs`
 
-Loads `hooks/pi/index.ts` via `tsx` against a fake `ExtensionAPI` whose
-`exec()` matches Pi's real semantics (`stdio: ["ignore", "pipe", "pipe"]`)
-and exercises all six tracked Pi tools.
+Two layers: (A) drives `scryrs hook pi --file <tmp>` with crafted raw Pi events,
+and (B) loads `hooks/pi/index.ts` via `tsx` with a mock Pi runtime.
 
 **What it proves:**
 
-- **Debug gating**: With `SCRYRS_DEBUG` unset the Pi hook emits no `[scryrs]`
-  breadcrumbs and echoes no `[scryrs-record]` child debug lines.
-- **SessionStart**: The `session_start` lifecycle event produces a
-  `SessionStart` TraceEvent with correct envelope shape.
-- **Tool event capture**: All six tracked Pi tools (`read`, `bash`,
-  `ast_grep_search`, `edit`, `write`, `lsp_navigation`) produce correctly
-  mapped events (`FileOpened`, `CommandExecuted`, `SearchRun`, `EditMade`,
-  `SymbolInspected`).
-- **Debug breadcrumbs**: With `SCRYRS_DEBUG=1` the fixture asserts hook-load,
-  `session_start`, tracked-tool, untracked-tool, missing-field, record-send,
-  record-result, non-zero-exit, and exec-failure breadcrumbs by presence rather
-  than exact ordering.
-- **Wire inspection**: With `SCRYRS_DEBUG=wire` the fixture asserts bounded
-  sanitized input previews without requiring full `content`/`details` dumps.
-- **Non-interference**: The handler returns `undefined` for every event —
-  the original tool result is never modified.
-- **Failure propagation**: A failing `lsp_navigation` (`isError: true`)
-  produces a `FailedLookup` event with `outcome.result: 'Failure'` while
-  the original error-state event input is preserved unchanged.
-- **Fail-open**: When scryrs is not on PATH, the handler returns
-  `undefined` and `console.error` reports the scryrs failure.
-- **Unlisted tools**: Pi tools not in the tracked set (e.g., `web_search`)
-  are silently ignored and produce no trace events.
+- **Mapping**: `read`→`FileOpened`, `ast_grep_search`→`SearchRun`,
+  `edit`/`write`→`EditMade`, `lsp_navigation`→`SymbolInspected` (success) or
+  `FailedLookup` (`isError`). `outcome` reflects `isError` (post-execution).
+- **Pass-through** and **Bash debug-gating**, as for Claude Code.
+- **Shim delegation**: The slimmed `index.ts` forwards the raw event (with an
+  injected `session_id`) to `scryrs hook pi --file <tmp>` and persists.
+- **Fail-open**: A non-zero `scryrs hook pi` invocation does not throw or alter
+  the agent-visible tool result.
+- **No translation in TypeScript**: `index.ts` contains no `scryrs record`
+  call, no `TRACKED_TOOLS` whitelist, and no event-type mapping.
 
 #### `installed-hook-e2e.mjs`
 
 Runs `scryrs init --agent claude-code` and `scryrs init --agent pi` in temporary
-consumer project directories, loads the installed hook artifacts from consumer
-install paths (NOT from `hooks/` in the repository source tree), and exercises
-them against the real `scryrs` binary.
+consumer directories and proves the installed artifacts capture events.
 
 **What it proves:**
 
-- **Init output is functional**: Proves that `scryrs init` produces
-  loadable, working hook artifacts — not just that files were created.
-  Source-hook fixtures load from `hooks/` in the repo; this fixture loads
-  from `.claude/hooks/` and `.pi/extensions/pi-trace/` in consumer directories.
-- **Claude Code installed hook**: The installed `scryrs-hook.mjs` is a valid
-  Node.js module that returns `{continue: true}`, produces zero stdout/stderr,
-  and persists events to `.scryrs/scryrs.db` via the real scryrs binary.
-- **Pi installed hook**: The installed `index.ts` is exercised inside the real
-  `pi` CLI process in print mode with a zero-network mock provider registered
-  via `-e ./mock-provider.ts`. This proves the actual Pi runtime discovers,
-  loads, and executes the installed hook, persists events to
-  `.scryrs/scryrs.db`, and emits debug breadcrumbs when `SCRYRS_DEBUG=1` is
-  enabled.
-  **Version-gating:** The single-file `index.ts` sufficiency assumption has been
-  verified against Pi versions that expect a single `index.ts` extension file
-  without additional manifest, `package.json`, or `tsconfig` artifacts. If Pi
-  extends its extension contract to require additional consumer artifacts, this
-  test must be updated.
-- **Next-step text accuracy**: The deterministic stdout output from `scryrs init`
-  is checked to ensure users receive correct setup instructions.
-- **Error detection**: A corrupt or unloadable hook file causes the fixture to
-  fail with a diagnostic, rather than silently skipping the load step.
+- **Claude Code**: `init` create-or-merges `.claude/settings.json` with the
+  native `scryrs hook claude-code` command hook (no `.mjs`, no `.claude/hooks`).
+  Piping a `PreToolUse` payload to the native command persists an event,
+  confirmed via `scryrs hotspots .` (`analyzedEventCount >= 1`). Next-step text
+  references the native command and never a `.mjs` file.
+- **Pi**: `init` installs the slimmed `index.ts` at
+  `.pi/extensions/pi-trace/index.ts`. The fixture transpiles it via `tsx`,
+  exercises it with a simulated `tool_result`, proves it invokes
+  `scryrs hook pi --file`, and confirms persistence via `scryrs hotspots .`.
 
 ### Libraries
 
 #### `lib/assert.mjs`
-
-Shared assertion helpers used by both fixtures:
 
 | Function | Description |
 |---|---|
@@ -132,14 +109,18 @@ Shared assertion helpers used by both fixtures:
 | `counts()` | Return `{ passed, failed }` for aggregation |
 | `reset()` | Reset pass/fail counters |
 
-#### `lib/jsonl.mjs`
-
-JSONL helpers for reading and validating scryrs event files:
+#### `lib/db.mjs`
 
 | Function | Description |
 |---|---|
 | `readEventsDb(path)` | Read all events from a `.scryrs/scryrs.db` SQLite datastore |
 | `assertEventShape(event, type, toolName?)` | Validate canonical `TraceEvent` envelope |
+
+#### `lib/pi-shim-driver.mjs`
+
+Run under `tsx`. Loads a Pi `index.ts` shim, exercises it with a mock Pi runtime
+(`on` + `exec`), and prints captured `exec` calls as JSON. Used by the Pi
+fixtures to verify delegation and fail-open without a real Pi runtime.
 
 ## Usage
 
@@ -152,33 +133,28 @@ scripts/verify-trace-capture
 ### Run a specific harness
 
 ```bash
-scripts/verify-trace-capture --claude-only   # Claude source-hook fixture only
-scripts/verify-trace-capture --pi-only       # Pi source-hook fixture + real Pi-process installed-hook check
-scripts/verify-trace-capture --init-only     # Installed-hook checks only
+scripts/verify-trace-capture --claude-only   # Claude Code fixture only
+scripts/verify-trace-capture --pi-only       # Pi fixture + installed-hook (pi)
+scripts/verify-trace-capture --init-only     # Installed-hook fixture only
 ```
 
 ### Run a single fixture directly (for debugging)
 
 ```bash
-# Build scryrs first
+# Build scryrs first, then install fixture deps.
 cargo build --release
+npm install better-sqlite3 tsx
 
-# Run the fixture (requires Node.js)
-node scripts/verification/claude-code-e2e.mjs
-node scripts/verification/pi-hook-e2e.mjs
-SCRYRS_DEBUG=1 node scripts/verification/pi-hook-e2e.mjs
+SCRYRS_BIN="$PWD/target/release/scryrs" node scripts/verification/claude-code-e2e.mjs
+SCRYRS_BIN="$PWD/target/release/scryrs" node scripts/verification/pi-hook-e2e.mjs
+SCRYRS_BIN="$PWD/target/release/scryrs" node scripts/verification/installed-hook-e2e.mjs
 ```
 
 ## Debug mode notes
 
-`SCRYRS_DEBUG` is opt-in and intended for development only.
-
-- `SCRYRS_DEBUG=1` enables bounded `[scryrs]` and `[scryrs-record]`
-  breadcrumbs.
-- `SCRYRS_DEBUG=wire` adds bounded sanitized previews of observed tool inputs.
-- `SCRYRS_DEBUG=raw` adds capped raw event previews for local troubleshooting.
-
-`wire` and `raw` can expose observed tool inputs. Keep them off in normal runs.
+`SCRYRS_DEBUG` is opt-in and intended for development only. When set to a
+non-empty value it enables `Bash`/`bash` capture and bounded `[scryrs-hook]`
+and `[scryrs]` breadcrumbs on stderr. Keep it off in normal runs.
 
 ## Docker Image Compatibility
 
@@ -194,11 +170,8 @@ FIXTURE_NODE_IMAGE=node:24 scripts/verify-trace-capture
 
 ## Relationship to Other Tests
 
-- `scripts/hook-test` — fast, fake-scryrs development feedback loop for Claude
-  Code JSON shaping and fail-open logic. Runs in seconds, no Rust build
-  required. Does NOT prove persistence through real `scryrs record`.
-- `scripts/verify-trace-capture` — authoritative end-to-end proof that both
-  hooks correctly feed real scryrs persistence. May be wired into
-  `scripts/precommit-run` as a dedicated CI step via `--with-trace-verify`.
-
-Both serve different purposes and neither replaces the other.
+- `cargo test` (unit + `hook_tests.rs`) — fast, in-process coverage of the
+  adapters and the `scryrs hook` command, including fail-open. No Docker needed.
+- `scripts/verify-trace-capture` — authoritative end-to-end proof that the
+  native `scryrs hook` integration feeds real scryrs persistence. May be wired
+  into `scripts/precommit-run` via `--with-trace-verify`.

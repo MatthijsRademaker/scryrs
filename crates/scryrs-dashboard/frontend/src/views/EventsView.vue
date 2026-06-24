@@ -1,12 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { Alert, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, EmptyState, EventTypeBar, SelectInput } from "@/shared/ui";
+import { Alert, Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, EmptyState, EventTypeBar, SelectInput } from "@/shared/ui";
 import { useEventStore } from "@/stores/events";
 import { useSessionStore } from "@/stores/sessions";
+import { useMetaStore } from "@/stores/meta";
 import { colorForKey } from "@/shared/lib/viz";
+import { formatSubject } from "@/shared/lib/subject";
+import type { TraceEventItem } from "@/shared/api/client";
 
 const events = useEventStore();
 const sessions = useSessionStore();
+const meta = useMetaStore();
+
+function subjectDisplay(event: TraceEventItem) {
+  return formatSubject(event.subject, meta.repositoryPath, event.subjectKind);
+}
 const selectedSession = ref("");
 const options = computed(() => [{ label: "All sessions", value: "" }, ...sessions.sessions.map((session) => ({ label: session.sessionId, value: session.sessionId }))]);
 
@@ -21,7 +29,7 @@ function loadMore() {
   void events.load({ sessionId: selectedSession.value || null, cursor: events.nextCursor });
 }
 
-onMounted(() => { void sessions.loadSessions(); void events.load(); });
+onMounted(() => { void sessions.loadSessions(); void events.load(); void meta.ensureLoaded(); });
 watch(selectedSession, (sessionId) => {
   glowStart.value = Number.POSITIVE_INFINITY;
   void events.load({ sessionId: sessionId || null });
@@ -66,7 +74,11 @@ watch(selectedSession, (sessionId) => {
                   {{ event.eventType }}
                 </span>
                 <span class="text-muted-foreground">{{ event.timestamp }}</span>
-                <span class="text-foreground/80">{{ event.subject ?? 'lifecycle' }}</span>
+                <span v-if="event.subject" class="inline-flex items-center gap-1.5 text-foreground/80" :title="subjectDisplay(event).full">
+                  <Badge v-if="subjectDisplay(event).isExternal" variant="warning" class="shrink-0">EXTERNAL</Badge>
+                  {{ subjectDisplay(event).label }}
+                </span>
+                <span v-else class="text-foreground/80">lifecycle</span>
                 <span v-if="event.subjectKind" class="text-muted-foreground/70">{{ event.subjectKind }}</span>
               </div>
               <pre class="mt-1 overflow-hidden text-ellipsis whitespace-pre-wrap break-all text-[0.7rem] text-muted-foreground">{{ payloadPreview(event.payload) }}</pre>

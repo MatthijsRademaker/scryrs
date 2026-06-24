@@ -14,6 +14,9 @@ COMMANDS\n\
       Ingest JSONL trace events from stdin.\n\
   scryrs record --file <PATH>\n\
       Ingest JSONL trace events from a file.\n\
+  scryrs hook <HARNESS> [--stdin | --file <PATH>]\n\
+      Translate a harness's native tool event and record it (fail-open).\n\
+      Supported harnesses: claude-code (stdin), pi (--file).\n\
   scryrs init --agent <NAME>\n\
       Install the scryrs trace hook for a supported agent harness.\n\
       Supported harnesses: claude-code, pi\n\
@@ -56,6 +59,8 @@ EXAMPLES\n\
   scryrs hotspots .\n\
   scryrs record --stdin < events.jsonl\n\
   scryrs record --file session.jsonl\n\
+  scryrs hook claude-code < pre-tool-use.json\n\
+  scryrs hook pi --file event.json\n\
   scryrs init --agent claude-code\n\
   scryrs init --agent pi\n\
   scryrs dashboard\n\
@@ -65,7 +70,7 @@ OPTIONS\n\
   -V, --version    Print version and exit\n\
   -hj, --help-json Print machine-readable CLI surface description and exit\n\n\
 EXIT CODES\n\
-  0    Success (hotspots: JSON written; record: all events accepted; init: hook installed; dashboard: server shut down cleanly)\n\
+  0    Success (hotspots: JSON written; record: all events accepted; init: hook installed; dashboard: server shut down cleanly; hook: always — fail-open, never blocks the harness)\n\
   1    Hotspots: storage error. Record: rejected events or I/O error. Init: I/O error. Dashboard: port in use or artifact read error.\n\
   2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file or store failure); init: unsupported harness, collision, or self-install refusal; dashboard: invalid flags or bind failure",
         SCHEMA_VERSION, HOTSPOT_SCHEMA_VERSION

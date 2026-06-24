@@ -1,215 +1,101 @@
 # scryrs reference trace hook for Pi
 
-Transport-only Pi extension that maps post-execution tool events to the canonical
-[TraceEvent][scryrs-types] schema and delegates ingestion to `scryrs record --file <path>`.
+A **transport-only** Pi extension. Pi loads an in-process module (there is no
+subprocess hook for Pi the way Claude Code has), so this shim cannot be deleted —
+but it is reduced to pure transport. It registers `session_start` and
+`tool_result`, resolves the `session_id` from Pi's `SessionManager`, serializes
+the **raw** harness event, and hands it to the native `scryrs hook pi --file
+<path>` command. **All tool→`TraceEvent` translation lives in the Rust
+`scryrs-adapter-harness` crate**, not in this file.
 
-Note: Pi's `exec()` uses `stdio: ["ignore", "pipe", "pipe"]` — stdin cannot be
-written to.  The hook writes each event to a temp file under a unique
-`/tmp/scryrs-pi-*/` directory and invokes `scryrs record --file <path>` instead
-of `--stdin`.  Temp files are cleaned up after each ingestion, regardless of
-success or failure.
+Note: Pi's `exec()` opens child stdin as `/dev/null`, so the shim writes each
+raw event to a temp file under a unique `/tmp/scryrs-pi-*/` directory and calls
+`scryrs hook pi --file <path>` (rather than piping on stdin). Temp files are
+cleaned up after each invocation, regardless of success or failure.
 
 ## Install
 
-Copy this directory (`hooks/pi/`) to one of Pi's trusted extension locations:
+```bash
+scryrs init --agent pi
+```
 
-- `~/.pi/agent/extensions/pi-trace/` — global, available in all Pi sessions
-- `.pi/extensions/pi-trace/` — project-local, only for this project
+This installs the slimmed `index.ts` to `.pi/extensions/pi-trace/index.ts`. Then
+reload Pi with `/reload` (or restart). You can also install globally by copying
+this directory to `~/.pi/agent/extensions/pi-trace/`.
 
-Then reload Pi with `/reload` (or restart).
-
-Once installed every invocation of the five default tracked Pi tools produces a
-corresponding entry in `.scryrs/scryrs.db` in the working directory. Bash
-tracing is opt-in via `SCRYRS_DEBUG` (see Debug logging below).
+Once installed, every invocation of a tracked Pi tool forwards its raw event to
+`scryrs hook pi`, which translates and persists it into `.scryrs/scryrs.db` in
+the working directory. Bash tracing is opt-in via `SCRYRS_DEBUG`.
 
 ## Requirements
 
-`scryrs` must be on `PATH`.  If it is missing the hook continues silently
-(fail-open) — no tool result is ever modified or blocked.
+`scryrs` must be on `PATH`. If it is missing or errors, the shim logs via
+`console.error` and continues (fail-open) — no tool result is ever modified or
+blocked.
 
-## Debug logging
+## What the shim does (and does not do)
 
-Debug output is **opt-in** through `SCRYRS_DEBUG` and is intended for local
-development and trace-pipeline troubleshooting.
+- **Does**: register `session_start`/`tool_result`, resolve `session_id`,
+  serialize the raw event (with `session_id` injected), call `scryrs hook pi
+  --file <tmp>`, clean up, fail open.
+- **Does not**: map tool names to event types, maintain a tracked-tools
+  whitelist, gate Bash, or know the `TraceEvent` schema. All of that moved to the
+  Rust `pi` adapter, which is the single source of truth.
 
-- `SCRYRS_DEBUG=1` — emit bounded `[scryrs]` hook breadcrumbs and echo bounded
-  `[scryrs-record]` child-process breadcrumbs.
-- `SCRYRS_DEBUG=wire` — include sanitized previews of observed input fields such
-  as `command`, `path`, `query`, and `symbol`.
-- `SCRYRS_DEBUG=raw` — include a capped raw event preview for deeper local
-  debugging.
+## Tool → event mapping (performed by the Rust `pi` adapter)
 
-All debug lines stay single-line and bounded. With `SCRYRS_DEBUG` unset the
-hook stays quiet apart from existing fail-open warnings/errors.
+The native `scryrs hook pi` command applies this mapping. Bash is captured only
+when `SCRYRS_DEBUG` is set to a non-empty value.
 
-**Warning:** `wire` and especially `raw` mode can expose observed tool inputs.
-Do not enable them in sessions where those inputs may contain secrets or file
-contents you would not want echoed to stderr.
+| Pi tool name | TraceEvent type | Key field | Notes |
+|---|---|---|---|
+| `read` | `FileOpened` | `path` ← `input.path` | |
+| `ast_grep_search` | `SearchRun` | `query` ← `input.query` | |
+| `edit` | `EditMade` | `target` ← `input.path` | |
+| `write` | `EditMade` | `target` ← `input.path` | No `WriteMade` variant; a write is semantically an edit |
+| `lsp_navigation` | `SymbolInspected` (ok) / `FailedLookup` (`isError`) | `name`/`subject` ← `input.symbol` | Branch on `isError` |
+| `bash` (debug-only) | `CommandExecuted` | `command` ← `input.command` | Only when `SCRYRS_DEBUG` is non-empty |
 
-Example:
-
-```bash
-SCRYRS_DEBUG=1 pi
-SCRYRS_DEBUG=wire node scripts/verification/pi-hook-e2e.mjs
-```
-
-## Tracked tools
-
-The hook captures five Pi tools by default (observer-first). Bash capture is **off by default** and re-enabled only when `SCRYRS_DEBUG` is set to a non-empty value.
-
-### Default tracked tools
-
-| Pi tool name | TraceEvent type | Payload type | Key field | Notes |
-|---|---|---|---|---|
-| `read` | `FileOpened` | `FileOpenedPayload` | `path` ← `event.input.path` | |
-| `ast_grep_search` | `SearchRun` | `SearchRunPayload` | `query` ← `event.input?.query ?? "unknown"` | Defensive access (see below) |
-| `edit` | `EditMade` | `EditMadePayload` | `target` ← `event.input.path` | |
-| `write` | `EditMade` | `EditMadePayload` | `target` ← `event.input.path` | No `WriteMade` variant exists (see below) |
-| `lsp_navigation` | `SymbolInspected` (success) / `FailedLookup` (failure) | `SymbolInspectedPayload` / `FailedLookupPayload` | `name`/`subject` ← `event.input?.symbol ?? "unknown"` | Conditional on `event.isError` (see below) |
-
-### Debug-only tool
-
-| Pi tool name | Capture mode | TraceEvent type | Payload type | Key field | Notes |
-|---|---|---|---|---|---|
-| `bash` | debug-only (`SCRYRS_DEBUG`) | `CommandExecuted` | `CommandExecutedPayload` | `command` ← `event.input.command` | Not captured by default; set `SCRYRS_DEBUG=1` to enable |
-
-Events for any other tool are silently ignored.
-
-## Mapping decisions
-
-### `write` → `EditMade`
-
-`scryrs-types` does not define a `WriteMade` payload variant.  The `write` Pi
-tool creates or overwrites a file — semantically an edit — so it maps to the
-existing `EditMade` family (`target: filePath`).  This was confirmed with the
-project architect.
-
-### `lsp_navigation` conditional mapping
-
-When `event.isError` is **false** the hook emits a `SymbolInspected` TraceEvent
-(`payload.name`).  When `event.isError` is **true** it emits a `FailedLookup`
-TraceEvent (`payload.subject`) with outcome `Failure`.  Both paths use the same
-input field extraction.
-
-### `ast_grep_search` / `lsp_navigation` assumed input fields
-
-The hook assumes the following input field names:
-
-- `ast_grep_search`: `query`
-- `lsp_navigation`: `symbol`
-
-These are accessed defensively (`event.input?.query`, `event.input?.symbol`).
-If a field is missing the hook uses the fallback value `"unknown"` and logs a
-`console.warn`.  **Consumers should verify these field names against their
-Pi tool definitions** — Pi releases may rename tool arguments.
-
-## Rewrite-tool compatibility
-
-### Bash capture is debug-gated
-
-Bash is **not captured by default**. Set `SCRYRS_DEBUG` to any non-empty value to re-enable Bash tracing for diagnostic sessions. When Bash capture is enabled, scryrs records `event.input.command` from `tool_result` — the post-execution event. Whatever command string the harness presents on `tool_result` is recorded as `CommandExecuted.payload.command` exactly as observed.
-
-This means:
-
-- If an upstream rewrite extension (e.g., RTK) transforms the `tool_call` input **and** the harness propagates that mutation into `tool_result`, scryrs records the rewritten form.
-- If the harness does **not** propagate `tool_call` mutations, scryrs records whatever command string `tool_result` carries — which may be the original agent-entered command.
-
-### Limitations (when Bash capture is enabled)
-
-- **Mutation propagation is not verified.** Whether Pi propagates `tool_call` input mutations through to `tool_result` is an empirical question. Until confirmed, the observed-command behavior described above is a **limitation statement**, not a verified guarantee.
-- **Rewrite prefixes are persisted as-is.** Commands like `rtk ls -la` appear verbatim in traces. scryrs does not strip prefixes, normalize, or reconstruct original intent.
-- **Compound commands remain single trace events.** A command like `echo "=== BACKEND ===" && rtk ls backend/api/ && rtk ls backend/cmd/` is recorded as one `CommandExecuted` event, not split into subcommands.
-
-## Fail-open guarantees
-
-- The entire `scryrs record --file` subprocess call runs inside a try-catch.
-- Temp file I/O errors are caught separately — the hook logs and returns
-  before even attempting the subprocess call.
-- A 5-second timeout prevents hung subprocesses from delaying the agent turn.
-- Any failure — missing binary, non-zero exit, timeout, temp-file I/O error —
-  is logged via `console.error` with enough context to identify the tracing gap.
-- Temp files are always cleaned up in a `finally` block.
-- The `tool_result` handler **always** returns `undefined`.  The original tool
-  `content`, `details`, and `isError` are passed through unchanged.
+Missing input fields fall back to `"unknown"`. Because `tool_result` fires
+post-execution, `outcome` reflects the event's `isError` (`Failure` vs
+`Success`). Events for any other tool produce no `TraceEvent` (pass-through).
 
 ## Session demarcation
 
 The `session_id` is resolved from Pi's built-in `SessionManager.getSessionId()`
-during the `session_start` lifecycle event.  This ensures alignment with Pi's
-session identity — the same UUID that appears in the session file path
-(`~/.pi/agent/sessions/--<path>--/<timestamp>_<uuid>.jsonl`) and the session
-header entry (`{"type":"session","id":"..."}`).
+during `session_start` and injected into every forwarded event. A `SessionStart`
+`TraceEvent` is produced (the shim forwards a session_start marker, which the
+adapter maps to `SessionStart`). All tool events within that session carry the
+same `session_id`.
 
-A `SessionStart` TraceEvent is emitted during Pi's `session_start` lifecycle
-event.  All tool events within that session carry the same `session_id`.
+`SessionEnd` is **deferred**: Pi's `session_shutdown` fires during process exit
+where the shim may not reliably complete a subprocess call.
 
-### `SessionEnd` is **deferred**
+## Debug logging
 
-`SessionEnd` is not emitted.  Pi's `session_shutdown` fires during process exit
-where the hook may not reliably complete a subprocess call.  This is a known
-limitation; a follow-up task will add `SessionEnd` when Pi lifecycle handling
-is better understood.
+`SCRYRS_DEBUG` is opt-in. When set to a non-empty value the shim emits bounded
+`[scryrs]` breadcrumbs on stderr and enables Bash capture. The native `scryrs
+hook pi` command additionally emits `[scryrs-hook]` breadcrumbs under the same
+flag. Keep it off in normal runs.
 
-Each downstream event still carries a consistent `session_id`, so consumers
-can attribute all events to a session even without an explicit end marker.
+## Fail-open guarantees
 
-### Transport: `--file` (not `--stdin`)
-
-The hook writes each event as a single-line JSONL file under a unique temp
-directory (`/tmp/scryrs-pi-*/`), then delegates ingestion via `scryrs record
---file <path>`.  This works around Pi's `exec()` implementation which opens
-child process stdin as `/dev/null` (`stdio: ["ignore", ...]`).
-
-Temp files are deleted in a `finally` block after each ingestion attempt.
+- The `scryrs hook pi --file` call runs inside a try/catch with a 5s timeout.
+- Temp-file I/O errors are caught and logged; the shim returns without throwing.
+- Any failure (missing binary, non-zero exit, timeout) is logged via
+  `console.error`; the temp file is removed in a `finally` block.
+- The `tool_result` handler always returns `undefined` — the original tool
+  `content`, `details`, and `isError` pass through unchanged.
 
 ## Automated verification
-
-Run the cross-harness verification entrypoint to exercise the Pi hook against
-the real `scryrs record --stdin` binary in a Docker-backed environment:
-
-> **Note:** The cross-harness test uses `--stdin` directly via shell pipe.
-> The Pi-specific `--file` transport is only relevant when running inside
-> the actual Pi process.
 
 ```bash
 scripts/verify-trace-capture --pi-only
 ```
 
-This builds the real `scryrs` binary and verifies:
-
-- SessionStart lifecycle event emission and persistence
-- Tool event capture for all five default tracked Pi tools with canonical
-  `TraceEvent` envelope shape
-- Default mode: Bash is not captured (observer-first)
-- Debug mode (`SCRYRS_DEBUG=1`): Bash is captured as `CommandExecuted`
-- Debug-disabled quiet behavior (`[scryrs]` and `[scryrs-record]` absent)
-- Debug-enabled breadcrumbs for hook load, session start, tracked/untracked
-  tools, missing-field fallback, record send/result, and exec-failure paths
-- Handler returns `undefined` for all events (non-interference)
-- Failure propagation: failing `lsp_navigation` produces `FailedLookup`
-  with `outcome.result: 'Failure'` while original error payload is unchanged
-- Fail-open: handler returns `undefined` when scryrs is missing;
-  `console.error` reports the failure
-- Unlisted tools are silently ignored
-
-Run the full cross-harness suite (Claude Code + Pi) with:
-
-```bash
-scripts/verify-trace-capture
-```
-
-## Manual verification (deprecated)
-
-After installation, verify the hook works:
-
-1. Install the hook into Pi and restart.
-2. Invoke each of the five default tracked tools (`read`, `ast_grep_search`,
-   `lsp_navigation`, `edit`, `write`).
-3. Confirm `.scryrs/scryrs.db` contains a `SessionStart` event followed by
-   the corresponding tool events.
-4. (Optional) Set `SCRYRS_DEBUG=1` and invoke `bash` — confirm a `CommandExecuted`
-   event is captured.
-5. Move `scryrs` off `PATH` and invoke a tracked tool — confirm the tool result
-   is unchanged and `console.error` reports the scryrs failure.
+This builds the real `scryrs` binary and (1) drives `scryrs hook pi --file` with
+crafted raw events to verify the mapping (including `isError`→`Failure` and the
+`lsp_navigation` branches), and (2) loads this `index.ts` via `tsx` with a mock
+Pi runtime to verify it delegates to `scryrs hook pi --file` and fails open.
 
 [scryrs-types]: ../../crates/scryrs-types/src/lib.rs

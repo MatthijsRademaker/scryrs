@@ -9,6 +9,7 @@ mod chrono;
 mod dispatch;
 mod help_json;
 mod help_text;
+mod hook;
 mod hotspots;
 mod record;
 #[cfg(feature = "core")]
@@ -20,6 +21,8 @@ pub mod test_support;
 
 #[cfg(test)]
 mod dispatch_tests;
+#[cfg(all(test, feature = "core"))]
+mod hook_tests;
 #[cfg(all(test, feature = "core"))]
 mod hotspot_integration_tests;
 #[cfg(test)]
