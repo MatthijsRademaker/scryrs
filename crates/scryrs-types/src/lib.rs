@@ -313,6 +313,8 @@ pub enum EventAckStatus {
     Accepted,
     /// Duplicate submission — already processed, no new record created.
     Idempotent,
+    /// Event failed server-side validation — see `EventAck.error_reason`.
+    Rejected,
 }
 
 /// Per-event acknowledgment returned in `BatchIngestResponse`.
@@ -322,6 +324,8 @@ pub struct EventAck {
     pub status: EventAckStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_event_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_reason: Option<String>,
     pub received_at: String,
 }
 
@@ -340,7 +344,7 @@ pub struct BatchIngestResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LiveHotspotsResponse {
     pub schemaVersion: String,
-    pub repository_id: String,
+    pub repositoryId: String,
     pub cursor: String,
     pub generatedAt: String,
     pub entries: Vec<HotspotEntry>,
@@ -1138,18 +1142,21 @@ mod tests {
                     producer_event_id: "evt-001".into(),
                     status: EventAckStatus::Accepted,
                     server_event_id: Some("srv-42".into()),
+                    error_reason: None,
                     received_at: "2026-06-24T10:00:07Z".into(),
                 },
                 EventAck {
                     producer_event_id: "evt-001".into(),
                     status: EventAckStatus::Idempotent,
                     server_event_id: None,
+                    error_reason: None,
                     received_at: "2026-06-24T10:00:07Z".into(),
                 },
                 EventAck {
                     producer_event_id: "evt-003".into(),
                     status: EventAckStatus::Accepted,
                     server_event_id: Some("srv-43".into()),
+                    error_reason: None,
                     received_at: "2026-06-24T10:00:07Z".into(),
                 },
             ],
@@ -1165,6 +1172,7 @@ mod tests {
         let ack = EventAck {
             producer_event_id: "evt-001".into(),
             status: EventAckStatus::Accepted,
+            error_reason: None,
             server_event_id: None,
             received_at: "2026-06-24T10:00:07Z".into(),
         };
@@ -1174,11 +1182,22 @@ mod tests {
         let ack = EventAck {
             producer_event_id: "evt-001".into(),
             status: EventAckStatus::Idempotent,
+            error_reason: None,
             server_event_id: None,
             received_at: "2026-06-24T10:00:07Z".into(),
         };
         let json = serialize_json(&ack);
         assert!(json.contains("\"status\":\"idempotent\""));
+
+        let ack = EventAck {
+            producer_event_id: "evt-001".into(),
+            status: EventAckStatus::Rejected,
+            error_reason: Some("invalid TraceEvent: missing session_id".into()),
+            server_event_id: None,
+            received_at: "2026-06-24T10:00:07Z".into(),
+        };
+        let json = serialize_json(&ack);
+        assert!(json.contains("\"status\":\"rejected\""));
     }
 
     #[test]
@@ -1186,6 +1205,7 @@ mod tests {
         let ack_without = EventAck {
             producer_event_id: "evt-001".into(),
             status: EventAckStatus::Accepted,
+            error_reason: None,
             server_event_id: None,
             received_at: "2026-06-24T10:00:07Z".into(),
         };
@@ -1195,6 +1215,7 @@ mod tests {
         let ack_with = EventAck {
             producer_event_id: "evt-001".into(),
             status: EventAckStatus::Accepted,
+            error_reason: None,
             server_event_id: Some("srv-42".into()),
             received_at: "2026-06-24T10:00:07Z".into(),
         };
@@ -1228,7 +1249,7 @@ mod tests {
 
         let response = LiveHotspotsResponse {
             schemaVersion: LIVE_HOTSPOT_SCHEMA_VERSION.into(),
-            repository_id: "github.com/scryrs-project/scryrs".into(),
+            repositoryId: "github.com/scryrs-project/scryrs".into(),
             cursor: "cursor-42".into(),
             generatedAt: "2026-06-24T12:00:00Z".into(),
             entries: vec![entry.clone()],
@@ -1243,7 +1264,7 @@ mod tests {
     fn live_hotspots_response_no_filesystem_fields() {
         let response = LiveHotspotsResponse {
             schemaVersion: LIVE_HOTSPOT_SCHEMA_VERSION.into(),
-            repository_id: "github.com/scryrs-project/scryrs".into(),
+            repositoryId: "github.com/scryrs-project/scryrs".into(),
             cursor: "cursor-1".into(),
             generatedAt: "2026-06-24T12:00:00Z".into(),
             entries: vec![],
@@ -1392,7 +1413,7 @@ mod tests {
     fn live_hotspots_response_with_empty_entries() {
         let response = LiveHotspotsResponse {
             schemaVersion: LIVE_HOTSPOT_SCHEMA_VERSION.into(),
-            repository_id: "unknown-repo".into(),
+            repositoryId: "unknown-repo".into(),
             cursor: "cursor-0".into(),
             generatedAt: "2026-06-24T12:00:00Z".into(),
             entries: vec![],
@@ -1401,5 +1422,46 @@ mod tests {
         let reconstructed: LiveHotspotsResponse = deserialize_json(&json);
         assert_eq!(reconstructed, response);
         assert!(reconstructed.entries.is_empty());
+    }
+
+    #[test]
+    fn event_ack_rejected_variant_round_trips() {
+        let ack = EventAck {
+            producer_event_id: "evt-099".into(),
+            status: EventAckStatus::Rejected,
+            server_event_id: None,
+            error_reason: Some("invalid TraceEvent: missing session_id".into()),
+            received_at: "2026-06-24T10:00:07Z".into(),
+        };
+        let json = serialize_json(&ack);
+        let reconstructed: EventAck = deserialize_json(&json);
+        assert_eq!(reconstructed, ack);
+        assert!(json.contains("\"status\":\"rejected\""));
+        assert!(json.contains("error_reason"));
+    }
+
+    #[test]
+    fn event_ack_rejected_variant_error_reason_is_optional() {
+        // error_reason should be omitted when None
+        let ack_no_reason = EventAck {
+            producer_event_id: "evt-099".into(),
+            status: EventAckStatus::Rejected,
+            server_event_id: None,
+            error_reason: None,
+            received_at: "2026-06-24T10:00:07Z".into(),
+        };
+        let json = serialize_json(&ack_no_reason);
+        assert!(!json.contains("error_reason"));
+
+        // error_reason should be present when Some
+        let ack_with_reason = EventAck {
+            producer_event_id: "evt-099".into(),
+            status: EventAckStatus::Rejected,
+            server_event_id: None,
+            error_reason: Some("validation failed".into()),
+            received_at: "2026-06-24T10:00:07Z".into(),
+        };
+        let json = serialize_json(&ack_with_reason);
+        assert!(json.contains("error_reason"));
     }
 }

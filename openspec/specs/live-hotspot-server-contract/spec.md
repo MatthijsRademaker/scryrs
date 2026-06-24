@@ -1,8 +1,11 @@
 # live-hotspot-server-contract Specification
 
 ## Purpose
-TBD - created by archiving change task-5c314e77-f447-4edf-b399-3dc8b60cc231. Update Purpose after archive.
+
+Defines the versioned server ingest and identity contract for scryrs Phase 4 (Live Hotspot Server and Signals). Specifies the `ServerIngestEnvelope` batch wrapper around existing `TraceEvent` payloads, three HTTP endpoint shapes (`POST /v1/trace-events/batch` for ingest, `GET /v1/repositories/{repository_id}/hotspots` for live query, `GET /v1/repositories/{repository_id}/signals` for SSE signal stream), deduplication on composite key `(repository_id, workspace_id, agent_id, producer_event_id)` with first-writer-wins semantics, clock-domain separation (`client_timestamp` vs server `received_at`), and source-of-truth rules separating local-only mode from remote-live mode. All types are additive to `crates/scryrs-types`; the inner `TraceEvent` schema and existing local-only pipeline are unchanged.
+
 ## Requirements
+
 ### Requirement: ServerIngestEnvelope wraps TraceEvent with stable identity fields
 
 The system SHALL define a `ServerIngestEnvelope` struct in `crates/scryrs-types` as a versioned JSON batch wrapper. The envelope SHALL carry submission-context identity fields at the top level and an array of per-event items, each pairing identity and timing metadata with an inner `TraceEvent`. The inner `TraceEvent` schema SHALL NOT be modified.
@@ -183,7 +186,7 @@ The system SHALL define a `GET /v1/repositories/{repository_id}/hotspots` endpoi
 - **THEN** the response status is `200 OK`
 - **AND** the response body is a JSON `LiveHotspotsResponse`
 - **AND** `LiveHotspotsResponse.schemaVersion` is the live hotspot schema version
-- **AND** `LiveHotspotsResponse.repository_id` is `"repo-a"`
+- **AND** `LiveHotspotsResponse.repositoryId` is `"repo-a"`
 - **AND** `LiveHotspotsResponse.entries` contains ranked `HotspotEntry` items computed from server state
 - **AND** `LiveHotspotsResponse.generatedAt` is the server time when the response was computed
 - **AND** `LiveHotspotsResponse.cursor` is an opaque cursor for pagination or stream resumption
@@ -331,4 +334,3 @@ This change SHALL define the contract, add types in `scryrs-types`, write one ne
 - **THEN** the only modified crate is `scryrs-types` (new structs, new tests)
 - **AND** the only new documentation is the OpenSpec spec and trace-hook-contract Remote Mode appendix
 - **AND** no hook source files are modified
-
