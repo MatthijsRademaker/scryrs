@@ -102,7 +102,7 @@ Adapters depend on shared contracts and suite outputs. Core detection should nev
 ### CI lanes
 
 - **Pull request**: `cargo test --workspace --all-targets --all-features --locked` (all Rust tests across workspace crates).
-- **Hook verification**: A separate CI job in `.github/workflows/ci.yml` runs `scripts/hook-test` on every PR, checking Claude Code hook JSON shaping, fail-open, and transparency. Runtime: <5 seconds, Node-only.
+- **Hook verification**: A separate CI job in `.github/workflows/ci.yml` runs `scripts/hook-test` on every PR, checking Claude Code hook JSON shaping, fail-open, and transparency. Runtime: &lt;5 seconds, Node-only.
 - **Cross-harness e2e** (`scripts/verify-trace-capture`): Docker-backed end-to-end verification exercising both Claude Code and Pi hook fixtures against a real `scryrs` binary. Measured runtime ~41 seconds (cached build). Assigned to **nightly lane** pending CI Docker-in-Docker support.
 
 ### Hook verification
