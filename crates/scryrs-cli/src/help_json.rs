@@ -4,7 +4,7 @@ use serde_json::json;
 
 /// Version of the `--help-json` surface document format, independent of
 /// `SCHEMA_VERSION` which governs command output envelopes.
-const SURFACE_VERSION: &str = "0.6.0";
+const SURFACE_VERSION: &str = "0.7.0";
 
 pub(crate) fn cli_surface_doc() -> String {
     let doc = json!({
@@ -113,6 +113,19 @@ pub(crate) fn cli_surface_doc() -> String {
                     "mimeType": "text/html",
                     "description": "Vue.js SPA served over HTTP. REST API at GET /api/hotspots, GET /api/sessions, GET /api/sessions/:sessionId, GET /api/events."
                 }
+            },
+            {
+                "name": "server",
+                "description": "Start the central trace ingest server for POST /v1/trace-events/batch",
+                "flags": [
+                    {"name": "port", "short": "-p", "long": "--port", "type": "number", "default": 8081, "description": "TCP port to bind"},
+                    {"name": "bind", "short": "-b", "long": "--bind", "type": "string", "default": "127.0.0.1", "description": "Bind address"},
+                    {"name": "store", "long": "--store", "type": "string", "default": ".scryrs/server.db", "description": "Server-owned SQLite store path"}
+                ],
+                "output": {
+                    "mimeType": "application/json",
+                    "description": "BatchIngestResponse returned by POST /v1/trace-events/batch with accepted_count, duplicate_count, rejected_count, received_count, and per-item EventAck diagnostics."
+                }
             }
         ],
         "globalFlags": [
@@ -122,9 +135,9 @@ pub(crate) fn cli_surface_doc() -> String {
         ],
         "rootBehavior": {"action": "help", "exitCode": 0},
         "exitCodes": {
-            "0": "Success (hotspots: JSON written, including empty entries; record: all events accepted; init: hook installed; dashboard: server shut down cleanly; hook: always — fail-open, never blocks the harness)",
-            "1": "Hotspots: storage error. Record: one or more events rejected, or I/O error writing output. Init: I/O error. Dashboard: port in use or artifact read error.",
-            "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file or store failure); init: unsupported harness, collision, or self-install refusal; dashboard: invalid flags."
+            "0": "Success (hotspots: JSON written, including empty entries; record: all events accepted; init: hook installed; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)",
+            "1": "Hotspots: storage error. Record: one or more events rejected, or I/O error writing output. Init: I/O error. Dashboard: port in use or artifact read error. Server: port in use or store error.",
+            "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file or store failure); init: unsupported harness, collision, or self-install refusal; dashboard: invalid flags; server: invalid flags or bind failure."
         }
     });
     serde_json::to_string(&doc).unwrap_or_else(|_| "{}".into())

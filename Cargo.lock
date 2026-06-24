@@ -728,6 +728,7 @@ dependencies = [
  "scryrs-policy",
  "scryrs-runtime",
  "scryrs-sandbox",
+ "scryrs-server",
  "scryrs-telemetry",
  "scryrs-types",
  "serde_json",
@@ -803,6 +804,20 @@ name = "scryrs-sandbox"
 version = "0.1.0"
 dependencies = [
  "scryrs-types",
+]
+
+[[package]]
+name = "scryrs-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "rusqlite",
+ "scryrs-types",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tower",
 ]
 
 [[package]]

@@ -3,6 +3,7 @@
 
 mod dashboard;
 mod init;
+mod server;
 
 #[cfg(feature = "core")]
 mod chrono;
