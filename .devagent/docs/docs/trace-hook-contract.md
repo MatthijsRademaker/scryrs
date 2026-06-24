@@ -408,3 +408,71 @@ No reference hooks for other harnesses are planned at this time. Harness authors
 - [CLI v0 Contract](./cli-v0-contract.md) — deterministic output and exit-code contract for `scryrs record` and `scryrs hotspots`.
 - [Product Roadmap](./roadmap.mdx) — delivery sequence including Phase 1 proxy capture and reference hook work.
 - [Architecture](./architecture.mdx) — crate topology and runtime flow.
+
+## Appendix: Remote Mode (Phase 4)
+
+This appendix documents the remote ingestion contract for scryrs Phase 4 (Live Hotspot Server and Signals). Remote mode is a planned capability — the contract types are defined in `crates/scryrs-types` but no server runtime or CLI transport behavior exists yet. This appendix serves as a specification for future harness integrators and server implementers.
+
+### Remote Ingestion Envelope
+
+When remote mode is active, trace events are wrapped in a `ServerIngestEnvelope` before transmission. The envelope adds stable identity and deduplication fields around the existing `TraceEvent` payload without modifying the inner event schema.
+
+**`ServerIngestEnvelope` fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `envelope_version` | string | **yes** | Semantic version of the envelope contract, starting at `"1.0.0"` |
+| `repository_id` | string | **yes** | Stable repository identity (see Identity Field Semantics below) |
+| `workspace_id` | string | **yes** | Logical hook-installation scope identifier |
+| `agent_id` | string | **yes** | Harness or agent type identifier (e.g., `"pi"`, `"claude-code"`) |
+| `events` | array of `EnvelopeEvent` | **yes** | Array of per-event items |
+
+**`EnvelopeEvent` fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `producer_event_id` | string | **yes** | Event identifier unique within the producer scope (per agent, per workspace, per repository) |
+| `client_timestamp` | string | **yes** | RFC 3339 timestamp from the producer's wall clock at submission |
+| `event` | `TraceEvent` | **yes** | The inner `TraceEvent`, unchanged from the local contract |
+
+The inner `TraceEvent` schema and the local `scryrs record --stdin` contract are **unchanged**. Remote mode prepends identity metadata in the transport wrapper but preserves the canonical `TraceEvent` wire format exactly as defined in the TraceEvent Schema section above. All nine event families, session demarcation rules, outcome encoding, and validation invariants remain identical.
+
+### Identity Field Semantics
+
+**`repository_id`** — A stable, container-independent repository identifier. Derived from the Git remote origin URL, normalized by lowercasing, stripping trailing slashes, and treating protocols agnostically (e.g., `"github.com/scryrs-project/scryrs"`). Two clones of the same repository on different machines produce the same `repository_id`. For repositories without a Git remote, the producer must supply an explicit `repository_id` via `scryrs.json` configuration or an environment variable; omission is a validation error in remote mode. `repository_id` never uses absolute filesystem paths.
+
+**`workspace_id`** — A logical hook-installation scope identifier. Identifies a particular agent installation on a particular working copy. It persists across harness restarts within the same working copy but is distinct per agent installation (different `agent_id` + same checkout = different `workspace_id`). The exact derivation rule is deferred to implementation tasks, but the recommended approach incorporates the agent identifier or a random token to prevent filesystem-path collision.
+
+**`agent_id`** — The harness or agent type identifier. Examples: `"pi"`, `"claude-code"`, `"custom-agent"`. This field distinguishes events produced by different agent harnesses within the same workspace.
+
+**`producer_event_id`** — A string unique within the producer scope `(repository_id, workspace_id, agent_id)`. Process-monotonic counters are sufficient; globally unique identifiers are not required. Combined with the other three identity fields, this forms a 4-tuple composite key for server-side deduplication.
+
+### Deduplication Contract
+
+The server deduplicates events using a composite key of `(repository_id, workspace_id, agent_id, producer_event_id)`. The first accepted submission for a given key creates the event record. Subsequent submissions with the same key are acknowledged as idempotent and do not increment hotspot scores, event counts, or create duplicate rows. This means:
+
+- Harness hooks can safely retry submissions without creating duplicates.
+- Hotspot scores do not double-count retransmitted events.
+- Producers can use simple, process-scoped IDs (e.g., monotonic counters) without global coordination — the 4-tuple scope bounds uniqueness.
+
+### Remote vs Local Mode Separation
+
+Remote mode is **exclusive**, not additive. When remote ingest is explicitly configured (via `scryrs.json` or environment variable), the CLI:
+
+1. **Skips local storage** — events are submitted to the remote server and are NOT written to `.scryrs/scryrs.db`. No local SQLite store is opened or created.
+2. **Uses the server as the source of truth** — hotspot queries read from the server, not from local artifacts.
+3. **Does not merge** local and remote state. The local `.scryrs/scryrs.db` from prior local-only sessions is not consulted.
+
+Remote mode is activated **only by explicit configuration**. It is never activated by implicit detection or environmental heuristics. Local-only mode remains the default. The `.scryrs/hotspots.json` artifact file may still be written as an export/cache of server state but is not the live source of truth when remote mode is active.
+
+### Implications for Harness Authors
+
+When remote mode is eventually implemented:
+
+- **Hook event formatting is unchanged.** Hooks continue to emit `TraceEvent` records exactly as they do in local mode. The remote transport layer in `scryrs record` wraps events in `ServerIngestEnvelope` automatically.
+- **Identity fields are supplied by the CLI, not by hooks.** Hooks do not need to know about `repository_id`, `workspace_id`, or `agent_id` — `scryrs record` derives these from repository metadata and configuration.
+- **`producer_event_id` is generated automatically.** The transport layer assigns process-monotonic event IDs during batch construction.
+- **Fail-open guarantees are preserved.** If the remote server is unreachable, the CLI rejects the batch with a diagnostic but does not affect tool execution. The fail-open pattern documented in the invocation contract above applies unchanged.
+- **No dual-write mode exists.** Harness authors do not need to handle mixed local-and-remote state. A repository operates in exactly one mode at a time.
+
+The canonical Rust types are defined in [`crates/scryrs-types/src/lib.rs`](https://github.com/scryrs-project/scryrs/blob/main/crates/scryrs-types/src/lib.rs) alongside the existing `TraceEvent` and `HotspotsReport` types. Harness authors working on remote-transport implementations in other languages should use these types as the authoritative wire contract.
