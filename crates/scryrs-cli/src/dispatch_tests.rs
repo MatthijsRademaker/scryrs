@@ -428,3 +428,79 @@ fn dashboard_with_unknown_flag_exits_2() {
         "must not say 'unknown command'"
     );
 }
+
+// --- Server command tests ---
+
+#[test]
+fn server_appears_in_help_json_output() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(run_with_writers(["--help-json"], &mut out, &mut err), 0);
+    assert!(err.is_empty());
+    let json_str = String::from_utf8_lossy(&out);
+    assert!(
+        json_str.contains("\"name\":\"server\""),
+        "--help-json output must contain server command, got:\n{json_str}"
+    );
+    assert!(
+        json_str.contains("POST /v1/trace-events/batch"),
+        "--help-json server entry must document the batch endpoint, got:\n{json_str}"
+    );
+}
+
+#[test]
+fn server_help_exits_0_and_lists_flags() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(["server", "--help"], &mut out, &mut err),
+        0
+    );
+    assert!(err.is_empty());
+    let help = String::from_utf8_lossy(&out);
+    assert!(help.contains("start the central trace ingest server"));
+    assert!(help.contains("--port <PORT>"));
+    assert!(help.contains("--bind <ADDR>"));
+    assert!(help.contains("--store <PATH>"));
+    assert!(help.contains("POST /v1/trace-events/batch"));
+}
+
+#[test]
+fn server_invalid_port_exits_2() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(["server", "--port", "0"], &mut out, &mut err),
+        2
+    );
+    assert!(out.is_empty());
+    let err_str = String::from_utf8_lossy(&err);
+    assert!(
+        err_str.contains("invalid --port value '0'"),
+        "server --port 0 must report validation error, got: {err_str}"
+    );
+}
+
+#[test]
+fn server_with_unknown_flag_exits_2() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(["server", "--unknown"], &mut out, &mut err),
+        2
+    );
+    assert!(out.is_empty());
+    let err_str = String::from_utf8_lossy(&err);
+    assert!(
+        err_str.contains("scryrs server: unexpected argument"),
+        "server --unknown must report unexpected argument, got: {err_str}"
+    );
+    assert!(
+        !err_str.contains("unknown command"),
+        "must not say 'unknown command'"
+    );
+}

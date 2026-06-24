@@ -18,8 +18,12 @@ const SERVER_STORE_SCHEMA_VERSION: i64 = 1;
 /// Open a connection at `path`, creating parent directories.
 fn open_connection(path: &Path) -> rusqlite::Result<Connection> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        fs::create_dir_all(parent).map_err(|e| {
+            rusqlite::Error::InvalidParameterName(format!(
+                "failed to create store parent directory '{}': {e}",
+                parent.display()
+            ))
+        })?;
     }
 
     let conn = Connection::open(path)?;
@@ -46,13 +50,8 @@ fn ensure_schema(conn: &Connection) -> rusqlite::Result<()> {
 
     if let Some(v) = existing_version {
         if v != SERVER_STORE_SCHEMA_VERSION {
-            return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!(
-                        "server store schema version mismatch: found {v}, expected {SERVER_STORE_SCHEMA_VERSION}"
-                    ),
-                ),
+            return Err(rusqlite::Error::InvalidParameterName(format!(
+                "server store schema version mismatch: found {v}, expected {SERVER_STORE_SCHEMA_VERSION}"
             )));
         }
         return Ok(());
@@ -179,14 +178,16 @@ impl ServerStore {
                 error_reason: None,
                 received_at: stored_at,
             },
-            InsertResult::SerializeError { error } => EventAck {
-                index,
-                producer_event_id: Some(item.producer_event_id.clone()),
-                status: EventAckStatus::Rejected,
-                server_event_id: None,
-                error_reason: Some(error),
-                received_at: received_at.to_string(),
-            },
+            InsertResult::SerializeError { error } | InsertResult::StorageError { error } => {
+                EventAck {
+                    index,
+                    producer_event_id: Some(item.producer_event_id.clone()),
+                    status: EventAckStatus::Rejected,
+                    server_event_id: None,
+                    error_reason: Some(error),
+                    received_at: received_at.to_string(),
+                }
+            }
         }
     }
 
@@ -247,21 +248,28 @@ impl ServerStore {
             }
             Ok(0) => {
                 // INSERT OR IGNORE — duplicate key, read back original received_at.
-                let stored_at: String = self
-                    .conn
-                    .query_row(
-                        "SELECT received_at FROM server_trace_events
-                         WHERE repository_id = ?1 AND workspace_id = ?2
-                           AND agent_id = ?3 AND producer_event_id = ?4",
-                        params![
-                            envelope.repository_id,
-                            envelope.workspace_id,
-                            envelope.agent_id,
-                            item.producer_event_id,
-                        ],
-                        |row| row.get(0),
-                    )
-                    .unwrap_or_else(|_| received_at.to_string());
+                let stored_at: String = match self.conn.query_row(
+                    "SELECT received_at FROM server_trace_events
+                     WHERE repository_id = ?1 AND workspace_id = ?2
+                       AND agent_id = ?3 AND producer_event_id = ?4",
+                    params![
+                        envelope.repository_id,
+                        envelope.workspace_id,
+                        envelope.agent_id,
+                        item.producer_event_id,
+                    ],
+                    |row| row.get(0),
+                ) {
+                    Ok(ts) => ts,
+                    Err(e) => {
+                        return InsertResult::StorageError {
+                            error: format!(
+                                "failed to read back duplicate received_at for producer_event_id '{}' after INSERT OR IGNORE: {e}",
+                                item.producer_event_id
+                            ),
+                        };
+                    }
+                };
                 InsertResult::Duplicate { stored_at }
             }
             _ => {
@@ -283,6 +291,9 @@ enum InsertResult {
         stored_at: String,
     },
     SerializeError {
+        error: String,
+    },
+    StorageError {
         error: String,
     },
 }
@@ -343,8 +354,6 @@ fn is_offset(s: &str) -> bool {
         && s.as_bytes()[4].is_ascii_digit()
         && s.as_bytes()[5].is_ascii_digit()
 }
-
-
 
 #[cfg(test)]
 mod tests {

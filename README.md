@@ -16,6 +16,12 @@ crates/scryrs-types
 crates/scryrs-core
   Standalone trace and hotspot foundation.
 
+crates/scryrs-server
+  Central trace ingest server with idempotent SQLite persistence.
+
+crates/scryrs-dashboard
+  Local dashboard server and browser UI for trace and hotspot visualization.
+
 crates/scryrs-graph
   Knowledge graph and routing manifest foundation.
 
@@ -49,7 +55,7 @@ xtask
 
 ## Feature split
 
-The CLI ships three commands:
+The CLI ships six commands:
 
 ```bash
 # Hotspot analysis from recorded trace events
@@ -62,6 +68,12 @@ cargo run -p scryrs-cli -- record --file session.jsonl
 # Hook installation for supported harnesses
 cargo run -p scryrs-cli -- init --agent claude-code
 cargo run -p scryrs-cli -- init --agent pi
+
+# Local dashboard server
+cargo run -p scryrs-cli -- dashboard
+
+# Central trace ingest server
+cargo run -p scryrs-cli -- server
 ```
 
 Default features include the standalone suite, Markdown adapter, runtime, and deterministic guardrail support. `full` adds the optional LLM boundary and Rspress adapter.
@@ -154,9 +166,16 @@ COMMANDS
       Ingest JSONL trace events from stdin.
   scryrs record --file <PATH>
       Ingest JSONL trace events from a file.
+  scryrs hook <HARNESS> [--stdin | --file <PATH>]
+      Translate a harness's native tool event and record it (fail-open).
+      Supported harnesses: claude-code (stdin), pi (--file).
   scryrs init --agent <NAME>
       Install the scryrs trace hook for a supported agent harness.
       Supported harnesses: claude-code, pi
+  scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]
+      Start local dashboard server and open the browser dashboard.
+  scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]
+      Start the central trace ingest server for POST /v1/trace-events/batch.
 
 RECORD OUTPUT
   A single-line JSON summary on stdout.
@@ -171,8 +190,14 @@ EXAMPLES
   scryrs hotspots .
   scryrs record --stdin < events.jsonl
   scryrs record --file session.jsonl
+  scryrs hook claude-code < pre-tool-use.json
+  scryrs hook pi --file event.json
   scryrs init --agent claude-code
   scryrs init --agent pi
+  scryrs dashboard
+  scryrs dashboard --port 9090 --no-open
+  scryrs server
+  scryrs server --port 9091
 
 OPTIONS
   -h, --help       Print this help message and exit
@@ -180,9 +205,9 @@ OPTIONS
   -hj, --help-json Print machine-readable CLI surface description and exit
 
 EXIT CODES
-  0    Success (hotspots: JSON written; record: all events accepted; init: hook installed)
-  1    Hotspots: storage error. Record: rejected events or I/O error. Init: I/O error.
-  2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file or store failure); init: unsupported harness, collision, or self-install refusal
+  0    Success (hotspots: JSON written; record: all events accepted; init: hook installed; dashboard: server shut down cleanly; server: server shut down cleanly)
+  1    Hotspots: storage error. Record: rejected events or I/O error. Init: I/O error. Dashboard: port in use or artifact read error. Server: port in use or store error.
+  2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file or store failure); init: unsupported harness, collision, or self-install refusal; dashboard: invalid flags or bind failure; server: invalid flags or bind failure
 ```
 
 **`--version`** prints the binary version:
@@ -224,9 +249,9 @@ The CLI follows a three-code exit convention with command-specific semantics:
 
 | Exit code | Meaning     |
 |-----------|-------------|
-| 0         | Success (hotspots: JSON written, including empty entries; record: all events accepted) |
-| 1         | Hotspots: storage error. Record: rejected events or I/O error |
-| 2         | Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file or store failure) |
+| 0         | Success (hotspots: JSON written, including empty entries; record: all events accepted; init: hook installed; dashboard: server shut down cleanly; server: server shut down cleanly) |
+| 1         | Hotspots: storage error. Record: rejected events or I/O error. Init: I/O error. Dashboard: port in use or artifact read error. Server: port in use or store error. |
+| 2         | Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file or store failure); init: unsupported harness, collision, or self-install refusal; dashboard: invalid flags or bind failure; server: invalid flags or bind failure |
 
 **Missing required argument** — exit 2:
 
@@ -240,7 +265,7 @@ See `scryrs --help`
 
 ### Current limitations
 
-- **Three commands:** `hotspots`, `record`, and `init` are the supported commands. Everything else (`trace`, `propose`, `graph`, `route`, `adapters`, `report`, `suggest-docs`) produces an "unknown command" error.
+- **Six commands:** `hotspots`, `record`, `hook`, `init`, `dashboard`, and `server` are the supported commands. Everything else (`trace`, `propose`, `graph`, `route`, `adapters`, `report`, `suggest-docs`) produces an "unknown command" error.
 - **Hotspot analysis:** `hotspots` reads from `.scryrs/scryrs.db` and produces ranked `HotspotEntry` results. Empty or missing stores produce distinct exit codes.
 - **Record is ingestion-only:** `scryrs record` validates and persists trace events. It does not trigger hotspot analysis, graph building, or other downstream processing.
 - **What's not listed:** No speculative future commands or features appear here. The quickstart documents exactly what exists today.
@@ -251,12 +276,13 @@ See `scryrs --help`
 |---------|-------------|-----|
 | `unknown command: 'X'` | You ran a command that doesn't exist yet | Run `cargo run -p scryrs-cli -- --help` to see available commands |
 | `missing required PATH argument` | You ran `hotspots` without a path | Add a path: `cargo run -p scryrs-cli -- hotspots .` |
+| `port in use` | Another process is already using the dashboard or server port | Use `--port` to pick a different port, or stop the other process |
 | `error[E0463]: can't find crate` | Missing Rust toolchain or wrong directory | Install Rust 1.85+ via rustup, ensure you're in the repo root |
 | Build hangs or runs out of memory | First build compiles many dependencies | It's normal for a fresh `cargo build`. Subsequent builds use cached artifacts and are much faster. |
 
 ## Current status
 
-v0 CLI contract. `scryrs record` ingests JSONL trace events via `--stdin` or `--file <PATH>`, validates against the shared `TraceEvent` schema, persists accepted events to `.scryrs/scryrs.db`, and returns deterministic summary counts and rejection diagnostics. `scryrs hotspots <PATH>` reads from `.scryrs/scryrs.db`, scores subjects with a deterministic weight table and failure bonus, produces a versioned `HotspotsReport` envelope with ranked evidence-carrying entries, and writes the report to stdout and `.scryrs/hotspots.json`.
+v0 CLI contract. `scryrs record` ingests JSONL trace events via `--stdin` or `--file <PATH>`, validates against the shared `TraceEvent` schema, persists accepted events to `.scryrs/scryrs.db`, and returns deterministic summary counts and rejection diagnostics. `scryrs hotspots <PATH>` reads from `.scryrs/scryrs.db`, scores subjects with a deterministic weight table and failure bonus, produces a versioned `HotspotsReport` envelope with ranked evidence-carrying entries, and writes the report to stdout and `.scryrs/hotspots.json`. `scryrs dashboard` starts a local dashboard server with a Vue.js SPA for trace and hotspot visualization. `scryrs server` starts a long-lived central trace ingest server at `POST /v1/trace-events/batch` with server-owned SQLite persistence and first-writer-wins idempotency.
 
 ## Local checks
 
