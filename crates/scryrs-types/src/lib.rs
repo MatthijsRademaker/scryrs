@@ -283,6 +283,34 @@ pub struct RunMetadata {
     pub lastEventId: u64,
 }
 
+// --- Live hotspot accumulator and signal types ---
+
+/// Deterministic signal persisted when a cumulative hotspot score crosses
+/// the configured threshold. Each signal is append-only and stored
+/// separately from accumulator rows.
+#[allow(non_snake_case)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HotspotSignal {
+    /// Repository that produced the event.
+    pub repositoryId: String,
+    /// Subject kind tag ("file", "search", "symbol", "command", "document").
+    pub subjectKind: String,
+    /// Concrete subject string.
+    pub subject: String,
+    /// Cumulative score at the time of the crossing.
+    pub score: u32,
+    /// Score delta contributed by the triggering event.
+    pub delta: u32,
+    /// Window model tag — always `"cumulative"` for this foundation.
+    pub window: String,
+    /// Configured threshold that was crossed.
+    pub threshold: u32,
+    /// Ordered server_trace_events row IDs contributing to this signal.
+    pub evidenceRowIds: Vec<u64>,
+    /// RFC 3339 timestamp when the signal was created.
+    pub createdAt: String,
+}
+
 // --- Live hotspot server contract types (Phase 4) ---
 
 /// Versioned batch wrapper for trace events submitted to the live hotspot server.
@@ -1630,5 +1658,65 @@ mod tests {
         assert_eq!(reconstructed, response);
         assert_eq!(reconstructed.accepted_count, 5);
         assert_eq!(reconstructed.rejected_count, 1);
+    }
+
+    // --- HotspotSignal round-trip tests ---
+
+    #[test]
+    fn hotspot_signal_round_trips() {
+        let signal = HotspotSignal {
+            repositoryId: "repo-a".into(),
+            subjectKind: "file".into(),
+            subject: "src/main.rs".into(),
+            score: 15,
+            delta: 3,
+            window: "cumulative".into(),
+            threshold: 10,
+            evidenceRowIds: vec![1, 5, 9],
+            createdAt: "2026-06-25T12:00:00Z".into(),
+        };
+        let json = serialize_json(&signal);
+        let reconstructed: HotspotSignal = deserialize_json(&json);
+        assert_eq!(reconstructed, signal);
+        assert!(json.contains("\"subjectKind\":\"file\""));
+        assert!(json.contains("\"window\":\"cumulative\""));
+        assert!(json.contains("\"threshold\":10"));
+        assert!(json.contains("\"evidenceRowIds\":[1,5,9]"));
+    }
+
+    #[test]
+    fn hotspot_signal_empty_evidence_row_ids() {
+        let signal = HotspotSignal {
+            repositoryId: "repo-a".into(),
+            subjectKind: "search".into(),
+            subject: "routing".into(),
+            score: 0,
+            delta: 0,
+            window: "cumulative".into(),
+            threshold: 10,
+            evidenceRowIds: vec![],
+            createdAt: "2026-06-25T12:00:00Z".into(),
+        };
+        let json = serialize_json(&signal);
+        let reconstructed: HotspotSignal = deserialize_json(&json);
+        assert_eq!(reconstructed, signal);
+    }
+
+    #[test]
+    fn hotspot_signal_delta_independent_of_score() {
+        // Signal score and delta are separate fields: score is cumulative, delta is per-event.
+        let signal = HotspotSignal {
+            repositoryId: "repo-a".into(),
+            subjectKind: "command".into(),
+            subject: "cargo test".into(),
+            score: 12,
+            delta: 3,
+            window: "cumulative".into(),
+            threshold: 10,
+            evidenceRowIds: vec![42],
+            createdAt: "2026-06-25T12:00:00Z".into(),
+        };
+        assert_eq!(signal.score, 12);
+        assert_eq!(signal.delta, 3);
     }
 }

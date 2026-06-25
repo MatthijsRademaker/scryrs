@@ -10,7 +10,7 @@ pub use ingestion::{
     ingest_jsonl_detailed,
 };
 pub use query::{QueryError, TraceQuery};
-pub use scoring::score_hotspots;
+pub use scoring::{base_weight, per_event_contribution, score_hotspots};
 pub use store::{CANONICAL_STORE_PATH, EventStore};
 
 use scryrs_types::FeatureDescriptor;

@@ -968,6 +968,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "rusqlite",
+ "scryrs-core",
  "scryrs-types",
  "serde",
  "serde_json",
