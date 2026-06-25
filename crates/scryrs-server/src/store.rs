@@ -2159,13 +2159,10 @@ mod tests {
         let _acks = store.ingest_batch(&envelope).unwrap();
 
         // query_hotspots from the store.
-        let live_entries = store
-            .query_hotspots("repo-a", WINDOW_CUMULATIVE)
-            .unwrap();
+        let live_entries = store.query_hotspots("repo-a", WINDOW_CUMULATIVE).unwrap();
 
         // score_hotspots from the same raw events.
-        let events_ref: Vec<(u64, &TraceEvent)> =
-            vec![(1u64, &e1), (2u64, &e2), (3u64, &e3)];
+        let events_ref: Vec<(u64, &TraceEvent)> = vec![(1u64, &e1), (2u64, &e2), (3u64, &e3)];
         let batch_entries = score_hotspots(&events_ref);
 
         assert_eq!(live_entries.len(), batch_entries.len());

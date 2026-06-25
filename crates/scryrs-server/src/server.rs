@@ -282,10 +282,18 @@ async fn signal_stream(
     State(state): State<AppState>,
     Path(repository_id): Path<String>,
     Query(params): Query<SignalStreamParams>,
+    headers: axum::http::HeaderMap,
 ) -> Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>> {
     let store_path = state.store_path.clone();
     let repo = repository_id.clone();
-    let start_after: Option<i64> = params.after;
+
+    // Resolve replay cursor: query parameter takes precedence over Last-Event-ID header.
+    let start_after: Option<i64> = params.after.or_else(|| {
+        headers
+            .get("Last-Event-ID")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<i64>().ok())
+    });
 
     let (tx, rx) =
         tokio::sync::mpsc::unbounded_channel::<Result<Event, std::convert::Infallible>>();
@@ -327,40 +335,30 @@ async fn signal_stream(
 
             let rows: Vec<scryrs_types::HotspotSignalEvent> = match (|| -> rusqlite::Result<_> {
                 let mut stmt = conn.prepare(&sql)?;
+
+                let map_row =
+                    |r: &rusqlite::Row<'_>| -> rusqlite::Result<scryrs_types::HotspotSignalEvent> {
+                        Ok(scryrs_types::HotspotSignalEvent {
+                            id: r.get(0)?,
+                            repositoryId: repo.clone(),
+                            subjectKind: r.get(1)?,
+                            subject: r.get(2)?,
+                            score: r.get(3)?,
+                            delta: r.get(4)?,
+                            window: r.get(5)?,
+                            threshold: r.get(6)?,
+                            evidenceRowIds: serde_json::from_str(&r.get::<_, String>(7)?)
+                                .unwrap_or_default(),
+                            createdAt: r.get(8)?,
+                        })
+                    };
+
                 if let Some(after) = cursor {
-                    stmt.query_map(rusqlite::params![&repo, after], |r| {
-                        Ok(scryrs_types::HotspotSignalEvent {
-                            id: r.get(0)?,
-                            repositoryId: repo.clone(),
-                            subjectKind: r.get(1)?,
-                            subject: r.get(2)?,
-                            score: r.get(3)?,
-                            delta: r.get(4)?,
-                            window: r.get(5)?,
-                            threshold: r.get(6)?,
-                            evidenceRowIds: serde_json::from_str(&r.get::<_, String>(7)?)
-                                .unwrap_or_default(),
-                            createdAt: r.get(8)?,
-                        })
-                    })?
-                    .collect::<rusqlite::Result<Vec<_>>>()
+                    stmt.query_map(rusqlite::params![&repo, after], map_row)?
+                        .collect::<rusqlite::Result<Vec<_>>>()
                 } else {
-                    stmt.query_map(rusqlite::params![&repo], |r| {
-                        Ok(scryrs_types::HotspotSignalEvent {
-                            id: r.get(0)?,
-                            repositoryId: repo.clone(),
-                            subjectKind: r.get(1)?,
-                            subject: r.get(2)?,
-                            score: r.get(3)?,
-                            delta: r.get(4)?,
-                            window: r.get(5)?,
-                            threshold: r.get(6)?,
-                            evidenceRowIds: serde_json::from_str(&r.get::<_, String>(7)?)
-                                .unwrap_or_default(),
-                            createdAt: r.get(8)?,
-                        })
-                    })?
-                    .collect::<rusqlite::Result<Vec<_>>>()
+                    stmt.query_map(rusqlite::params![&repo], map_row)?
+                        .collect::<rusqlite::Result<Vec<_>>>()
                 }
             })() {
                 Ok(r) => r,
@@ -939,6 +937,73 @@ mod tests {
             .oneshot(signal_request("repo-a", Some(42)))
             .await
             .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let ct = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert!(ct.starts_with("text/event-stream"));
+    }
+
+    /// Build a signal-stream request with a `Last-Event-ID` header (no query param).
+    fn signal_request_with_last_event_id(repo: &str, last_id: Option<i64>) -> Request<Body> {
+        let uri = format!("/v1/repositories/{repo}/signals");
+        let mut builder = Request::builder().method("GET").uri(uri);
+        if let Some(id) = last_id {
+            builder = builder.header("Last-Event-ID", id.to_string());
+        }
+        builder.body(Body::empty()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn sse_with_last_event_id_header_returns_200() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let app = router(&store_path, 10).unwrap();
+
+        let response = app
+            .oneshot(signal_request_with_last_event_id("repo-a", Some(42)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let ct = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert!(ct.starts_with("text/event-stream"));
+    }
+
+    #[tokio::test]
+    async fn sse_last_event_id_absent_still_works() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let app = router(&store_path, 10).unwrap();
+
+        let response = app
+            .oneshot(signal_request_with_last_event_id("repo-a", None))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn sse_after_param_takes_precedence_over_last_event_id() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let app = router(&store_path, 10).unwrap();
+
+        // Query param `after=10` should take precedence over `Last-Event-ID: 99`.
+        let uri = "/v1/repositories/repo-a/signals?after=10".to_string();
+        let req = Request::builder()
+            .method("GET")
+            .uri(uri)
+            .header("Last-Event-ID", "99")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let ct = response
             .headers()
