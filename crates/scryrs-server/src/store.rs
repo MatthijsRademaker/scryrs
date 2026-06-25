@@ -152,54 +152,43 @@ fn create_v2_tables(conn: &Connection) -> rusqlite::Result<()> {
 /// Server-owned SQLite store for central trace ingest with idempotent inserts.
 pub struct ServerStore {
     conn: Connection,
+    signal_threshold: u32,
 }
 
 impl ServerStore {
     /// Open (or create) the server datastore at `path`.
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, rusqlite::Error> {
+    pub fn open(path: impl AsRef<Path>, signal_threshold: u32) -> Result<Self, rusqlite::Error> {
         let path_ref = path.as_ref();
         let conn = open_connection(path_ref)?;
         ensure_schema(&conn)?;
-        Ok(Self { conn })
+        Ok(Self {
+            conn,
+            signal_threshold,
+        })
     }
 
     /// Process a batch ingest envelope, returning per-item acknowledgments.
     ///
-    /// All accepted events in the batch are committed in a single SQLite
-    /// transaction together with their live hotspot accumulator updates.
+    /// Each accepted event insert, accumulator update, and optional signal
+    /// insert are committed in a single SQLite transaction so the stored event
+    /// row and its live hotspot state cannot diverge.
     pub fn ingest_batch(&self, envelope: &ServerIngestEnvelope) -> Vec<EventAck> {
         let received_at = chrono_now();
-
-        // Phase 1: validate and insert each event, tracking accepted items.
         let mut acks: Vec<EventAck> = Vec::with_capacity(envelope.events.len());
-        let mut accepted: Vec<(usize, i64)> = Vec::new(); // (event_index, row_id)
+
+        // Wrap the entire batch in one explicit transaction so event inserts
+        // and accumulator mutations commit together (or roll back together).
+        let _ = self.conn.execute_batch("BEGIN TRANSACTION;");
 
         for (index, item) in envelope.events.iter().enumerate() {
-            let ack = self.process_item(envelope, item, index, &received_at);
-
-            // Track accepted events for live hotspot updates.
-            if ack.status == EventAckStatus::Accepted {
-                if let Some(ref server_id) = ack.server_event_id {
-                    if let Some(row_id) = server_id
-                        .strip_prefix("srv-")
-                        .and_then(|s| s.parse::<i64>().ok())
-                    {
-                        accepted.push((index, row_id));
-                    }
-                }
+            let (ack, row_id) = self.process_item(envelope, item, index, &received_at);
+            if let Some(row_id) = row_id {
+                let _ = self.apply_live_accumulator(envelope, index, row_id);
             }
-
             acks.push(ack);
         }
 
-        // Phase 2: apply live hotspot accumulator updates atomically in a transaction.
-        if !accepted.is_empty() && self.conn.execute_batch("BEGIN TRANSACTION;").is_ok() {
-            for &(event_index, row_id) in &accepted {
-                let _ = self.apply_live_accumulator(envelope, event_index, row_id);
-            }
-            let _ = self.conn.execute_batch("COMMIT;");
-        }
-
+        let _ = self.conn.execute_batch("COMMIT;");
         acks
     }
 
@@ -209,32 +198,38 @@ impl ServerStore {
         item: &EnvelopeEvent,
         index: usize,
         received_at: &str,
-    ) -> EventAck {
+    ) -> (EventAck, Option<i64>) {
         // Validate client_timestamp as RFC 3339.
         if !is_valid_rfc3339(&item.client_timestamp) {
-            return EventAck {
-                index,
-                producer_event_id: Some(item.producer_event_id.clone()),
-                status: EventAckStatus::Rejected,
-                server_event_id: None,
-                error_reason: Some(format!(
-                    "invalid client_timestamp: '{}' is not valid RFC 3339",
-                    item.client_timestamp
-                )),
-                received_at: received_at.to_string(),
-            };
+            return (
+                EventAck {
+                    index,
+                    producer_event_id: Some(item.producer_event_id.clone()),
+                    status: EventAckStatus::Rejected,
+                    server_event_id: None,
+                    error_reason: Some(format!(
+                        "invalid client_timestamp: '{}' is not valid RFC 3339",
+                        item.client_timestamp
+                    )),
+                    received_at: received_at.to_string(),
+                },
+                None,
+            );
         }
 
         // Validate inner TraceEvent.
         if let Err(reason) = item.event.validate() {
-            return EventAck {
-                index,
-                producer_event_id: Some(item.producer_event_id.clone()),
-                status: EventAckStatus::Rejected,
-                server_event_id: None,
-                error_reason: Some(format!("TraceEvent validation failed: {reason}")),
-                received_at: received_at.to_string(),
-            };
+            return (
+                EventAck {
+                    index,
+                    producer_event_id: Some(item.producer_event_id.clone()),
+                    status: EventAckStatus::Rejected,
+                    server_event_id: None,
+                    error_reason: Some(format!("TraceEvent validation failed: {reason}")),
+                    received_at: received_at.to_string(),
+                },
+                None,
+            );
         }
 
         // Attempt insert with idempotency.
@@ -242,24 +237,30 @@ impl ServerStore {
             InsertResult::Accepted {
                 server_event_id,
                 stored_at,
-                row_id: _,
-            } => EventAck {
-                index,
-                producer_event_id: Some(item.producer_event_id.clone()),
-                status: EventAckStatus::Accepted,
-                server_event_id: Some(server_event_id),
-                error_reason: None,
-                received_at: stored_at,
-            },
-            InsertResult::Duplicate { stored_at } => EventAck {
-                index,
-                producer_event_id: Some(item.producer_event_id.clone()),
-                status: EventAckStatus::Idempotent,
-                server_event_id: None,
-                error_reason: None,
-                received_at: stored_at,
-            },
-            InsertResult::SerializeError { error } | InsertResult::StorageError { error } => {
+                row_id,
+            } => (
+                EventAck {
+                    index,
+                    producer_event_id: Some(item.producer_event_id.clone()),
+                    status: EventAckStatus::Accepted,
+                    server_event_id: Some(server_event_id),
+                    error_reason: None,
+                    received_at: stored_at,
+                },
+                Some(row_id),
+            ),
+            InsertResult::Duplicate { stored_at } => (
+                EventAck {
+                    index,
+                    producer_event_id: Some(item.producer_event_id.clone()),
+                    status: EventAckStatus::Idempotent,
+                    server_event_id: None,
+                    error_reason: None,
+                    received_at: stored_at,
+                },
+                None,
+            ),
+            InsertResult::SerializeError { error } | InsertResult::StorageError { error } => (
                 EventAck {
                     index,
                     producer_event_id: Some(item.producer_event_id.clone()),
@@ -267,8 +268,9 @@ impl ServerStore {
                     server_event_id: None,
                     error_reason: Some(error),
                     received_at: received_at.to_string(),
-                }
-            }
+                },
+                None,
+            ),
         }
     }
 
@@ -398,8 +400,6 @@ impl ServerStore {
         let contribution = per_event_contribution(event);
         let repository_id = &envelope.repository_id;
 
-        // Read existing accumulator or start fresh.
-
         // Read existing accumulator or create a new one.
         let existing: Option<(u32, String, String, String, String)> = self
             .conn
@@ -527,9 +527,7 @@ impl ServerStore {
         )?;
 
         // Check threshold crossing: old_score < threshold <= new_score.
-        // We use a fixed threshold here; the caller-configurable threshold will
-        // be threaded in via a follow-up (the Config.signal_threshold field).
-        let threshold: u32 = 10; // DEFAULT_SIGNAL_THRESHOLD
+        let threshold = self.signal_threshold;
         if old_score < threshold && new_score >= threshold {
             let created_at = chrono_now();
             let ev_for_signal = serde_json::to_string(&evidence_ids)
@@ -562,8 +560,8 @@ impl ServerStore {
     // ------------------------------------------------------------------
 
     /// Return the raw accumulator row for a subject, or `None`.
-    /// The evidence row IDs are ordered by `timestamp ASC, id ASC` so
-    /// they match batch hotspot semantics.
+    /// Evidence row IDs are returned in `timestamp ASC, id ASC` order
+    /// matching batch hotspot semantics.
     pub fn get_accumulator_row(
         &self,
         repository_id: &str,
@@ -592,7 +590,10 @@ impl ServerStore {
         );
 
         match row {
-            Ok(acc) => Ok(Some(acc)),
+            Ok(mut acc) => {
+                acc.evidence_row_ids = self.sort_evidence_ids(&acc.evidence_row_ids)?;
+                Ok(Some(acc))
+            }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e),
         }
@@ -669,8 +670,41 @@ pub struct SignalRow {
 /// Window tag for cumulative accumulator model.
 pub const WINDOW_CUMULATIVE: &str = "cumulative";
 
+impl ServerStore {
+    /// Sort evidence row IDs by `timestamp ASC, id ASC` so they match
+    /// batch hotspot semantics when materialized.
+    fn sort_evidence_ids(&self, evidence_json: &str) -> rusqlite::Result<String> {
+        let ids: Vec<i64> = serde_json::from_str(evidence_json).unwrap_or_default();
+
+        if ids.is_empty() {
+            return Ok(evidence_json.to_string());
+        }
+
+        // Query server_trace_events for the timestamps of these row IDs
+        // and return them sorted by (timestamp, id).
+        let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("?{i}")).collect();
+        let sql = format!(
+            "SELECT id FROM server_trace_events WHERE id IN ({}) ORDER BY timestamp ASC, id ASC",
+            placeholders.join(", ")
+        );
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        let params: Vec<Box<dyn rusqlite::types::ToSql>> = ids
+            .iter()
+            .map(|id| Box::new(*id) as Box<dyn rusqlite::types::ToSql>)
+            .collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let sorted: Vec<i64> = stmt
+            .query_map(param_refs.as_slice(), |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<i64>>>()?;
+
+        serde_json::to_string(&sorted)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
+    }
+}
+
 enum InsertResult {
-    #[allow(dead_code)]
     Accepted {
         server_event_id: String,
         stored_at: String,
@@ -799,7 +833,7 @@ mod tests {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
 
-        let _store = ServerStore::open(&store_path).unwrap_or_else(|e| panic!("open: {e}"));
+        let _store = ServerStore::open(&store_path, 10).unwrap_or_else(|e| panic!("open: {e}"));
         assert!(store_path.exists());
 
         let conn = Connection::open(&store_path).unwrap_or_else(|e| panic!("reopen: {e}"));
@@ -839,7 +873,7 @@ mod tests {
     fn first_insert_is_accepted() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let store = ServerStore::open(&store_path).unwrap_or_else(|e| panic!("open: {e}"));
+        let store = ServerStore::open(&store_path, 10).unwrap_or_else(|e| panic!("open: {e}"));
 
         let event = make_event("s1", "doc/a.md");
         let envelope = make_envelope("repo-a", "ws-1", "pi", vec![env_event("evt-001", event)]);
@@ -856,7 +890,7 @@ mod tests {
     fn duplicate_submission_is_idempotent() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let store = ServerStore::open(&store_path).unwrap_or_else(|e| panic!("open: {e}"));
+        let store = ServerStore::open(&store_path, 10).unwrap_or_else(|e| panic!("open: {e}"));
 
         let event = make_event("s1", "doc/a.md");
         let envelope = make_envelope("repo-a", "ws-1", "pi", vec![env_event("evt-001", event)]);
@@ -874,7 +908,7 @@ mod tests {
     fn different_keys_produce_different_rows() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let store = ServerStore::open(&store_path).unwrap_or_else(|e| panic!("open: {e}"));
+        let store = ServerStore::open(&store_path, 10).unwrap_or_else(|e| panic!("open: {e}"));
 
         let env1 = make_envelope(
             "repo-a",
@@ -909,7 +943,7 @@ mod tests {
     fn invalid_client_timestamp_is_rejected() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let store = ServerStore::open(&store_path).unwrap_or_else(|e| panic!("open: {e}"));
+        let store = ServerStore::open(&store_path, 10).unwrap_or_else(|e| panic!("open: {e}"));
 
         let event = make_event("s1", "doc/a.md");
         let envelope = make_envelope(
@@ -939,7 +973,7 @@ mod tests {
     fn mixed_batch_accepts_valid_and_rejects_invalid() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let store = ServerStore::open(&store_path).unwrap_or_else(|e| panic!("open: {e}"));
+        let store = ServerStore::open(&store_path, 10).unwrap_or_else(|e| panic!("open: {e}"));
 
         let mut invalid_event = make_event("s1", "doc/a.md");
         invalid_event.schema_version = "0.9.9".into(); // will fail validate()
@@ -979,7 +1013,7 @@ mod tests {
     fn empty_events_array_returns_empty_acks() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let store = ServerStore::open(&store_path).unwrap_or_else(|e| panic!("open: {e}"));
+        let store = ServerStore::open(&store_path, 10).unwrap_or_else(|e| panic!("open: {e}"));
 
         let envelope = make_envelope("repo-a", "ws-1", "pi", vec![]);
         let acks = store.ingest_batch(&envelope);
@@ -992,7 +1026,7 @@ mod tests {
     fn v2_tables_created_on_fresh_store() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let _store = ServerStore::open(&store_path).unwrap_or_else(|e| panic!("open: {e}"));
+        let _store = ServerStore::open(&store_path, 10).unwrap_or_else(|e| panic!("open: {e}"));
 
         let conn = Connection::open(&store_path).unwrap_or_else(|e| panic!("reopen: {e}"));
 
@@ -1073,7 +1107,8 @@ mod tests {
         }
 
         // Open with the upgraded store — migration should succeed.
-        let store = ServerStore::open(&store_path).unwrap_or_else(|e| panic!("open v1→v2: {e}"));
+        let store =
+            ServerStore::open(&store_path, 10).unwrap_or_else(|e| panic!("open v1→v2: {e}"));
 
         let conn = Connection::open(&store_path).unwrap_or_else(|e| panic!("reopen: {e}"));
 
@@ -1142,7 +1177,7 @@ mod tests {
             .unwrap_or_else(|e| panic!("write version: {e}"));
         }
 
-        let result = ServerStore::open(&store_path);
+        let result = ServerStore::open(&store_path, 10);
         assert!(
             result.is_err(),
             "opening with unknown schema version must fail"
@@ -1205,7 +1240,7 @@ mod tests {
     fn first_accepted_event_creates_accumulator() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let store = ServerStore::open(&store_path).unwrap();
+        let store = ServerStore::open(&store_path, 10).unwrap();
 
         let event = subject_event(
             TraceEventType::FileOpened,
@@ -1238,7 +1273,7 @@ mod tests {
     fn two_events_same_subject_accumulate() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let store = ServerStore::open(&store_path).unwrap();
+        let store = ServerStore::open(&store_path, 10).unwrap();
 
         let e1 = subject_event(
             TraceEventType::FileOpened,
@@ -1278,7 +1313,7 @@ mod tests {
     fn failure_bonus_applied_in_accumulator() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let store = ServerStore::open(&store_path).unwrap();
+        let store = ServerStore::open(&store_path, 10).unwrap();
 
         let event = subject_event(
             TraceEventType::EditMade,
@@ -1309,7 +1344,7 @@ mod tests {
     fn duplicate_replay_does_not_change_accumulator() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let store = ServerStore::open(&store_path).unwrap();
+        let store = ServerStore::open(&store_path, 10).unwrap();
 
         let event = subject_event(
             TraceEventType::FileOpened,
@@ -1342,7 +1377,7 @@ mod tests {
     fn lifecycle_events_do_not_create_accumulators() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let store = ServerStore::open(&store_path).unwrap();
+        let store = ServerStore::open(&store_path, 10).unwrap();
 
         let event = make_event("s1", "doc/a.md"); // DocRetrieved is subject-bearing
         let session_start = TraceEvent {
@@ -1375,7 +1410,7 @@ mod tests {
     fn rejected_events_do_not_create_accumulators() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let store = ServerStore::open(&store_path).unwrap();
+        let store = ServerStore::open(&store_path, 10).unwrap();
 
         let mut bad_event = subject_event(
             TraceEventType::FileOpened,
@@ -1428,7 +1463,7 @@ mod tests {
     fn threshold_crossing_emits_signal() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let store = ServerStore::open(&store_path).unwrap();
+        let store = ServerStore::open(&store_path, 10).unwrap();
 
         // 5 FileOpened events = score 5 (below threshold 10).
         for i in 0..5 {
@@ -1508,7 +1543,7 @@ mod tests {
     fn no_duplicate_signal_when_already_above_threshold() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let store = ServerStore::open(&store_path).unwrap();
+        let store = ServerStore::open(&store_path, 10).unwrap();
 
         // 10 FileOpened crosses threshold and emits one signal.
         for i in 0..10 {
@@ -1554,7 +1589,7 @@ mod tests {
     fn duplicate_replay_does_not_emit_duplicate_signal() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let store = ServerStore::open(&store_path).unwrap();
+        let store = ServerStore::open(&store_path, 10).unwrap();
 
         // Cross threshold with 10 events.
         for i in 0..10 {
@@ -1599,7 +1634,7 @@ mod tests {
 
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let store = ServerStore::open(&store_path).unwrap();
+        let store = ServerStore::open(&store_path, 10).unwrap();
 
         let event1 = subject_event(
             TraceEventType::FileOpened,
@@ -1672,7 +1707,7 @@ mod tests {
     fn all_subject_bearing_families_contribute_to_live_state() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let store = ServerStore::open(&store_path).unwrap();
+        let store = ServerStore::open(&store_path, 10).unwrap();
 
         // FileOpened (file) - weight 1
         let e1 = subject_event(
