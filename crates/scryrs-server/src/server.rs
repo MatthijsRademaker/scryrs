@@ -29,8 +29,8 @@ struct ErrorBody {
     error: String,
 }
 
-fn router(store_path: &std::path::Path) -> Result<Router, rusqlite::Error> {
-    let store = ServerStore::open(store_path)?;
+fn router(store_path: &std::path::Path, signal_threshold: u32) -> Result<Router, rusqlite::Error> {
+    let store = ServerStore::open(store_path, signal_threshold)?;
     let state = AppState {
         store: Arc::new(Mutex::new(store)),
     };
@@ -45,7 +45,7 @@ pub async fn serve(config: Config) -> Result<(), crate::ServerError> {
     let addr = listener.local_addr()?;
     write_startup_message(&addr, &config.store_path)?;
 
-    let app = router(&config.store_path)
+    let app = router(&config.store_path, config.signal_threshold)
         .map_err(|e| crate::ServerError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
 
     axum::serve(listener, app)
@@ -156,7 +156,18 @@ async fn ingest_batch(State(state): State<AppState>, body: String) -> axum::resp
     // Lock the store for the duration of batch processing.
     let acks = {
         let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
-        store.ingest_batch(&envelope)
+        match store.ingest_batch(&envelope) {
+            Ok(acks) => acks,
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorBody {
+                        error: format!("batch ingest failed: {e}"),
+                    }),
+                )
+                    .into_response();
+            }
+        }
     };
 
     let accepted_count = acks
@@ -234,7 +245,7 @@ mod tests {
     async fn valid_batch_returns_200_with_accepted_event() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let app = router(&store_path).unwrap();
+        let app = router(&store_path, 10).unwrap();
 
         let response = app.oneshot(request(make_valid_body())).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -256,7 +267,7 @@ mod tests {
     async fn duplicate_replay_returns_idempotent() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let app = router(&store_path).unwrap();
+        let app = router(&store_path, 10).unwrap();
 
         let body = make_valid_body();
 
@@ -284,7 +295,7 @@ mod tests {
     async fn malformed_json_returns_400() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let app = router(&store_path).unwrap();
+        let app = router(&store_path, 10).unwrap();
 
         let response = app.oneshot(request("not json".into())).await.unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -305,7 +316,7 @@ mod tests {
     async fn unsupported_envelope_version_returns_400() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let app = router(&store_path).unwrap();
+        let app = router(&store_path, 10).unwrap();
 
         let body = serde_json::json!({
             "envelope_version": "9.9.9",
@@ -335,7 +346,7 @@ mod tests {
     async fn missing_repository_id_returns_400() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let app = router(&store_path).unwrap();
+        let app = router(&store_path, 10).unwrap();
 
         let body = serde_json::json!({
             "envelope_version": "1.0.0",
@@ -365,7 +376,7 @@ mod tests {
     async fn missing_workspace_id_returns_400() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let app = router(&store_path).unwrap();
+        let app = router(&store_path, 10).unwrap();
 
         let body = serde_json::json!({
             "envelope_version": "1.0.0",
@@ -384,7 +395,7 @@ mod tests {
     async fn missing_agent_id_returns_400() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let app = router(&store_path).unwrap();
+        let app = router(&store_path, 10).unwrap();
 
         let body = serde_json::json!({
             "envelope_version": "1.0.0",
@@ -405,7 +416,7 @@ mod tests {
     async fn concurrent_duplicate_submissions_yield_one_accepted_one_idempotent() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let app = router(&store_path).unwrap();
+        let app = router(&store_path, 10).unwrap();
         let body = make_valid_body();
 
         // Spawn 3 concurrent submissions with identical composite key.
@@ -449,7 +460,7 @@ mod tests {
     async fn concurrent_submissions_with_distinct_keys_all_accepted() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
-        let app = router(&store_path).unwrap();
+        let app = router(&store_path, 10).unwrap();
 
         let body_template = |pid: &str| -> String {
             serde_json::json!({

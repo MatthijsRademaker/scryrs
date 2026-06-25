@@ -62,7 +62,12 @@ pub(crate) fn execute_server(err: &mut impl Write, m: &ArgMatches) -> i32 {
         }
     };
 
-    let config = match scryrs_server::Config::try_new(port, bind_address, store_path) {
+    let config = match scryrs_server::Config::try_new(
+        port,
+        bind_address,
+        store_path,
+        scryrs_server::DEFAULT_SIGNAL_THRESHOLD,
+    ) {
         Ok(config) => config,
         Err(error) => {
             let _ = writeln!(err, "scryrs server: {error}");

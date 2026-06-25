@@ -11,6 +11,10 @@ pub mod server;
 pub mod store;
 pub(crate) mod time;
 
+/// Default signal threshold — a `HotspotSignal` is emitted when a
+/// cumulative hotspot score crosses this value from below.
+pub const DEFAULT_SIGNAL_THRESHOLD: u32 = 10;
+
 /// Configuration for the central ingest server.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
@@ -20,20 +24,25 @@ pub struct Config {
     pub bind_address: IpAddr,
     /// Path to the server-owned SQLite database (default `.scryrs/server.db`).
     pub store_path: PathBuf,
+    /// Cumulative hotspot score threshold that triggers a `HotspotSignal`.
+    /// Defaults to `DEFAULT_SIGNAL_THRESHOLD` (10).
+    pub signal_threshold: u32,
 }
 
 impl Config {
-    /// Default configuration: localhost:8081, `.scryrs/server.db`.
+    /// Default configuration: localhost:8081, `.scryrs/server.db`,
+    /// signal_threshold 10.
     #[must_use]
     pub fn default_local() -> Self {
         Self {
             port: 8081,
             bind_address: IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
             store_path: PathBuf::from(".scryrs/server.db"),
+            signal_threshold: DEFAULT_SIGNAL_THRESHOLD,
         }
     }
 
-    /// Construct a validated `Config`.
+    /// Construct a validated `Config` with the given signal threshold.
     ///
     /// # Errors
     ///
@@ -43,6 +52,7 @@ impl Config {
         port: u16,
         bind_address: IpAddr,
         store_path: PathBuf,
+        signal_threshold: u32,
     ) -> Result<Self, ServerError> {
         if port == 0 {
             return Err(ServerError::InvalidConfig(
@@ -58,6 +68,7 @@ impl Config {
             port,
             bind_address,
             store_path,
+            signal_threshold,
         })
     }
 }
@@ -112,6 +123,7 @@ mod tests {
         assert_eq!(cfg.port, 8081);
         assert_eq!(cfg.bind_address.to_string(), "127.0.0.1");
         assert_eq!(cfg.store_path, PathBuf::from(".scryrs/server.db"));
+        assert_eq!(cfg.signal_threshold, DEFAULT_SIGNAL_THRESHOLD);
     }
 
     #[test]
@@ -120,6 +132,7 @@ mod tests {
             0,
             IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
             PathBuf::from(".scryrs/server.db"),
+            10,
         )
         .err()
         .unwrap_or_else(|| panic!("zero port must fail"));
@@ -133,6 +146,7 @@ mod tests {
             8081,
             IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
             PathBuf::from(""),
+            10,
         )
         .err()
         .unwrap_or_else(|| panic!("empty store path must fail"));
@@ -146,11 +160,20 @@ mod tests {
             9091,
             IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)),
             PathBuf::from("/tmp/live.db"),
+            20,
         )
         .unwrap_or_else(|e| panic!("valid config must succeed: {e}"));
 
         assert_eq!(cfg.port, 9091);
         assert_eq!(cfg.bind_address.to_string(), "0.0.0.0");
         assert_eq!(cfg.store_path, PathBuf::from("/tmp/live.db"));
+        assert_eq!(cfg.signal_threshold, 20);
+    }
+
+    #[test]
+    fn signal_threshold_default_is_10() {
+        assert_eq!(DEFAULT_SIGNAL_THRESHOLD, 10);
+        let cfg = Config::default_local();
+        assert_eq!(cfg.signal_threshold, 10);
     }
 }

@@ -27,7 +27,7 @@ pub const WEIGHT_FAILED_LOOKUP: u32 = 4;
 pub const FAILURE_BONUS: u32 = 2;
 
 /// Return the base weight for a given event type.
-fn base_weight(event_type: TraceEventType) -> u32 {
+pub fn base_weight(event_type: TraceEventType) -> u32 {
     match event_type {
         TraceEventType::FileOpened => WEIGHT_FILE_OPENED,
         TraceEventType::SearchRun => WEIGHT_SEARCH_RUN,
@@ -39,6 +39,21 @@ fn base_weight(event_type: TraceEventType) -> u32 {
         // Lifecycle events should never reach this function.
         TraceEventType::SessionStart | TraceEventType::SessionEnd => 0,
     }
+}
+
+/// Compute the deterministic per-event hotspot contribution for a single event.
+///
+/// Returns the base weight for the event type plus the failure bonus when
+/// `outcome` is `Failure`. Lifecycle events (`SessionStart`, `SessionEnd`)
+/// contribute zero. This function is shared by batch scoring and live
+/// accumulation so semantics cannot drift.
+#[must_use]
+pub fn per_event_contribution(event: &TraceEvent) -> u32 {
+    let mut contribution = base_weight(event.event_type);
+    if matches!(event.outcome, Outcome::Failure { .. }) {
+        contribution += FAILURE_BONUS;
+    }
+    contribution
 }
 
 // ---------------------------------------------------------------------------
@@ -103,14 +118,8 @@ pub fn score_hotspots(events_with_ids: &[(u64, &TraceEvent)]) -> Vec<HotspotEntr
             row_ids: Vec::new(),
         });
 
-        // Base weight.
-        let weight = base_weight(event.event_type);
-        entry.score += weight;
-
-        // Failure bonus.
-        if matches!(event.outcome, Outcome::Failure { .. }) {
-            entry.score += FAILURE_BONUS;
-        }
+        // Use the shared per-event contribution API.
+        entry.score += per_event_contribution(event);
 
         // Per-event-type counts.
         let type_name = event.event_type.payload_type_str().to_string();
@@ -292,7 +301,7 @@ mod tests {
         assert_eq!(entry.rank, 1);
         assert_eq!(entry.subjectKind, "file");
         assert_eq!(entry.subject, "src/main.rs");
-        // FileOpened(1) * 2 + EditMade(3) * 1 = 5
+        // FileOpened(1)*2 + EditMade(3)*1 = 5
         assert_eq!(entry.score, 5);
         assert_eq!(entry.sessionCount, 1);
         assert_eq!(entry.firstSeen, "2026-06-21T09:00:00Z");
@@ -704,5 +713,100 @@ mod tests {
         // With correct tie-break (first element): 4 < 5 → entry with rowIds [4,6] first.
         assert_eq!(entries[0].evidence.rowIds, vec![4, 6]);
         assert_eq!(entries[1].evidence.rowIds, vec![5, 3]);
+    }
+
+    // --- per_event_contribution tests ---
+
+    #[test]
+    fn per_event_contribution_file_opened_success_returns_1() {
+        let e = make_event(
+            TraceEventType::FileOpened,
+            TraceEventPayload::FileOpened(FileOpenedPayload {
+                path: "a.rs".into(),
+            }),
+            Outcome::Success,
+            "s1",
+            "2026-06-21T09:00:00Z",
+        );
+        assert_eq!(per_event_contribution(&e), 1);
+    }
+
+    #[test]
+    fn per_event_contribution_edit_made_failure_returns_5() {
+        let e = make_event(
+            TraceEventType::EditMade,
+            TraceEventPayload::EditMade(EditMadePayload {
+                target: "b.rs".into(),
+            }),
+            Outcome::Failure {
+                reason: Some("err".into()),
+            },
+            "s1",
+            "2026-06-21T09:00:00Z",
+        );
+        // base 3 + failure bonus 2 = 5
+        assert_eq!(per_event_contribution(&e), 5);
+    }
+
+    #[test]
+    fn per_event_contribution_failed_lookup_failure_returns_6() {
+        let e = make_event(
+            TraceEventType::FailedLookup,
+            TraceEventPayload::FailedLookup(FailedLookupPayload {
+                subject: "x".into(),
+            }),
+            Outcome::Failure {
+                reason: Some("nf".into()),
+            },
+            "s1",
+            "2026-06-21T09:00:00Z",
+        );
+        // base 4 + failure bonus 2 = 6
+        assert_eq!(per_event_contribution(&e), 6);
+    }
+
+    #[test]
+    fn per_event_contribution_lifecycle_returns_0() {
+        let e = make_event(
+            TraceEventType::SessionStart,
+            TraceEventPayload::SessionStart(SessionStartPayload),
+            Outcome::Success,
+            "s1",
+            "2026-06-21T09:00:00Z",
+        );
+        assert_eq!(per_event_contribution(&e), 0);
+    }
+
+    #[test]
+    fn per_event_contribution_search_run_success_returns_2() {
+        let e = make_event(
+            TraceEventType::SearchRun,
+            TraceEventPayload::SearchRun(SearchRunPayload { query: "q".into() }),
+            Outcome::Success,
+            "s1",
+            "2026-06-21T09:00:00Z",
+        );
+        assert_eq!(per_event_contribution(&e), 2);
+    }
+
+    #[test]
+    fn per_event_contribution_matches_score_hotspots() {
+        // Any event's per_event_contribution should equal the score of that event
+        // when scored in isolation by score_hotspots.
+        let e = make_event(
+            TraceEventType::EditMade,
+            TraceEventPayload::EditMade(EditMadePayload {
+                target: "x.rs".into(),
+            }),
+            Outcome::Failure {
+                reason: Some("err".into()),
+            },
+            "s1",
+            "2026-06-21T09:00:00Z",
+        );
+        let contribution = per_event_contribution(&e);
+        let entries = score_hotspots(&[(1u64, &e)]);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].score, contribution);
     }
 }
