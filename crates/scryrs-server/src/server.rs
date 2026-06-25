@@ -156,7 +156,18 @@ async fn ingest_batch(State(state): State<AppState>, body: String) -> axum::resp
     // Lock the store for the duration of batch processing.
     let acks = {
         let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
-        store.ingest_batch(&envelope)
+        match store.ingest_batch(&envelope) {
+            Ok(acks) => acks,
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorBody {
+                        error: format!("batch ingest failed: {e}"),
+                    }),
+                )
+                    .into_response();
+            }
+        }
     };
 
     let accepted_count = acks

@@ -172,24 +172,24 @@ impl ServerStore {
     /// Each accepted event insert, accumulator update, and optional signal
     /// insert are committed in a single SQLite transaction so the stored event
     /// row and its live hotspot state cannot diverge.
-    pub fn ingest_batch(&self, envelope: &ServerIngestEnvelope) -> Vec<EventAck> {
+    pub fn ingest_batch(&self, envelope: &ServerIngestEnvelope) -> Result<Vec<EventAck>, rusqlite::Error> {
         let received_at = chrono_now();
         let mut acks: Vec<EventAck> = Vec::with_capacity(envelope.events.len());
 
         // Wrap the entire batch in one explicit transaction so event inserts
         // and accumulator mutations commit together (or roll back together).
-        let _ = self.conn.execute_batch("BEGIN TRANSACTION;");
+        self.conn.execute_batch("BEGIN TRANSACTION;")?;
 
         for (index, item) in envelope.events.iter().enumerate() {
             let (ack, row_id) = self.process_item(envelope, item, index, &received_at);
             if let Some(row_id) = row_id {
-                let _ = self.apply_live_accumulator(envelope, index, row_id);
+                self.apply_live_accumulator(envelope, index, row_id)?;
             }
             acks.push(ack);
         }
 
-        let _ = self.conn.execute_batch("COMMIT;");
-        acks
+        self.conn.execute_batch("COMMIT;")?;
+        Ok(acks)
     }
 
     fn process_item(
@@ -401,10 +401,11 @@ impl ServerStore {
         let repository_id = &envelope.repository_id;
 
         // Read existing accumulator or create a new one.
-        let existing: Option<(u32, String, String, String, String)> = self
+        let existing: Option<(u32, String, String, String, String, String, String)> = self
             .conn
             .query_row(
-                "SELECT score, event_type_counts, outcome_counts, session_ids, evidence_row_ids
+                "SELECT score, event_type_counts, outcome_counts, session_ids, evidence_row_ids,
+                        first_seen, last_seen
              FROM hotspot_accumulators
              WHERE repository_id = ?1 AND window = ?2 AND subject_kind = ?3 AND subject = ?4",
                 params![repository_id, window, kind, subject],
@@ -415,6 +416,8 @@ impl ServerStore {
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
                     ))
                 },
             )
@@ -428,34 +431,23 @@ impl ServerStore {
         let last_seen: String;
         let mut evidence_ids: serde_json::Value;
 
-        if let Some((score, etc_json, oc_json, sess_json, ev_json)) = existing {
+        if let Some((score, etc_json, oc_json, sess_json, ev_json, cur_first, cur_last)) = existing {
             old_score = score;
             event_type_counts = serde_json::from_str(&etc_json).unwrap_or(serde_json::json!({}));
             outcome_counts = serde_json::from_str(&oc_json).unwrap_or(serde_json::json!({}));
             session_ids = serde_json::from_str(&sess_json).unwrap_or(serde_json::json!([]));
             evidence_ids = serde_json::from_str(&ev_json).unwrap_or(serde_json::json!([]));
 
-            // Read current first_seen and last_seen for the update.
-            let (current_first, current_last): (String, String) = self
-                .conn
-                .query_row(
-                    "SELECT first_seen, last_seen FROM hotspot_accumulators
-                 WHERE repository_id = ?1 AND window = ?2 AND subject_kind = ?3 AND subject = ?4",
-                    params![repository_id, window, kind, subject],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .unwrap_or_else(|_| (event.timestamp.clone(), event.timestamp.clone()));
-
-            first_seen = if event.timestamp < current_first {
+            first_seen = if event.timestamp < cur_first {
                 event.timestamp.clone()
             } else {
-                current_first
+                cur_first
             };
 
-            last_seen = if event.timestamp > current_last {
+            last_seen = if event.timestamp > cur_last {
                 event.timestamp.clone()
             } else {
-                current_last
+                cur_last
             };
         } else {
             old_score = 0;
@@ -488,9 +480,25 @@ impl ServerStore {
             }
         }
 
-        // Update evidence row IDs.
+        // Update evidence row IDs (stored sorted by timestamp ASC, id ASC).
         if let Some(ev_arr) = evidence_ids.as_array_mut() {
             ev_arr.push(serde_json::json!(row_id));
+        }
+        {
+            // Re-sort evidence IDs so both accumulator and signal rows store
+            // timestamp-ordered evidence matching batch hotspot semantics.
+            let id_vec: Vec<i64> = evidence_ids
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_i64())
+                        .collect()
+                })
+                .unwrap_or_default();
+            if !id_vec.is_empty() {
+                let sorted = self.sort_evidence_vec(&id_vec)?;
+                evidence_ids = serde_json::json!(sorted);
+            }
         }
 
         let new_score = old_score + contribution;
@@ -530,8 +538,6 @@ impl ServerStore {
         let threshold = self.signal_threshold;
         if old_score < threshold && new_score >= threshold {
             let created_at = chrono_now();
-            let ev_for_signal = serde_json::to_string(&evidence_ids)
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
 
             self.conn.execute(
                 "INSERT INTO hotspot_signals
@@ -546,7 +552,7 @@ impl ServerStore {
                     contribution,
                     window,
                     threshold,
-                    ev_for_signal,
+                    ev_json,
                     created_at,
                 ],
             )?;
@@ -680,8 +686,17 @@ impl ServerStore {
             return Ok(evidence_json.to_string());
         }
 
-        // Query server_trace_events for the timestamps of these row IDs
-        // and return them sorted by (timestamp, id).
+        let sorted = self.sort_evidence_vec(&ids)?;
+        serde_json::to_string(&sorted)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
+    }
+
+    /// Sort a Vec of event row IDs by `timestamp ASC, id ASC`.
+    fn sort_evidence_vec(&self, ids: &[i64]) -> rusqlite::Result<Vec<i64>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
         let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("?{i}")).collect();
         let sql = format!(
             "SELECT id FROM server_trace_events WHERE id IN ({}) ORDER BY timestamp ASC, id ASC",
@@ -695,12 +710,8 @@ impl ServerStore {
             .collect();
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             params.iter().map(|p| p.as_ref()).collect();
-        let sorted: Vec<i64> = stmt
-            .query_map(param_refs.as_slice(), |row| row.get(0))?
-            .collect::<rusqlite::Result<Vec<i64>>>()?;
-
-        serde_json::to_string(&sorted)
-            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
+        stmt.query_map(param_refs.as_slice(), |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<i64>>>()
     }
 }
 
@@ -878,7 +889,7 @@ mod tests {
         let event = make_event("s1", "doc/a.md");
         let envelope = make_envelope("repo-a", "ws-1", "pi", vec![env_event("evt-001", event)]);
 
-        let acks = store.ingest_batch(&envelope);
+        let acks = store.ingest_batch(&envelope).unwrap();
         assert_eq!(acks.len(), 1);
         assert_eq!(acks[0].index, 0);
         assert_eq!(acks[0].status, EventAckStatus::Accepted);
@@ -895,13 +906,32 @@ mod tests {
         let event = make_event("s1", "doc/a.md");
         let envelope = make_envelope("repo-a", "ws-1", "pi", vec![env_event("evt-001", event)]);
 
-        let acks1 = store.ingest_batch(&envelope);
+        let acks1 = store.ingest_batch(&envelope).unwrap();
         assert_eq!(acks1[0].status, EventAckStatus::Accepted);
         let original_received_at = acks1[0].received_at.clone();
 
-        let acks2 = store.ingest_batch(&envelope);
+        let acks2 = store.ingest_batch(&envelope).unwrap();
         assert_eq!(acks2[0].status, EventAckStatus::Idempotent);
         assert_eq!(acks2[0].received_at, original_received_at);
+    }
+
+    #[test]
+    fn ingest_batch_propagates_accumulator_errors() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap_or_else(|e| panic!("open: {e}"));
+
+        // Drop the accumulator table to force an error during apply_live_accumulator.
+        store
+            .conn
+            .execute_batch("DROP TABLE hotspot_accumulators;")
+            .unwrap();
+
+        let event = make_event("s1", "doc/a.md");
+        let envelope = make_envelope("repo-a", "ws-1", "pi", vec![env_event("evt-001", event)]);
+
+        let result = store.ingest_batch(&envelope);
+        assert!(result.is_err(), "expected error when accumulator table is missing");
     }
 
     #[test]
@@ -923,10 +953,10 @@ mod tests {
             vec![env_event("evt-002", make_event("s2", "doc/b.md"))],
         );
 
-        let acks1 = store.ingest_batch(&env1);
+        let acks1 = store.ingest_batch(&env1).unwrap();
         assert_eq!(acks1[0].status, EventAckStatus::Accepted);
 
-        let acks2 = store.ingest_batch(&env2);
+        let acks2 = store.ingest_batch(&env2).unwrap();
         assert_eq!(acks2[0].status, EventAckStatus::Accepted);
 
         // Verify two rows in the store.
@@ -957,7 +987,7 @@ mod tests {
             }],
         );
 
-        let acks = store.ingest_batch(&envelope);
+        let acks = store.ingest_batch(&envelope).unwrap();
         assert_eq!(acks.len(), 1);
         assert_eq!(acks[0].status, EventAckStatus::Rejected);
         assert!(
@@ -989,7 +1019,7 @@ mod tests {
             ],
         );
 
-        let acks = store.ingest_batch(&envelope);
+        let acks = store.ingest_batch(&envelope).unwrap();
         assert_eq!(acks.len(), 3);
 
         assert_eq!(acks[0].index, 0);
@@ -1016,7 +1046,7 @@ mod tests {
         let store = ServerStore::open(&store_path, 10).unwrap_or_else(|e| panic!("open: {e}"));
 
         let envelope = make_envelope("repo-a", "ws-1", "pi", vec![]);
-        let acks = store.ingest_batch(&envelope);
+        let acks = store.ingest_batch(&envelope).unwrap();
         assert!(acks.is_empty());
     }
 
@@ -1251,7 +1281,7 @@ mod tests {
         );
         let envelope = make_envelope("repo-a", "ws-1", "pi", vec![env_event("evt-001", event)]);
 
-        let _acks = store.ingest_batch(&envelope);
+        let _acks = store.ingest_batch(&envelope).unwrap();
 
         let acc = store
             .get_accumulator_row("repo-a", WINDOW_CUMULATIVE, "file", "src/main.rs")
@@ -1296,7 +1326,7 @@ mod tests {
             "pi",
             vec![env_event("evt-001", e1), env_event("evt-002", e2)],
         );
-        let _acks = store.ingest_batch(&envelope);
+        let _acks = store.ingest_batch(&envelope).unwrap();
 
         let acc = store
             .get_accumulator_row("repo-a", WINDOW_CUMULATIVE, "file", "src/main.rs")
@@ -1325,7 +1355,7 @@ mod tests {
             },
         );
         let envelope = make_envelope("repo-a", "ws-1", "pi", vec![env_event("evt-001", event)]);
-        let _acks = store.ingest_batch(&envelope);
+        let _acks = store.ingest_batch(&envelope).unwrap();
 
         let acc = store
             .get_accumulator_row("repo-a", WINDOW_CUMULATIVE, "file", "src/x.rs")
@@ -1355,8 +1385,8 @@ mod tests {
         );
         let envelope = make_envelope("repo-a", "ws-1", "pi", vec![env_event("evt-001", event)]);
 
-        let _acks1 = store.ingest_batch(&envelope);
-        let _acks2 = store.ingest_batch(&envelope);
+        let _acks1 = store.ingest_batch(&envelope).unwrap();
+        let _acks2 = store.ingest_batch(&envelope).unwrap();
 
         let acc = store
             .get_accumulator_row("repo-a", WINDOW_CUMULATIVE, "file", "src/main.rs")
@@ -1399,7 +1429,7 @@ mod tests {
                 env_event("evt-002", event),
             ],
         );
-        let _acks = store.ingest_batch(&envelope);
+        let _acks = store.ingest_batch(&envelope).unwrap();
 
         // Only one accumulator (for doc/a.md), not for the lifecycle event.
         assert_eq!(store.accumulator_count().unwrap(), 1);
@@ -1438,7 +1468,7 @@ mod tests {
                 env_event("evt-002", good_event),
             ],
         );
-        let acks = store.ingest_batch(&envelope);
+        let acks = store.ingest_batch(&envelope).unwrap();
         assert_eq!(acks[0].status, EventAckStatus::Rejected);
         assert_eq!(acks[1].status, EventAckStatus::Accepted);
 
@@ -1480,7 +1510,7 @@ mod tests {
                 "pi",
                 vec![env_event(&format!("evt-00{i}"), event)],
             );
-            let _acks = store.ingest_batch(&envelope);
+            let _acks = store.ingest_batch(&envelope).unwrap();
         }
 
         assert_eq!(store.signal_count().unwrap(), 0);
@@ -1494,7 +1524,7 @@ mod tests {
             Outcome::Success,
         );
         let env6 = make_envelope("repo-a", "ws-1", "pi", vec![env_event("evt-006", e6)]);
-        let _acks6 = store.ingest_batch(&env6);
+        let _acks6 = store.ingest_batch(&env6).unwrap();
         assert_eq!(store.signal_count().unwrap(), 0);
 
         // 7..9 more FileOpened = total score 9 (still below 10).
@@ -1512,7 +1542,7 @@ mod tests {
                 "pi",
                 vec![env_event(&format!("evt-00{i}"), event)],
             );
-            let _acks = store.ingest_batch(&envelope);
+            let _acks = store.ingest_batch(&envelope).unwrap();
         }
         assert_eq!(store.signal_count().unwrap(), 0);
 
@@ -1525,7 +1555,7 @@ mod tests {
             Outcome::Success,
         );
         let env10 = make_envelope("repo-a", "ws-1", "pi", vec![env_event("evt-010", e10)]);
-        let _acks10 = store.ingest_batch(&env10);
+        let _acks10 = store.ingest_batch(&env10).unwrap();
 
         assert_eq!(store.signal_count().unwrap(), 1);
         let signals = store.get_signals("repo-a").unwrap();
@@ -1560,7 +1590,7 @@ mod tests {
                 "pi",
                 vec![env_event(&format!("evt-{i:03}"), event)],
             );
-            let _acks = store.ingest_batch(&envelope);
+            let _acks = store.ingest_batch(&envelope).unwrap();
         }
 
         assert_eq!(store.signal_count().unwrap(), 1);
@@ -1574,7 +1604,7 @@ mod tests {
             Outcome::Success,
         );
         let env11 = make_envelope("repo-a", "ws-1", "pi", vec![env_event("evt-011", e11)]);
-        let _acks11 = store.ingest_batch(&env11);
+        let _acks11 = store.ingest_batch(&env11).unwrap();
 
         assert_eq!(store.signal_count().unwrap(), 1);
         let acc = store
@@ -1606,7 +1636,7 @@ mod tests {
                 "pi",
                 vec![env_event(&format!("evt-{i:03}"), event)],
             );
-            let _acks = store.ingest_batch(&envelope);
+            let _acks = store.ingest_batch(&envelope).unwrap();
         }
 
         assert_eq!(store.signal_count().unwrap(), 1);
@@ -1620,7 +1650,7 @@ mod tests {
             Outcome::Success,
         );
         let env10_replay = make_envelope("repo-a", "ws-1", "pi", vec![env_event("evt-009", e10)]);
-        let acks = store.ingest_batch(&env10_replay);
+        let acks = store.ingest_batch(&env10_replay).unwrap();
         assert_eq!(acks[0].status, EventAckStatus::Idempotent);
 
         // Still just one signal.
@@ -1671,7 +1701,7 @@ mod tests {
                 env_event("evt-003", event3.clone()),
             ],
         );
-        let _acks = store.ingest_batch(&envelope);
+        let _acks = store.ingest_batch(&envelope).unwrap();
 
         // Run batch scoring on the same events.
         let events_ref: Vec<(u64, &TraceEvent)> =
@@ -1744,7 +1774,7 @@ mod tests {
                 env_event("evt-003", e3),
             ],
         );
-        let _acks = store.ingest_batch(&envelope);
+        let _acks = store.ingest_batch(&envelope).unwrap();
 
         // file accumulator for src/main.rs: 1 + 3 = 4
         let acc_file = store
