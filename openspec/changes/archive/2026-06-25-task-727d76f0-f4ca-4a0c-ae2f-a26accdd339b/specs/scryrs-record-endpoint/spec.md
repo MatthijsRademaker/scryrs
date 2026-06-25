@@ -1,30 +1,4 @@
-# scryrs-record-endpoint Specification
-
-## Purpose
-
-Defines requirements for the scryrs record endpoint — the JSONL trace-event ingestion command covering stdin/file input modes, deterministic output contract, exit-code semantics, and minimal append-only event store persistence.
-## Requirements
-### Requirement: Record command accepts JSONL trace events from stdin and file
-
-The system SHALL expose `scryrs record --stdin` and `scryrs record --file <PATH>` as the only public ingestion modes for this change. Both modes MUST read newline-delimited JSON using the existing `scryrs-types::TraceEvent` wire contract, use the same ingestion path, and reject invocations that provide both or neither input mode.
-
-#### Scenario: Hook pipes events via stdin
-
-- **WHEN** a hook runs `scryrs record --stdin` and writes newline-delimited `TraceEvent` JSON to stdin
-- **THEN** the system ingests each non-empty line through the shared record path
-- **THEN** accepted events are persisted
-
-#### Scenario: Record reads events from file
-
-- **WHEN** a user runs `scryrs record --file session.jsonl`
-- **THEN** the system reads the file as newline-delimited `TraceEvent` JSON
-- **THEN** the system uses the same validation, storage, summary, and exit-code behavior as `--stdin`
-
-#### Scenario: Invalid input mode fails fast
-
-- **WHEN** `scryrs record` is invoked with both `--stdin` and `--file`, or with neither
-- **THEN** the system writes a usage error to stderr
-- **THEN** the system exits with code 2
+## MODIFIED Requirements
 
 ### Requirement: Accepted events are persisted through a versioned local SQLite datastore
 
@@ -43,30 +17,6 @@ The system SHALL preserve the existing local SQLite persistence path when remote
 - **WHEN** `scryrs record` accepts one or more events
 - **THEN** the system does not open, create, or write `.scryrs/scryrs.db`
 - **AND** the accepted-event batch boundary is one remote submission
-
-### Requirement: Validation rejects malformed non-empty lines without aborting ingestion
-
-The system SHALL validate each non-empty physical line as a `TraceEvent`. Malformed JSON or schema-invalid events MUST be rejected with deterministic diagnostics containing the 1-based physical line number, the failing field/path when available, and a reason, while ingestion continues with later lines.
-
-#### Scenario: Malformed JSON line is rejected
-
-- **WHEN** a non-empty line contains invalid JSON
-- **THEN** the system records a rejection for that 1-based physical line number
-- **THEN** the rejection diagnostic includes the parse reason
-- **THEN** the system continues processing subsequent lines
-
-#### Scenario: Schema-invalid event is rejected
-
-- **WHEN** a non-empty line parses as JSON but fails `TraceEvent` validation
-- **THEN** the system records a rejection for that 1-based physical line number
-- **THEN** the rejection diagnostic includes the failing field/path when available and a reason
-- **THEN** the system continues processing subsequent lines
-
-#### Scenario: Blank line is ignored
-
-- **WHEN** a physical input line is empty or whitespace-only
-- **THEN** the system skips that line
-- **THEN** the line does not increment accepted or rejected counts
 
 ### Requirement: Record output and exit codes are deterministic
 
@@ -132,6 +82,8 @@ The `record` endpoint SHALL remain limited to validation, transport, local persi
 - **AND** it does not queue the batch for later resend
 - **AND** it does not silently write the same events into `.scryrs/scryrs.db`
 
+## ADDED Requirements
+
 ### Requirement: Remote ingest mode is explicit and configuration-driven
 
 The `record` command SHALL resolve transport mode before reading input or opening the local store. Remote mode SHALL activate only when a non-empty ingest URL is supplied through explicit configuration. Configuration values SHALL be resolved from the nearest ancestor `scryrs.json` `remote` section, overridden by environment variables `SCRYRS_REMOTE_INGEST_URL`, `SCRYRS_REPOSITORY_ID`, `SCRYRS_WORKSPACE_ID`, `SCRYRS_AGENT_ID`, and `SCRYRS_REMOTE_TIMEOUT_MS`. If no ingest URL resolves, local mode SHALL remain active regardless of any other remote fields. In remote mode, `workspace_id` and `agent_id` are required explicit values; `repository_id` SHALL resolve from explicit configuration or the normalized Git remote-origin contract defined by `live-hotspot-server-contract`; any unresolved required remote identity SHALL fail before any network call with exit code `2`. `timeout_ms` SHALL default to `3000` when not configured.
@@ -183,4 +135,3 @@ When remote mode is active, `scryrs record` SHALL continue to parse newline-deli
 - **WHEN** the command derives `producer_event_id` for accepted events
 - **THEN** each accepted event receives the same deterministic `producer_event_id` on both runs
 - **AND** duplicate replay remains idempotent at the server contract boundary
-

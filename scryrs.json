@@ -4,6 +4,24 @@
 
   "scope": "hook-interface-manifest — This manifest defines hook interfaces and the scryrs record invocation contract. It is not a tool catalog, MCP descriptor, agent-callable surface, or tool-output rewriter.",
 
+  "remote": {
+    "_comment": "Optional CLI remote-ingest defaults. These values act as defaults for `scryrs record` and `scryrs hook` remote transport and are overridable by environment variables. Remote mode only activates when a non-empty `ingest_url` is resolved. HTTP logic stays inside Rust CLI code; hook shims remain transport-dumb.",
+    "ingest_url": "",
+    "repository_id": "",
+    "workspace_id": "",
+    "agent_id": "",
+    "timeout_ms": 3000,
+    "_environment_overrides": {
+      "SCRYRS_REMOTE_INGEST_URL": "Overrides ingest_url",
+      "SCRYRS_REPOSITORY_ID": "Overrides repository_id",
+      "SCRYRS_WORKSPACE_ID": "Overrides workspace_id",
+      "SCRYRS_AGENT_ID": "Overrides agent_id",
+      "SCRYRS_REMOTE_TIMEOUT_MS": "Overrides timeout_ms (milliseconds)"
+    },
+    "_config_precedence": "1. Environment variables (highest). 2. scryrs.json remote section defaults. 3. For repository_id only: git remote origin URL (lowest).",
+    "_failure_contract": "Missing required remote identity (repository_id, workspace_id, agent_id) when `ingest_url` is configured fails before any network call with exit 2 and a deterministic stderr diagnostic. Transport failures (timeout, connection, non-2xx, malformed response) exit 2 loudly. Remote mode skips .scryrs/scryrs.db entirely — no dual-write, no local fallback, no retry spool."
+  },
+
   "_anti_patterns": {
     "_comment": "The following are explicitly OUT OF SCOPE for this manifest.",
     "NOT_mcp_descriptor": "This manifest does not define MCP methods, tools/capabilities, server descriptors, or agent-callable surfaces.",
@@ -16,29 +34,41 @@
     "command": "scryrs",
     "usage": "scryrs hook <harness>",
     "harnesses": ["claude-code", "pi"],
-    "description": "Harness integration entry point. Accepts a harness's native tool event, translates it via the scryrs-adapter-harness crate, and persists it through the same canonical store as `scryrs record`. Always exits 0 with empty stdout (fail-open) and never blocks the harness.",
+    "description": "Harness integration entry point. Accepts a harness's native tool event, translates it via the scryrs-adapter-harness crate, and persists it through the shared canonical store (local mode) or remote ingest (when configured via the `remote` section). Always exits 0 with empty stdout (fail-open) and never blocks the harness.",
     "input": {
       "claude-code": "PreToolUse event JSON on stdin",
       "pi": "raw tool_result/session_start event JSON via --file <PATH> (Pi exec opens stdin as /dev/null)"
     },
-    "failOpen": "On any error (malformed input, unknown harness, translation failure, store error) the command exits 0, writes nothing to stdout, and appends a timestamped line to .scryrs/hooks/<harness>-warnings.log."
+    "failOpen": "On any error (malformed input, unknown harness, translation failure, store error, remote submission failure) the command exits 0, writes nothing to stdout, and appends a timestamped line to .scryrs/hooks/<harness>-warnings.log. Remote mode is transparent to hook integrations — the shim never contains HTTP logic."
   },
 
   "record": {
     "command": "scryrs",
     "args": ["record", "--stdin"],
-    "description": "Low-level canonical-JSONL ingestion primitive beneath `scryrs hook`. Accepts validated TraceEvent JSONL on stdin.",
+    "description": "Low-level canonical-JSONL ingestion primitive beneath `scryrs hook`. Accepts validated TraceEvent JSONL on stdin. When a non-empty remote ingest URL is configured (via scryrs.json `remote` section or SCRYRS_REMOTE_* env vars), accepted events are submitted as a remote batch to POST /v1/trace-events/batch instead of being written to the local SQLite store.",
     "alternateMode": {
       "flag": "--file <PATH>",
       "description": "Available alternate ingestion mode for reading trace events from a file instead of stdin."
     },
     "outputContract": {
-      "stdout": "Single-line JSON summary: {\"command\":\"record\",\"schemaVersion\":\"…\",\"accepted\":<count>,\"rejected\":<count>}.",
-      "stderr": "Rejection diagnostics — one JSON object per rejected non-empty line, with line, field, and reason fields.",
-      "exitCodes": {
-        "0": "All events accepted.",
-        "1": "One or more events rejected (partial acceptance), or I/O error.",
-        "2": "Fatal usage or I/O error (mutually exclusive modes, unreadable file, store failure)."
+      "local": {
+        "stdout": "Single-line JSON summary: {\"command\":\"record\",\"schemaVersion\":\"…\",\"accepted\":<count>,\"rejected\":<count>}.",
+        "stderr": "Rejection diagnostics — one JSON object per rejected non-empty line, with line, field, and reason fields.",
+        "exitCodes": {
+          "0": "All events accepted.",
+          "1": "One or more events rejected (partial acceptance), or I/O error.",
+          "2": "Fatal usage or I/O error (mutually exclusive modes, unreadable file, store failure)."
+        }
+      },
+      "remote": {
+        "stdout": "Single-line JSON summary: {\"command\":\"record\",\"schemaVersion\":\"…\",\"transport\":\"remote\",\"accepted\":<count>,\"duplicate\":<count>,\"rejected\":<count>,\"failed\":<count>}.",
+        "stderr": "Local rejection diagnostics (same as local mode), plus server-rejected item diagnostics with line -1 and producer_event_id as the field.",
+        "exitCodes": {
+          "0": "All events accepted (duplicates non-fatal).",
+          "1": "One or more events rejected (local or server), or I/O error.",
+          "2": "Fatal transport/server failure (timeout, connection, non-2xx, malformed response) or missing required remote identity."
+        },
+        "timeout": "Default 3000 ms, overridable via remote.timeout_ms or SCRYRS_REMOTE_TIMEOUT_MS."
       }
     }
   },

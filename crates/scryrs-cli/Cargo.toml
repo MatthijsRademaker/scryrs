@@ -53,6 +53,8 @@ scryrs-sandbox = { workspace = true, optional = true }
 scryrs-server = { workspace = true, optional = true }
 scryrs-telemetry = { workspace = true, optional = true }
 scryrs-types.workspace = true
+sha2.workspace = true
+ureq.workspace = true
 
 [dev-dependencies]
 insta = { version = "1", features = ["json"] }
