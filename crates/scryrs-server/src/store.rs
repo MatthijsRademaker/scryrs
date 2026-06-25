@@ -153,6 +153,7 @@ fn create_v2_tables(conn: &Connection) -> rusqlite::Result<()> {
 pub struct ServerStore {
     conn: Connection,
     signal_threshold: u32,
+    store_path: std::path::PathBuf,
 }
 
 impl ServerStore {
@@ -164,7 +165,14 @@ impl ServerStore {
         Ok(Self {
             conn,
             signal_threshold,
+            store_path: path_ref.to_path_buf(),
         })
+    }
+
+    /// Return the filesystem path of the store database.
+    /// Used by SSE handlers to open separate read-only connections.
+    pub fn store_path(&self) -> &std::path::Path {
+        &self.store_path
     }
 
     /// Process a batch ingest envelope, returning per-item acknowledgments.
@@ -172,7 +180,10 @@ impl ServerStore {
     /// Each accepted event insert, accumulator update, and optional signal
     /// insert are committed in a single SQLite transaction so the stored event
     /// row and its live hotspot state cannot diverge.
-    pub fn ingest_batch(&self, envelope: &ServerIngestEnvelope) -> Result<Vec<EventAck>, rusqlite::Error> {
+    pub fn ingest_batch(
+        &self,
+        envelope: &ServerIngestEnvelope,
+    ) -> Result<Vec<EventAck>, rusqlite::Error> {
         let received_at = chrono_now();
         let mut acks: Vec<EventAck> = Vec::with_capacity(envelope.events.len());
 
@@ -431,7 +442,8 @@ impl ServerStore {
         let last_seen: String;
         let mut evidence_ids: serde_json::Value;
 
-        if let Some((score, etc_json, oc_json, sess_json, ev_json, cur_first, cur_last)) = existing {
+        if let Some((score, etc_json, oc_json, sess_json, ev_json, cur_first, cur_last)) = existing
+        {
             old_score = score;
             event_type_counts = serde_json::from_str(&etc_json).unwrap_or(serde_json::json!({}));
             outcome_counts = serde_json::from_str(&oc_json).unwrap_or(serde_json::json!({}));
@@ -489,11 +501,7 @@ impl ServerStore {
             // timestamp-ordered evidence matching batch hotspot semantics.
             let id_vec: Vec<i64> = evidence_ids
                 .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|v| v.as_i64())
-                        .collect()
-                })
+                .map(|a| a.iter().filter_map(|v| v.as_i64()).collect())
                 .unwrap_or_default();
             if !id_vec.is_empty() {
                 let sorted = self.sort_evidence_vec(&id_vec)?;
@@ -644,6 +652,172 @@ impl ServerStore {
     pub fn signal_count(&self) -> rusqlite::Result<i64> {
         self.conn
             .query_row("SELECT COUNT(*) FROM hotspot_signals", [], |row| row.get(0))
+    }
+
+    // ------------------------------------------------------------------
+    // Production query methods for live hotspot query and SSE signal stream
+    // ------------------------------------------------------------------
+
+    /// Materialize ranked `HotspotEntry` values from accumulator rows for the
+    /// given repository and window. Applies six-key tie-break sorting and
+    /// assigns 1-based ranks. Returns an empty vec when no accumulators exist.
+    pub fn query_hotspots(
+        &self,
+        repository_id: &str,
+        window: &str,
+    ) -> rusqlite::Result<Vec<scryrs_types::HotspotEntry>> {
+        use scryrs_types::{HotspotCounts, HotspotEntry, HotspotEvidence};
+        use std::collections::HashMap;
+
+        let mut stmt = self.conn.prepare(
+            "SELECT score, event_type_counts, outcome_counts, session_ids,
+                    first_seen, last_seen, evidence_row_ids,
+                    subject_kind, subject
+             FROM hotspot_accumulators
+             WHERE repository_id = ?1 AND window = ?2",
+        )?;
+
+        let rows = stmt.query_map(params![repository_id, window], |r| {
+            Ok((
+                r.get::<_, u32>(0)?,    // score
+                r.get::<_, String>(1)?, // event_type_counts
+                r.get::<_, String>(2)?, // outcome_counts
+                r.get::<_, String>(3)?, // session_ids
+                r.get::<_, String>(4)?, // first_seen
+                r.get::<_, String>(5)?, // last_seen
+                r.get::<_, String>(6)?, // evidence_row_ids
+                r.get::<_, String>(7)?, // subject_kind
+                r.get::<_, String>(8)?, // subject
+            ))
+        })?;
+
+        let mut entries: Vec<HotspotEntry> = Vec::new();
+        for row in rows {
+            let (
+                score,
+                etc_json,
+                oc_json,
+                sess_json,
+                first_seen,
+                last_seen,
+                ev_json,
+                subject_kind,
+                subject,
+            ) = row?;
+
+            let event_type_counts: HashMap<String, u32> =
+                serde_json::from_str(&etc_json).unwrap_or_default();
+            let outcome_counts: HashMap<String, u32> =
+                serde_json::from_str(&oc_json).unwrap_or_default();
+            let session_ids: Vec<String> = serde_json::from_str(&sess_json).unwrap_or_default();
+            let row_ids: Vec<u64> = serde_json::from_str(&ev_json).unwrap_or_default();
+
+            entries.push(HotspotEntry {
+                rank: 0, // assigned after sorting
+                subjectKind: subject_kind,
+                subject,
+                score,
+                counts: HotspotCounts {
+                    eventType: event_type_counts,
+                    outcome: outcome_counts,
+                },
+                sessionCount: session_ids.len() as u32,
+                firstSeen: first_seen,
+                lastSeen: last_seen,
+                evidence: HotspotEvidence { rowIds: row_ids },
+            });
+        }
+
+        // Six-key tie-break chain matching score_hotspots.
+        entries.sort_by(|a, b| {
+            b.score
+                .cmp(&a.score) // score DESC
+                .then_with(|| b.sessionCount.cmp(&a.sessionCount)) // sessionCount DESC
+                .then_with(|| b.lastSeen.cmp(&a.lastSeen)) // lastSeen DESC
+                .then_with(|| a.subjectKind.cmp(&b.subjectKind)) // subjectKind ASC
+                .then_with(|| a.subject.cmp(&b.subject)) // subject ASC
+                .then_with(|| {
+                    // firstEvidenceId ASC
+                    let a_first = a.evidence.rowIds.first().copied().unwrap_or(u64::MAX);
+                    let b_first = b.evidence.rowIds.first().copied().unwrap_or(u64::MAX);
+                    a_first.cmp(&b_first)
+                })
+        });
+
+        // Assign 1-based ranks.
+        for (i, entry) in entries.iter_mut().enumerate() {
+            entry.rank = (i + 1) as u32;
+        }
+
+        Ok(entries)
+    }
+
+    /// Poll hotspot signals for a repository, ordered by `id ASC`.
+    /// Returns up to `limit` rows. When `after_id` is `Some`, only rows
+    /// with `id > after_id` are returned.
+    pub fn poll_signals(
+        &self,
+        repository_id: &str,
+        after_id: Option<i64>,
+        limit: i64,
+    ) -> rusqlite::Result<Vec<scryrs_types::HotspotSignalEvent>> {
+        use scryrs_types::HotspotSignalEvent;
+
+        let sql = if after_id.is_some() {
+            "SELECT id, subject_kind, subject, score, delta, window,
+                    threshold, evidence_row_ids, created_at
+             FROM hotspot_signals
+             WHERE repository_id = ?1 AND id > ?2
+             ORDER BY id ASC
+             LIMIT ?3"
+        } else {
+            "SELECT id, subject_kind, subject, score, delta, window,
+                    threshold, evidence_row_ids, created_at
+             FROM hotspot_signals
+             WHERE repository_id = ?1
+             ORDER BY id ASC
+             LIMIT ?2"
+        };
+
+        let mut stmt = self.conn.prepare(sql)?;
+
+        let rows: Vec<HotspotSignalEvent> = if let Some(after) = after_id {
+            stmt.query_map(params![repository_id, after, limit], |r| {
+                Ok(HotspotSignalEvent {
+                    id: r.get(0)?,
+                    repositoryId: repository_id.to_string(),
+                    subjectKind: r.get(1)?,
+                    subject: r.get(2)?,
+                    score: r.get(3)?,
+                    delta: r.get(4)?,
+                    window: r.get(5)?,
+                    threshold: r.get(6)?,
+                    evidenceRowIds: serde_json::from_str(&r.get::<_, String>(7)?)
+                        .unwrap_or_default(),
+                    createdAt: r.get(8)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+        } else {
+            stmt.query_map(params![repository_id, limit], |r| {
+                Ok(HotspotSignalEvent {
+                    id: r.get(0)?,
+                    repositoryId: repository_id.to_string(),
+                    subjectKind: r.get(1)?,
+                    subject: r.get(2)?,
+                    score: r.get(3)?,
+                    delta: r.get(4)?,
+                    window: r.get(5)?,
+                    threshold: r.get(6)?,
+                    evidenceRowIds: serde_json::from_str(&r.get::<_, String>(7)?)
+                        .unwrap_or_default(),
+                    createdAt: r.get(8)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+
+        Ok(rows)
     }
 }
 
@@ -931,7 +1105,10 @@ mod tests {
         let envelope = make_envelope("repo-a", "ws-1", "pi", vec![env_event("evt-001", event)]);
 
         let result = store.ingest_batch(&envelope);
-        assert!(result.is_err(), "expected error when accumulator table is missing");
+        assert!(
+            result.is_err(),
+            "expected error when accumulator table is missing"
+        );
     }
 
     #[test]
@@ -1791,5 +1968,320 @@ mod tests {
         assert_eq!(acc_cmd.score, 1);
 
         assert_eq!(store.accumulator_count().unwrap(), 2);
+    }
+
+    // --- query_hotspots tests (1.3) ---
+
+    #[test]
+    fn query_hotspots_empty_repository() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap();
+
+        let entries = store
+            .query_hotspots("unknown-repo", WINDOW_CUMULATIVE)
+            .unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn query_hotspots_single_entry() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap();
+
+        let event = subject_event(
+            TraceEventType::FileOpened,
+            "src/main.rs",
+            "s1",
+            "2026-06-25T10:00:00Z",
+            Outcome::Success,
+        );
+        let envelope = make_envelope("repo-a", "ws-1", "pi", vec![env_event("evt-001", event)]);
+        let _acks = store.ingest_batch(&envelope).unwrap();
+
+        let entries = store.query_hotspots("repo-a", WINDOW_CUMULATIVE).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].rank, 1);
+        assert_eq!(entries[0].subjectKind, "file");
+        assert_eq!(entries[0].subject, "src/main.rs");
+        assert_eq!(entries[0].score, 1);
+        assert_eq!(entries[0].sessionCount, 1);
+        assert_eq!(entries[0].firstSeen, "2026-06-25T10:00:00Z");
+        assert_eq!(entries[0].lastSeen, "2026-06-25T10:00:00Z");
+        assert_eq!(entries[0].counts.eventType.get("FileOpened"), Some(&1));
+        assert_eq!(entries[0].evidence.rowIds.len(), 1);
+    }
+
+    #[test]
+    fn query_hotspots_multi_entry_sorting() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap();
+
+        // Higher score entry.
+        let e1 = subject_event(
+            TraceEventType::EditMade,
+            "src/a.rs",
+            "s1",
+            "2026-06-25T10:00:00Z",
+            Outcome::Success,
+        );
+        // Lower score entry.
+        let e2 = subject_event(
+            TraceEventType::FileOpened,
+            "src/b.rs",
+            "s1",
+            "2026-06-25T10:01:00Z",
+            Outcome::Success,
+        );
+
+        let envelope = make_envelope(
+            "repo-a",
+            "ws-1",
+            "pi",
+            vec![env_event("evt-001", e1), env_event("evt-002", e2)],
+        );
+        let _acks = store.ingest_batch(&envelope).unwrap();
+
+        let entries = store.query_hotspots("repo-a", WINDOW_CUMULATIVE).unwrap();
+        assert_eq!(entries.len(), 2);
+        // Score DESC: EditMade(3) > FileOpened(1)
+        assert_eq!(entries[0].subject, "src/a.rs");
+        assert_eq!(entries[0].score, 3);
+        assert_eq!(entries[0].rank, 1);
+        assert_eq!(entries[1].subject, "src/b.rs");
+        assert_eq!(entries[1].score, 1);
+        assert_eq!(entries[1].rank, 2);
+    }
+
+    #[test]
+    fn query_hotspots_tie_break_first_evidence_id() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap();
+
+        // Same event type, same session, same timestamp → same score, sessionCount, lastSeen.
+        // Tie-break falls through to subjectKind ASC (both "file"), subject ASC ("a.rs" < "b.rs").
+        let e1 = subject_event(
+            TraceEventType::FileOpened,
+            "b.rs",
+            "s1",
+            "2026-06-25T10:00:00Z",
+            Outcome::Success,
+        );
+        let e2 = subject_event(
+            TraceEventType::FileOpened,
+            "a.rs",
+            "s1",
+            "2026-06-25T10:00:00Z",
+            Outcome::Success,
+        );
+
+        let envelope = make_envelope(
+            "repo-a",
+            "ws-1",
+            "pi",
+            vec![env_event("evt-001", e1), env_event("evt-002", e2)],
+        );
+        let _acks = store.ingest_batch(&envelope).unwrap();
+
+        let entries = store.query_hotspots("repo-a", WINDOW_CUMULATIVE).unwrap();
+        assert_eq!(entries.len(), 2);
+        // subject ASC: "a.rs" < "b.rs"
+        assert_eq!(entries[0].subject, "a.rs");
+        assert_eq!(entries[1].subject, "b.rs");
+    }
+
+    #[test]
+    fn query_hotspots_unknown_window_returns_empty() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap();
+
+        let event = subject_event(
+            TraceEventType::FileOpened,
+            "src/main.rs",
+            "s1",
+            "2026-06-25T10:00:00Z",
+            Outcome::Success,
+        );
+        let envelope = make_envelope("repo-a", "ws-1", "pi", vec![env_event("evt-001", event)]);
+        let _acks = store.ingest_batch(&envelope).unwrap();
+
+        // Events are stored with window "cumulative", so "recent" yields empty.
+        let entries = store.query_hotspots("repo-a", "recent").unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn query_hotspots_matches_batch_score_hotspots() {
+        use scryrs_core::scoring::score_hotspots;
+
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap();
+
+        let e1 = subject_event(
+            TraceEventType::FileOpened,
+            "src/a.rs",
+            "s1",
+            "2026-06-25T10:00:00Z",
+            Outcome::Success,
+        );
+        let e2 = subject_event(
+            TraceEventType::EditMade,
+            "src/a.rs",
+            "s1",
+            "2026-06-25T10:01:00Z",
+            Outcome::Failure {
+                reason: Some("err".into()),
+            },
+        );
+        let e3 = subject_event(
+            TraceEventType::FileOpened,
+            "src/b.rs",
+            "s2",
+            "2026-06-25T10:02:00Z",
+            Outcome::Success,
+        );
+
+        let envelope = make_envelope(
+            "repo-a",
+            "ws-1",
+            "pi",
+            vec![
+                env_event("qmb-001", e1.clone()),
+                env_event("qmb-002", e2.clone()),
+                env_event("qmb-003", e3.clone()),
+            ],
+        );
+        let _acks = store.ingest_batch(&envelope).unwrap();
+
+        // query_hotspots from the store.
+        let live_entries = store
+            .query_hotspots("repo-a", WINDOW_CUMULATIVE)
+            .unwrap();
+
+        // score_hotspots from the same raw events.
+        let events_ref: Vec<(u64, &TraceEvent)> =
+            vec![(1u64, &e1), (2u64, &e2), (3u64, &e3)];
+        let batch_entries = score_hotspots(&events_ref);
+
+        assert_eq!(live_entries.len(), batch_entries.len());
+        for (live, batch) in live_entries.iter().zip(batch_entries.iter()) {
+            assert_eq!(live.rank, batch.rank, "rank mismatch");
+            assert_eq!(live.subjectKind, batch.subjectKind);
+            assert_eq!(live.subject, batch.subject);
+            assert_eq!(live.score, batch.score);
+            assert_eq!(live.sessionCount, batch.sessionCount);
+            assert_eq!(live.firstSeen, batch.firstSeen);
+            assert_eq!(live.lastSeen, batch.lastSeen);
+        }
+    }
+
+    // --- poll_signals tests (1.4) ---
+
+    fn ingest_and_cross_threshold(
+        store: &ServerStore,
+        repo: &str,
+        subject: &str,
+        count: usize,
+        id_prefix: &str,
+    ) {
+        for i in 0..count {
+            let event = subject_event(
+                TraceEventType::FileOpened,
+                subject,
+                &format!("s{i}"),
+                &format!("2026-06-25T10:{i:02}:00Z"),
+                Outcome::Success,
+            );
+            let pid = format!("{id_prefix}-{i:03}");
+            let envelope = make_envelope(repo, "ws-1", "pi", vec![env_event(&pid, event)]);
+            let _acks = store.ingest_batch(&envelope).unwrap();
+        }
+    }
+
+    #[test]
+    fn poll_signals_empty_result() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap();
+
+        let signals = store.poll_signals("repo-a", None, 100).unwrap();
+        assert!(signals.is_empty());
+    }
+
+    #[test]
+    fn poll_signals_id_order() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap();
+
+        // Ingest enough to cross threshold for two subjects.
+        // 10 events for "a.rs" crosses threshold at event 10.
+        ingest_and_cross_threshold(&store, "repo-a", "a.rs", 10, "a");
+        // Then 10 for "b.rs".
+        ingest_and_cross_threshold(&store, "repo-a", "b.rs", 10, "b");
+
+        let signals = store.poll_signals("repo-a", None, 100).unwrap();
+        assert_eq!(signals.len(), 2);
+        // Should be ordered by id ASC.
+        assert_eq!(signals[0].subject, "a.rs");
+        assert_eq!(signals[1].subject, "b.rs");
+        assert!(signals[0].id < signals[1].id);
+    }
+
+    #[test]
+    fn poll_signals_after_id_filter() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap();
+
+        ingest_and_cross_threshold(&store, "repo-a", "a.rs", 10, "a");
+        ingest_and_cross_threshold(&store, "repo-a", "b.rs", 10, "b");
+
+        let all = store.poll_signals("repo-a", None, 100).unwrap();
+        assert_eq!(all.len(), 2);
+        let first_id = all[0].id;
+
+        let after = store.poll_signals("repo-a", Some(first_id), 100).unwrap();
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].subject, "b.rs");
+    }
+
+    #[test]
+    fn poll_signals_limit_truncation() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap();
+
+        ingest_and_cross_threshold(&store, "repo-a", "a.rs", 10, "a");
+        ingest_and_cross_threshold(&store, "repo-a", "b.rs", 10, "b");
+        ingest_and_cross_threshold(&store, "repo-a", "c.rs", 10, "c");
+
+        let signals = store.poll_signals("repo-a", None, 2).unwrap();
+        assert_eq!(signals.len(), 2);
+        assert_eq!(signals[0].subject, "a.rs");
+        assert_eq!(signals[1].subject, "b.rs");
+    }
+
+    #[test]
+    fn poll_signals_repository_isolation() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap();
+
+        ingest_and_cross_threshold(&store, "repo-a", "a.rs", 10, "a");
+        ingest_and_cross_threshold(&store, "repo-b", "b.rs", 10, "b");
+
+        let signals_a = store.poll_signals("repo-a", None, 100).unwrap();
+        assert_eq!(signals_a.len(), 1);
+        assert_eq!(signals_a[0].subject, "a.rs");
+
+        let signals_b = store.poll_signals("repo-b", None, 100).unwrap();
+        assert_eq!(signals_b.len(), 1);
+        assert_eq!(signals_b[0].subject, "b.rs");
     }
 }

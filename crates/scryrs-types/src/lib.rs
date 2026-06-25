@@ -311,6 +311,44 @@ pub struct HotspotSignal {
     pub createdAt: String,
 }
 
+/// SSE event payload wrapping a `HotspotSignal` with the server-side
+/// autoincrement row id. Used as the `data:` field in `GET /v1/repositories/{id}/signals`.
+#[allow(non_snake_case)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HotspotSignalEvent {
+    /// Server-side autoincrement row id from `hotspot_signals.id`.
+    pub id: i64,
+    /// Repository that produced the event.
+    pub repositoryId: String,
+    /// Subject kind tag ("file", "search", "symbol", "command", "document").
+    pub subjectKind: String,
+    /// Concrete subject string.
+    pub subject: String,
+    /// Cumulative score at the time of the crossing.
+    pub score: u32,
+    /// Score delta contributed by the triggering event.
+    pub delta: u32,
+    /// Window model tag — always `"cumulative"` for this foundation.
+    pub window: String,
+    /// Configured threshold that was crossed.
+    pub threshold: u32,
+    /// Ordered server_trace_events row IDs contributing to this signal.
+    pub evidenceRowIds: Vec<u64>,
+    /// RFC 3339 timestamp when the signal was created.
+    pub createdAt: String,
+}
+
+/// Query parameters for `GET /v1/repositories/{repository_id}/hotspots`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct HotspotQueryParams {
+    /// Window model tag. Only `"cumulative"` is supported; omitted defaults to `"cumulative"`.
+    #[serde(default)]
+    pub window: Option<String>,
+    /// Session-scoped filter — deferred, returns 400.
+    #[serde(default)]
+    pub session_id: Option<String>,
+}
+
 // --- Live hotspot server contract types (Phase 4) ---
 
 /// Versioned batch wrapper for trace events submitted to the live hotspot server.
@@ -1718,5 +1756,50 @@ mod tests {
         };
         assert_eq!(signal.score, 12);
         assert_eq!(signal.delta, 3);
+    }
+
+    // --- HotspotSignalEvent round-trip tests ---
+
+    #[test]
+    fn hotspot_signal_event_round_trips() {
+        let event = HotspotSignalEvent {
+            id: 42,
+            repositoryId: "repo-a".into(),
+            subjectKind: "file".into(),
+            subject: "src/main.rs".into(),
+            score: 15,
+            delta: 3,
+            window: "cumulative".into(),
+            threshold: 10,
+            evidenceRowIds: vec![1, 5, 9],
+            createdAt: "2026-06-25T12:00:00Z".into(),
+        };
+        let json = serialize_json(&event);
+        let reconstructed: HotspotSignalEvent = deserialize_json(&json);
+        assert_eq!(reconstructed, event);
+        assert!(json.contains("\"id\":42"));
+        assert!(json.contains("\"subjectKind\":\"file\""));
+        assert!(json.contains("\"score\":15"));
+        assert!(json.contains("\"evidenceRowIds\":[1,5,9]"));
+    }
+
+    #[test]
+    fn hotspot_signal_event_id_preserved_through_round_trip() {
+        let event = HotspotSignalEvent {
+            id: 999,
+            repositoryId: "repo-b".into(),
+            subjectKind: "search".into(),
+            subject: "routing".into(),
+            score: 5,
+            delta: 2,
+            window: "cumulative".into(),
+            threshold: 5,
+            evidenceRowIds: vec![],
+            createdAt: "2026-06-25T12:00:00Z".into(),
+        };
+        let json = serialize_json(&event);
+        let reconstructed: HotspotSignalEvent = deserialize_json(&json);
+        assert_eq!(reconstructed.id, 999);
+        assert_eq!(reconstructed, event);
     }
 }

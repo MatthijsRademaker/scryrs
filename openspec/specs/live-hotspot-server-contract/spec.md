@@ -215,7 +215,7 @@ The system SHALL define a `GET /v1/repositories/{repository_id}/hotspots` endpoi
 
 ### Requirement: SSE signal stream delivers hotspot delta events
 
-The system SHALL define a `GET /v1/repositories/{repository_id}/signals` endpoint for one-way streaming of hotspot delta events. The transport SHALL be Server-Sent Events (SSE) with media type `text/event-stream`. The exact signal payload schema is deferred to implementation tasks; this contract specifies only the transport and event framing.
+The system SHALL define a `GET /v1/repositories/{repository_id}/signals` endpoint for one-way streaming of hotspot delta events. The transport SHALL be Server-Sent Events (SSE) with media type `text/event-stream`. Each SSE event SHALL carry an `id:` field set to the signal's autoincrement row id from `hotspot_signals.id` and a `data:` field containing a JSON `HotspotSignalEvent` payload (defined in `scryrs-types`) that includes all `HotspotSignal` fields plus the server-side `id: i64`. The endpoint SHALL accept an `after=<id>` query parameter for replay; omission emits all signals from the start.
 
 #### Scenario: SSE endpoint returns text/event-stream
 
@@ -224,19 +224,20 @@ The system SHALL define a `GET /v1/repositories/{repository_id}/signals` endpoin
 - **THEN** the `Content-Type` header is `text/event-stream`
 - **AND** the connection is a long-lived HTTP response
 
-#### Scenario: SSE events carry id and data fields
+#### Scenario: SSE events carry id and data fields with HotspotSignalEvent payload
 
 - **GIVEN** a connected SSE client
 - **WHEN** a hotspot delta event occurs
-- **THEN** the SSE message includes an `id:` field carrying the event cursor or sequence number
-- **AND** the SSE message includes a `data:` field carrying a JSON payload
+- **THEN** the SSE message includes an `id:` field carrying the signal's autoincrement row id
+- **AND** the SSE message includes a `data:` field carrying a JSON `HotspotSignalEvent` with fields: `id`, `repositoryId`, `subjectKind`, `subject`, `score`, `delta`, `window`, `threshold`, `evidenceRowIds`, `createdAt`
 - **AND** the message is terminated by a blank line per SSE protocol
 
-#### Scenario: Signal payload schema is not defined in this contract
+#### Scenario: After parameter enables cursor-based replay
 
-- **WHEN** this contract is consulted for signal event semantics
-- **THEN** the document states that the signal payload schema (what `data:` contains) is deferred to a follow-up implementation task
-- **AND** no specific `HotspotSignal` type or field definitions are included in this contract
+- **GIVEN** a client has previously received signal id 42
+- **WHEN** `GET /v1/repositories/repo-a/signals?after=42` is called
+- **THEN** only signals with id > 42 are emitted
+- **AND** the SSE `id:` field is set to each signal's row id, supporting standard `Last-Event-ID` reconnect
 
 ### Requirement: Remote mode is exclusive and explicitly configured
 
