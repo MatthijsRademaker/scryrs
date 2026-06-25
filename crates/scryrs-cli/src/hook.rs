@@ -3,20 +3,25 @@
 //! `hook` is the harness-facing integration entry point. It accepts a harness's
 //! native tool event (Claude Code on stdin; Pi via `--file`), delegates
 //! translation to the `scryrs-adapter-harness` crate, and persists any resulting
-//! `TraceEvent` through the same canonical `EventStore` that `record` uses.
+//! `TraceEvent` through the shared canonical `EventStore` (local mode) or remote
+//! ingest submission (remote mode, when configured via `scryrs.json`).
 //!
 //! Its defining contract is **fail-open**: it NEVER blocks the harness. Any
-//! error — malformed input, unknown harness, translation failure, store error —
-//! results in exit 0 with empty stdout, plus a timestamped line in
-//! `.scryrs/hooks/<harness>-warnings.log`. This is the inverse of `record`'s
-//! 1/2 exit policy, which is why `hook` is its own command.
+//! error — malformed input, unknown harness, translation failure, store error,
+//! remote submission failure — results in exit 0 with empty stdout, plus a
+//! timestamped line in `.scryrs/hooks/<harness>-warnings.log`. This is the
+//! inverse of `record`'s 1/2 exit policy, which is why `hook` is its own command.
 
 use std::io::{Read, Write};
 
 use clap::ArgMatches;
 
 #[cfg(feature = "core")]
-use scryrs_adapter_harness::{HookContext, adapter_for, debug_enabled, now_iso8601};
+use {
+    crate::remote_config,
+    crate::remote_submit::{RemoteSubmitter, UreqSubmitter, build_envelope},
+    scryrs_adapter_harness::{HookContext, adapter_for, debug_enabled, now_iso8601},
+};
 
 /// Execute `scryrs hook <harness>`.
 ///
@@ -129,28 +134,67 @@ pub(crate) fn execute_hook<R: Read>(
         }
     };
 
-    // --- persist through the shared canonical store ---
-    let persist = (|| -> Result<(), String> {
-        let mut store =
-            EventStore::open(&store_path).map_err(|e| format!("cannot open store: {e}"))?;
-        store
-            .append(&event)
-            .map_err(|e| format!("cannot append event: {e}"))?;
-        Ok(())
-    })();
+    // --- persist through shared canonical store or remote submit ---
+    let remote = remote_config::resolve_remote_config().ok().flatten();
 
-    if let Err(reason) = persist {
-        warn(harness, &base_dir, &reason, debug, err);
-        return 0;
-    }
-
-    if debug {
-        let _ = writeln!(
-            err,
-            "[scryrs-hook] stage=persisted harness={harness} event_type={} store={}",
-            event.event_type.payload_type_str(),
-            store_path.display()
+    if let Some(resolved) = remote {
+        // Remote mode: submit one event as a batch of 1. Fail-open on errors.
+        let accepted_pairs = vec![(1usize, event.clone())];
+        let envelope = build_envelope(
+            &accepted_pairs,
+            &resolved.config.repository_id,
+            &resolved.config.workspace_id,
+            &resolved.config.agent_id,
         );
+        let submitter = UreqSubmitter;
+        match submitter.submit(
+            &resolved.config.ingest_url,
+            &envelope,
+            resolved.config.timeout_ms,
+        ) {
+            Ok(_resp) => {
+                if debug {
+                    let _ = writeln!(
+                        err,
+                        "[scryrs-hook] stage=remote_persisted harness={harness} event_type={}",
+                        event.event_type.payload_type_str()
+                    );
+                }
+            }
+            Err(submit_err) => {
+                warn(
+                    harness,
+                    &base_dir,
+                    &format!("remote ingest failed: {submit_err}"),
+                    debug,
+                    err,
+                );
+            }
+        }
+    } else {
+        // Local mode: persist through the shared canonical store.
+        let persist = (|| -> Result<(), String> {
+            let mut store =
+                EventStore::open(&store_path).map_err(|e| format!("cannot open store: {e}"))?;
+            store
+                .append(&event)
+                .map_err(|e| format!("cannot append event: {e}"))?;
+            Ok(())
+        })();
+
+        if let Err(reason) = persist {
+            warn(harness, &base_dir, &reason, debug, err);
+            return 0;
+        }
+
+        if debug {
+            let _ = writeln!(
+                err,
+                "[scryrs-hook] stage=persisted harness={harness} event_type={} store={}",
+                event.event_type.payload_type_str(),
+                store_path.display()
+            );
+        }
     }
 
     0

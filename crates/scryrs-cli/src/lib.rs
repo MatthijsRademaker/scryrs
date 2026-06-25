@@ -14,6 +14,10 @@ mod hook;
 mod hotspots;
 mod record;
 #[cfg(feature = "core")]
+mod remote_config;
+#[cfg(feature = "core")]
+mod remote_submit;
+#[cfg(feature = "core")]
 pub(crate) mod store_override;
 
 pub use dispatch::{run, run_with_io, run_with_writers};

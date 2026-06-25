@@ -273,11 +273,17 @@ impl ServerStore {
                 InsertResult::Duplicate { stored_at }
             }
             Err(e) => InsertResult::StorageError {
-                error: format!("SQL error during INSERT OR IGNORE for producer_event_id '{}': {e}", item.producer_event_id),
+                error: format!(
+                    "SQL error during INSERT OR IGNORE for producer_event_id '{}': {e}",
+                    item.producer_event_id
+                ),
             },
             Ok(_n) => InsertResult::StorageError {
                 // Unreachable for SQLite INSERT — rows-changed is 0 or 1.
-                error: format!("unexpected rows-changed ({_n}) from INSERT OR IGNORE for producer_event_id '{}'", item.producer_event_id),
+                error: format!(
+                    "unexpected rows-changed ({_n}) from INSERT OR IGNORE for producer_event_id '{}'",
+                    item.producer_event_id
+                ),
             },
         }
     }

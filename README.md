@@ -177,6 +177,15 @@ COMMANDS
   scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]
       Start the central trace ingest server for POST /v1/trace-events/batch.
 
+RECORD MODES
+  Local mode (default): persisted to .scryrs/scryrs.db, no network calls.
+  Remote mode: activated when a non-empty ingest URL is configured.
+      Configure via scryrs.json `remote` section.
+      Environment overrides: SCRYRS_REMOTE_INGEST_URL, SCRYRS_REPOSITORY_ID,
+      SCRYRS_WORKSPACE_ID, SCRYRS_AGENT_ID, SCRYRS_REMOTE_TIMEOUT_MS.
+      Remote mode skips SQLite entirely (no dual-write, no local fallback).
+      Default timeout: 3000 ms.
+
 RECORD OUTPUT
   A single-line JSON summary on stdout.
   Rejection diagnostics are written as JSON objects to stderr,
@@ -205,9 +214,9 @@ OPTIONS
   -hj, --help-json Print machine-readable CLI surface description and exit
 
 EXIT CODES
-  0    Success (hotspots: JSON written; record: all events accepted; init: hook installed; dashboard: server shut down cleanly; server: server shut down cleanly)
-  1    Hotspots: storage error. Record: rejected events or I/O error. Init: I/O error. Dashboard: port in use or artifact read error. Server: port in use or store error.
-  2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file or store failure); init: unsupported harness, collision, or self-install refusal; dashboard: invalid flags or bind failure; server: invalid flags or bind failure
+  0    Success (hotspots: JSON written; record local: all events accepted; record remote: no rejections or failures; init: hook installed; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)
+  1    Hotspots: storage error. Record: rejected events or I/O error (local or server rejections). Init: I/O error. Dashboard: port in use or artifact read error. Server: port in use or store error.
+  2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, or self-install refusal; dashboard: invalid flags or bind failure; server: invalid flags or bind failure
 ```
 
 **`--version`** prints the binary version:
@@ -249,9 +258,9 @@ The CLI follows a three-code exit convention with command-specific semantics:
 
 | Exit code | Meaning     |
 |-----------|-------------|
-| 0         | Success (hotspots: JSON written, including empty entries; record: all events accepted; init: hook installed; dashboard: server shut down cleanly; server: server shut down cleanly) |
-| 1         | Hotspots: storage error. Record: rejected events or I/O error. Init: I/O error. Dashboard: port in use or artifact read error. Server: port in use or store error. |
-| 2         | Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file or store failure); init: unsupported harness, collision, or self-install refusal; dashboard: invalid flags or bind failure; server: invalid flags or bind failure |
+| 0         | Success (hotspots: JSON written, including empty entries; record local: all events accepted; record remote: no rejections or failures; init: hook installed; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness) |
+| 1         | Hotspots: storage error. Record: rejected events or I/O error (local or server). Init: I/O error. Dashboard: port in use or artifact read error. Server: port in use or store error. |
+| 2         | Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, or self-install refusal; dashboard: invalid flags or bind failure; server: invalid flags or bind failure |
 
 **Missing required argument** — exit 2:
 
