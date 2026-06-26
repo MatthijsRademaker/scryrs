@@ -124,21 +124,23 @@ Per-subject score = sum of event weights multiplied by per-type counts. `FailedL
 
 ### `scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]`
 
-Starts a long-lived HTTP server for central trace event ingest at `POST /v1/trace-events/batch`. Accepts versioned trace-event batches, validates them deterministically, and persists accepted events into a server-owned SQLite store with first-writer-wins idempotency.
+Starts a long-lived HTTP server for central trace event ingest and live hotspot query/streaming. Accepts versioned trace-event batches at `POST /v1/trace-events/batch` with deterministic validation and first-writer-wins idempotency. Also serves read-only live hotspot rankings and a Server-Sent Events signal stream.
 
 | Field | Value |
 |-------|-------|
 | Input | No required arguments. Optional flags: `--bind` (default `127.0.0.1`), `--port` (default `8081`), `--store` (default `.scryrs/server.db`) |
-| Output | HTTP server with REST endpoint `POST /v1/trace-events/batch`. Startup message written to stderr. |
+| Output | HTTP server with three REST endpoints (see table below). Startup message written to stderr. |
 | Exit 0 | Server shut down cleanly (SIGINT/SIGTERM) |
 | Exit 1 | Server I/O failure (port already in use, bind failure) |
 | Exit 2 | Usage error (invalid `--port`, `--bind`, or `--store`) or feature not compiled |
 
 **REST API contract:**
 
-| Endpoint | Method | Request Body | Response |
-|----------|--------|-------------|----------|
+| Endpoint | Method | Request Body / Params | Response |
+|----------|--------|-----------------------|----------|
 | `/v1/trace-events/batch` | POST | `ServerIngestEnvelope` (JSON) | `200 OK` with `BatchIngestResponse` (JSON) containing `accepted_count`, `duplicate_count`, `rejected_count`, `received_count`, per-item `events` array with status and diagnostics, and `received_at` timestamp. `400 Bad Request` for malformed envelope, unsupported version, or missing identity fields. |
+| `/v1/repositories/{repository_id}/hotspots` | GET | `?window=cumulative` (default, only supported value), optional `?session_id=<id>` | `200 OK` with `LiveHotspotsResponse` (JSON) containing `schemaVersion`, `repositoryId`, `cursor`, `generatedAt`, and ranked `entries`. `400 Bad Request` for unsupported `window` values. |
+| `/v1/repositories/{repository_id}/signals` | GET | Optional `?after=<signal_id>` (cursor for replay/resume) | `200 OK` with `text/event-stream` (SSE). Each event carries `id: <signal_id>` and `data: <HotspotSignal JSON>`. The stream replays persisted signals with `id > after`, then continues with live signals. Includes a 15-second `keep-alive` heartbeat. |
 
 **ServerIngestEnvelope structure:**
 
@@ -189,6 +191,62 @@ Starts a long-lived HTTP server for central trace event ingest at `POST /v1/trac
 - `error_reason` is present only for rejected events.
 
 **Idempotency:** Events are deduplicated by composite key `(repository_id, workspace_id, agent_id, producer_event_id)`. Re-submitting an identical event returns status `"idempotent"` with the original `received_at` timestamp.
+
+**LiveHotspotsResponse structure:**
+
+```json
+{
+  "schemaVersion": "1.0.0",
+  "repositoryId": "repo-a",
+  "cursor": "",
+  "generatedAt": "2026-06-26T10:00:00Z",
+  "entries": [
+    {
+      "rank": 1,
+      "subjectKind": "File",
+      "subject": "src/a.rs",
+      "score": 42,
+      "counts": {
+        "eventType": { "FileOpened": 5, "EditMade": 3 },
+        "outcome": { "Success": 8 }
+      },
+      "sessionCount": 3,
+      "firstSeen": "2026-06-24T10:00:00Z",
+      "lastSeen": "2026-06-26T09:00:00Z",
+      "evidence": {
+        "rowIds": [1, 2, 3, 5, 7, 8, 10, 12]
+      }
+    }
+  ]
+}
+```
+
+- `schemaVersion`: Independent of trace event version; currently `"1.0.0"`.
+- `entries`: Ranked by six-key tie-break (score DESC, sessionCount DESC, lastSeen DESC, subjectKind ASC, subject ASC, firstEventId ASC). Empty array for repositories with no data.
+- `sessionCount`: Number of distinct sessions that touched the subject (cumulative query) or `1` (session-scoped query).
+- `evidence.rowIds`: Ordered list of `server_trace_events` row IDs contributing to the accumulator.
+- Session-scoped queries (`?session_id=<id>`) recompute rankings from raw events via `score_hotspots` rather than reading accumulators; this ensures session-level correctness at the cost of a full event scan.
+
+**HotspotSignal (SSE data field) structure:**
+
+```json
+{
+  "repositoryId": "repo-a",
+  "subjectKind": "File",
+  "subject": "src/a.rs",
+  "score": 42,
+  "delta": 1,
+  "window": "cumulative",
+  "threshold": 10,
+  "evidenceRowIds": [1, 2, 3],
+  "createdAt": "2026-06-26T10:00:00Z"
+}
+```
+
+- `id` (SSE event id): Monotonically increasing signal row ID, usable as `?after=` cursor value.
+- `delta`: Score change since the previous signal for the same subject (minimum 1).
+- `threshold`: The signal threshold in effect at creation time.
+- The SSE stream is infinite (replay phase then live broadcast). Clients should disconnect when no longer needed; reconnection with `?after=<last_seen_id>` resumes without gaps.
 
 ### `scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]`
 
