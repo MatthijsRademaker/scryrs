@@ -48,7 +48,7 @@ The change is done only when it is correct, simple, localized, verified, consist
 
 ## 11. No exception swallowing
 
-The go ecosystem lends itself well for error propagation, i want a full stack trace with relevant errors. Not swallow them and have a different error somehwere down the line.
+The Rust ecosystem lends itself well to error propagation (`Result` + `?`); I want errors propagated with full context, not swallowed and surfaced as a different error somewhere down the line.
 
 ## 12. File scope and naming
 
@@ -59,17 +59,16 @@ Use feature-descriptive file names; avoid generic buckets like `utils`, `helpers
 ## General guidance
 
 - Prefer delegating to subagents
-- Prefer executable truth in `src/` when docs disagree.
+- Prefer executable truth in `crates/` when docs disagree.
 - For dashboard UI work in `crates/scryrs-dashboard/frontend/`, read `.pi/skills/shadcn-vue/SKILL.md` before adding or modifying components.
 
 ## Documentation Sources
 
-Two separate documentation trees exist. They serve different audiences — do not confuse them.
+Developer documentation lives under `.devagent/docs/`. The dashboard (`crates/scryrs-dashboard/frontend/`) is a Vue app, not a docs tree — for dashboard UI work read `.pi/skills/shadcn-vue/SKILL.md`.
 
 | Path | Audience | Purpose |
 |---|---|---|
-| `.devagent/docs/` | **Project developers** (people working on the swarm codebase) | Internal architecture, CLI internals, agent/runtime docs, manager API, testing patterns, design decisions. Built with Rspress, served at `/project-docs/`. |
-| `src/dashboard/docs/` | **Swarm users** (people deploying/using the swarm) | Public-facing content shipped with the dashboard app. Currently holds shader/material reference examples. |
+| `.devagent/docs/` | **Project developers** (people working on the scryrs codebase) | Internal architecture, crate contracts, CLI behavior, execution flow, testing patterns, design decisions. Built with Rspress, served at `/project-docs/`. |
 
 ## Additional Rule Files
 
@@ -92,4 +91,4 @@ This repository carries two copies of the Pi trace hook. They are not equal-weig
 4. LLMs/agents **MUST NOT** treat the installed copy as the leading source or resolution target for hook logic.
 5. After editing `hooks/pi/index.ts`, refresh the installed copy by removing `.pi/extensions/pi-trace/index.ts` and re-running `scryrs init --agent pi`.
 
-**Important:** The frontmatter fields `modelEasy`, `modelModerate`, and `modelComplex` in `.pi/agents/*.md` are **live, active runtime configuration** — not dead code, not backwards-compat cruft, not stale config. They drive difficulty-based model routing at runtime (`resolveEffectiveModelRef` in `src/swarm-extension/extensions/index.ts`). Do not remove them under Rules 7 or 9; those rules apply to code, not to active runtime configuration that controls which AI model executes tasks. See `.pi/rules/agent-definition-fields.md` for the full contract.
+**Important:** The frontmatter fields `modelEasy`, `modelModerate`, and `modelComplex` in `.pi/agents/*.md` are **live, active runtime configuration** — not dead code, not backwards-compat cruft, not stale config. They drive difficulty-based model routing at runtime, resolved by the vendored `@swarm/swarm-extension` package (see `.pi/extensions/README.md`). Do not remove them under Rules 7 or 9; those rules apply to code, not to active runtime configuration that controls which AI model executes tasks.
