@@ -1,6 +1,6 @@
 # CLI v0 Contract
 
-The v0 CLI surface for `scryrs` provides four implemented commands: `hotspots`, `record`, `init`, and `dashboard`. This contract serves agent integrators and follow-up feature developers.
+The v0 CLI surface for `scryrs` provides five implemented commands: `hotspots`, `record`, `init`, `dashboard`, and `server`. This contract serves agent integrators and follow-up feature developers.
 
 ## Binary
 
@@ -122,6 +122,74 @@ Analyzes persisted trace events in `.scryrs/scryrs.db` and emits a deterministic
 
 Per-subject score = sum of event weights multiplied by per-type counts. `FailedLookup` events add a fixed `FAILURE_BONUS` of 2 per occurrence in addition to the weight.
 
+### `scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]`
+
+Starts a long-lived HTTP server for central trace event ingest at `POST /v1/trace-events/batch`. Accepts versioned trace-event batches, validates them deterministically, and persists accepted events into a server-owned SQLite store with first-writer-wins idempotency.
+
+| Field | Value |
+|-------|-------|
+| Input | No required arguments. Optional flags: `--bind` (default `127.0.0.1`), `--port` (default `8081`), `--store` (default `.scryrs/server.db`) |
+| Output | HTTP server with REST endpoint `POST /v1/trace-events/batch`. Startup message written to stderr. |
+| Exit 0 | Server shut down cleanly (SIGINT/SIGTERM) |
+| Exit 1 | Server I/O failure (port already in use, bind failure) |
+| Exit 2 | Usage error (invalid `--port`, `--bind`, or `--store`) or feature not compiled |
+
+**REST API contract:**
+
+| Endpoint | Method | Request Body | Response |
+|----------|--------|-------------|----------|
+| `/v1/trace-events/batch` | POST | `ServerIngestEnvelope` (JSON) | `200 OK` with `BatchIngestResponse` (JSON) containing `accepted_count`, `duplicate_count`, `rejected_count`, `received_count`, per-item `events` array with status and diagnostics, and `received_at` timestamp. `400 Bad Request` for malformed envelope, unsupported version, or missing identity fields. |
+
+**ServerIngestEnvelope structure:**
+
+```json
+{
+  "envelope_version": "1.0.0",
+  "repository_id": "<repo-id>",
+  "workspace_id": "<workspace-id>",
+  "agent_id": "<agent-id>",
+  "events": [
+    {
+      "producer_event_id": "<unique-event-id>",
+      "client_timestamp": "<RFC 3339>",
+      "event": { "...": "..." }
+    }
+  ]
+}
+```
+
+**BatchIngestResponse structure:**
+
+```json
+{
+  "accepted_count": 3,
+  "duplicate_count": 1,
+  "rejected_count": 2,
+  "received_count": 4,
+  "events": [
+    {
+      "index": 0,
+      "producer_event_id": "evt-001",
+      "status": "accepted",
+      "server_event_id": "srv-42",
+      "error_reason": null,
+      "received_at": "2026-06-24T10:00:07Z"
+    }
+  ],
+  "received_at": "2026-06-24T10:00:07Z"
+}
+```
+
+- `accepted_count`: Number of new events accepted (first-writer-wins).
+- `duplicate_count`: Number of idempotent (previously stored) events.
+- `rejected_count`: Number of invalid events (malformed timestamp, schema-invalid TraceEvent, serialization error).
+- `received_count`: `accepted_count + duplicate_count` (backwards-compatible field).
+- Per-item `status` is one of `"accepted"`, `"idempotent"`, or `"rejected"`.
+- `server_event_id` is present only for accepted events, formatted as `"srv-{rowid}"`.
+- `error_reason` is present only for rejected events.
+
+**Idempotency:** Events are deduplicated by composite key `(repository_id, workspace_id, agent_id, producer_event_id)`. Re-submitting an identical event returns status `"idempotent"` with the original `received_at` timestamp.
+
 ### `scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]`
 
 Starts a local HTTP server and serves an embedded Vue.js SPA dashboard for visual browsing of `.scryrs/` hotspot, session, and event data. Reads `.scryrs/hotspots.json` and `.scryrs/scryrs.db` from the current working directory.
@@ -194,9 +262,9 @@ Agents should check `surfaceVersion` before parsing to detect format changes. Th
 
 | Code | Meaning |
 |------|---------|
-| 0 | Hotspots: report written successfully (may have zero entries). Record: all processed non-empty lines were accepted. Dashboard: server shut down cleanly. Help/version/surface display. |
-| 1 | Hotspots: I/O error writing stdout or artifact file. Record: one or more events rejected, or I/O error writing output. Dashboard: port in use or server startup I/O failure. |
-| 2 | Hotspots: missing PATH, store not found, corrupt store. Dashboard: invalid flags or bind address. Unknown commands, missing required arguments, invalid arguments, unsupported paths (usage errors). Record: fatal I/O error (unreadable file or store failure). |
+| 0 | Hotspots: report written successfully (may have zero entries). Record: all processed non-empty lines were accepted. Dashboard: server shut down cleanly. Server: server shut down cleanly. Help/version/surface display. |
+| 1 | Hotspots: I/O error writing stdout or artifact file. Record: one or more events rejected, or I/O error writing output. Dashboard: port in use or server startup I/O failure. Server: port in use, bind failure, or server I/O error. |
+| 2 | Hotspots: missing PATH, store not found, corrupt store. Dashboard: invalid flags or bind address. Server: invalid port/bind/store, or feature not compiled. Unknown commands, missing required arguments, invalid arguments, unsupported paths (usage errors). Record: fatal I/O error (unreadable file or store failure). |
 
 All error messages and human-facing diagnostics are written to stderr.
 
@@ -250,7 +318,7 @@ All error messages and human-facing diagnostics are written to stderr.
 
 **Fail-fast paths:** The following always exit 2 and write an error to stderr:
 
-- Any command other than `hotspots`, `dashboard`, `record`, or `init` (including `components`, `trace`, `propose`, `graph`, `route`, `adapters`, `report`, `suggest-docs`). `scryrs dashboard` is a valid implemented command.
+- Any command other than `hotspots`, `dashboard`, `record`, `init`, or `server` (including `components`, `trace`, `propose`, `graph`, `route`, `adapters`, `report`, `suggest-docs`). `scryrs dashboard` and `scryrs server` are valid implemented commands.
 - `scryrs hotspots` without a PATH argument
 - `scryrs record` with neither or both input modes (mutually exclusive)
 - `scryrs record --file` with an unreadable path
@@ -283,6 +351,22 @@ All error messages and human-facing diagnostics are written to stderr.
 **Collision behavior:** For `claude-code`, the installer merges into an existing `.claude/settings.json` — preserving unrelated keys and existing hooks, idempotent on re-run (the hook appears exactly once). For `pi`, if the target file already exists the installer exits 2 with remediation instructions rather than overwriting.
 
 **Self-install guard:** The installer refuses to run inside the scryrs source repository (detected via dual-marker heuristic).
+
+### Server command
+
+**When to call:** An agent or CI pipeline should call `scryrs server` to start a long-lived central trace ingest server. Multiple agent containers can then POST trace event batches to `POST /v1/trace-events/batch` without writing to the same SQLite file directly.
+
+**Input:** No required positional arguments. Optional flags: `--port <PORT>` (default `8081`), `-p <PORT>`, `--bind <ADDR>` (default `127.0.0.1`), `-b <ADDR>`, `--store <PATH>` (default `.scryrs/server.db`).
+
+**Output:** HTTP server with a single POST endpoint. Startup message written to stderr (e.g., `scryrs server listening on http://127.0.0.1:8081, store .scryrs/server.db`).
+
+**Exit codes:**
+
+- Exit 0: Server shut down cleanly (SIGINT/SIGTERM).
+- Exit 1: Port already in use, bind failure, or server I/O error.
+- Exit 2: Invalid flags, port zero, empty store path, or feature not compiled.
+
+**Feature gate:** The server command is available when the `server` Cargo feature is enabled (included in `default` and `full` feature sets). When the feature is absent, invoking `scryrs server` exits 2 with "server feature not enabled."
 
 ## Out of scope for v0
 

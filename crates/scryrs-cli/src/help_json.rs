@@ -4,7 +4,7 @@ use serde_json::json;
 
 /// Version of the `--help-json` surface document format, independent of
 /// `SCHEMA_VERSION` which governs command output envelopes.
-const SURFACE_VERSION: &str = "0.6.0";
+const SURFACE_VERSION: &str = "0.7.0";
 
 pub(crate) fn cli_surface_doc() -> String {
     let doc = json!({
@@ -37,26 +37,48 @@ pub(crate) fn cli_surface_doc() -> String {
             },
             {
                 "name": "record",
-                "description": "Ingest JSONL trace events from stdin or file",
+                "description": "Ingest JSONL trace events from stdin or file. Defaults to local mode (writes to .scryrs/scryrs.db). Activates remote mode when a non-empty ingest URL is configured via scryrs.json `remote` section (overridden by SCRYRS_REMOTE_INGEST_URL, SCRYRS_REPOSITORY_ID, SCRYRS_WORKSPACE_ID, SCRYRS_AGENT_ID, SCRYRS_REMOTE_TIMEOUT_MS). Remote mode skips local SQLite and submits a single batch to POST /v1/trace-events/batch.",
                 "modes": [
                     {"name": "stdin", "flag": "--stdin", "description": "Read JSONL events from stdin"},
                     {"name": "file", "flag": "--file", "value": "PATH", "description": "Read JSONL events from PATH"}
                 ],
-                "output": {
-                    "mimeType": "application/json",
-                    "fields": [
-                        {"name": "command", "type": "string", "description": "Name of the executed command (always \"record\")", "optional": false},
-                        {"name": "schemaVersion", "type": "string", "description": "Version of the output envelope format", "optional": false},
-                        {"name": "accepted", "type": "number", "description": "Count of accepted events", "optional": false},
-                        {"name": "rejected", "type": "number", "description": "Count of rejected non-empty lines", "optional": false}
-                    ]
+                "transport": {
+                    "local": {
+                        "description": "Default transport — persists accepted events to .scryrs/scryrs.db via the canonical EventStore.",
+                        "output": {
+                            "mimeType": "application/json",
+                            "fields": [
+                                {"name": "command", "type": "string", "description": "Name of the executed command (always \"record\")", "optional": false},
+                                {"name": "schemaVersion", "type": "string", "description": "Version of the output envelope format", "optional": false},
+                                {"name": "accepted", "type": "number", "description": "Count of accepted events", "optional": false},
+                                {"name": "rejected", "type": "number", "description": "Count of rejected non-empty lines", "optional": false}
+                            ]
+                        }
+                    },
+                    "remote": {
+                        "description": "Explicit remote mode — activated by scryrs.json `remote.ingest_url` or SCRYRS_REMOTE_INGEST_URL. Skips .scryrs/scryrs.db entirely. Default timeout 3000 ms.",
+                        "configPrecedence": ["1. Environment variables (SCRYRS_REMOTE_*)", "2. scryrs.json `remote` section", "3. Git remote origin URL (repository_id fallback only)"],
+                        "requiredIdentity": ["repository_id", "workspace_id", "agent_id"],
+                        "output": {
+                            "mimeType": "application/json",
+                            "fields": [
+                                {"name": "command", "type": "string", "description": "Name of the executed command (always \"record\")", "optional": false},
+                                {"name": "schemaVersion", "type": "string", "description": "Version of the output envelope format", "optional": false},
+                                {"name": "transport", "type": "string", "description": "Always \"remote\" when remote mode is active", "optional": false},
+                                {"name": "accepted", "type": "number", "description": "Count of events the server accepted", "optional": false},
+                                {"name": "duplicate", "type": "number", "description": "Count of idempotent (previously seen) events — non-fatal", "optional": false},
+                                {"name": "rejected", "type": "number", "description": "Count of rejected events (local validation + server rejections)", "optional": false},
+                                {"name": "failed", "type": "number", "description": "Count of server-rejected items", "optional": false}
+                            ]
+                        }
+                    }
                 },
                 "stderr": {
                     "mimeType": "application/jsonl",
-                    "description": "One JSON object per rejected non-empty line",
+                    "description": "One JSON object per rejected non-empty line (local) or per server-rejected item (remote, with line -1 and producer_event_id as the field)",
                     "fields": [
-                        {"name": "line", "type": "number", "description": "1‑based physical line number", "optional": false},
-                        {"name": "field", "type": "string|null", "description": "Failing field/path when available", "optional": true},
+                        {"name": "line", "type": "number", "description": "1‑based physical line number (-1 for server-rejected items)", "optional": false},
+                        {"name": "field", "type": "string|null", "description": "Failing field/path when available, or producer_event_id for server rejects", "optional": true},
                         {"name": "reason", "type": "string", "description": "Human-readable rejection reason", "optional": false}
                     ]
                 }
@@ -113,6 +135,19 @@ pub(crate) fn cli_surface_doc() -> String {
                     "mimeType": "text/html",
                     "description": "Vue.js SPA served over HTTP. REST API at GET /api/hotspots, GET /api/sessions, GET /api/sessions/:sessionId, GET /api/events."
                 }
+            },
+            {
+                "name": "server",
+                "description": "Start the central trace ingest server for POST /v1/trace-events/batch",
+                "flags": [
+                    {"name": "port", "short": "-p", "long": "--port", "type": "number", "default": 8081, "description": "TCP port to bind"},
+                    {"name": "bind", "short": "-b", "long": "--bind", "type": "string", "default": "127.0.0.1", "description": "Bind address"},
+                    {"name": "store", "long": "--store", "type": "string", "default": ".scryrs/server.db", "description": "Server-owned SQLite store path"}
+                ],
+                "output": {
+                    "mimeType": "application/json",
+                    "description": "BatchIngestResponse returned by POST /v1/trace-events/batch with accepted_count, duplicate_count, rejected_count, received_count, and per-item EventAck diagnostics."
+                }
             }
         ],
         "globalFlags": [
@@ -122,9 +157,9 @@ pub(crate) fn cli_surface_doc() -> String {
         ],
         "rootBehavior": {"action": "help", "exitCode": 0},
         "exitCodes": {
-            "0": "Success (hotspots: JSON written, including empty entries; record: all events accepted; init: hook installed; dashboard: server shut down cleanly; hook: always — fail-open, never blocks the harness)",
-            "1": "Hotspots: storage error. Record: one or more events rejected, or I/O error writing output. Init: I/O error. Dashboard: port in use or artifact read error.",
-            "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file or store failure); init: unsupported harness, collision, or self-install refusal; dashboard: invalid flags."
+            "0": "Success (hotspots: JSON written, including empty entries; record local: all events accepted; record remote: no rejections or failures; init: hook installed; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)",
+            "1": "Hotspots: storage error. Record: one or more events rejected (local or server), or I/O error writing output. Init: I/O error. Dashboard: port in use or artifact read error. Server: port in use or store error.",
+            "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, or self-install refusal; dashboard: invalid flags; server: invalid flags or bind failure."
         }
     });
     serde_json::to_string(&doc).unwrap_or_else(|_| "{}".into())

@@ -3,9 +3,7 @@
 ## Purpose
 
 Defines requirements for the trace hook contract document — the canonical harness integration reference covering non-interference rules, TraceEvent schema mapping, session demarcation, scryrs.json manifest shape, and integration tiers.
-
 ## Requirements
-
 ### Requirement: Canonical hook-contract documentation exists and is discoverable
 
 The system SHALL publish a single canonical hook-contract document at `.devagent/docs/docs/trace-hook-contract.md` that serves as the source of truth for harness integrators. The document SHALL be registered in `.devagent/docs/docs/_nav.json` under the Technical section and SHALL clearly identify itself as the canonical integration contract.
@@ -25,26 +23,19 @@ The system SHALL publish a single canonical hook-contract document at `.devagent
 
 ### Requirement: Non-interference and fail-open rules are stated unambiguously
 
-The hook contract SHALL state unambiguously that scryrs is trace-collection only. It SHALL document that scryrs never rewrites tool stdout, stderr, exit status, or semantics; scryrs does not proxy business-tool execution; hooks contain no business logic beyond formatting plus subprocess delegation; and scryrs is never registered as an agent-callable business tool or MCP/tool catalog surface. The contract SHALL include fail-open guidance: if hook invocation of `scryrs record` fails for any reason, the harness tool execution SHALL proceed normally without scryrs interference.
+The hook contract SHALL state unambiguously that scryrs remains trace-collection only and that Pi and Claude integrations remain transport-dumb. Hook shims and harness configuration SHALL keep delegating to the scryrs CLI and SHALL NOT embed direct HTTP fetch logic, remote-ingest request construction, or server-response handling. When remote mode is configured, any network submission performed on the hook-invoked CLI path SHALL remain inside Rust CLI code. Hook fail-open behavior SHALL be preserved: if that CLI path fails, the harness tool execution proceeds unmodified and the failure is surfaced only through hook warning diagnostics rather than by blocking the tool.
 
-#### Scenario: Integrator reads non-interference rule
+#### Scenario: Hook integrations do not gain HTTP logic
 
-- **GIVEN** scryrs is trace collection only
-- **WHEN** an integrator reads the contract
-- **THEN** they see that scryrs must never rewrite tool output, exit status, or semantics
-- **AND** scryrs is never registered as an agent-callable business tool
+- **WHEN** a maintainer updates Pi or Claude integration for remote ingest support
+- **THEN** the hook shim or harness configuration still delegates to the scryrs CLI
+- **AND** no direct server HTTP client logic is added to the hook integration itself
 
-#### Scenario: Hook failure does not block tool execution
+#### Scenario: Remote failure on the hook path does not block the harness
 
-- **WHEN** a hook's invocation of `scryrs record` fails (process crash, pipe error, or non-zero exit)
-- **THEN** the harness SHALL proceed with the original tool execution normally
-- **AND** the original tool's stdout, stderr, and exit status are preserved unmodified
-
-#### Scenario: scryrs.json is not a tool catalog
-
-- **WHEN** an integrator reads the `scryrs.json` manifest documentation
-- **THEN** the document explicitly states that `scryrs.json` is a hook-interface and record-invocation manifest only
-- **AND** the document states it is not a tool catalog, MCP descriptor, or business-tool surface
+- **WHEN** the CLI path invoked by a hook encounters a remote ingest failure
+- **THEN** the original harness tool execution still proceeds unmodified
+- **AND** the failure is surfaced through the hook's warning/fail-open diagnostics rather than by changing the tool result
 
 ### Requirement: TraceEvent schema is referenced and event families are documented
 
@@ -85,25 +76,19 @@ The hook contract SHALL document that session boundaries are represented as firs
 
 ### Requirement: scryrs record invocation is documented without alternate ingestion paths
 
-The hook contract SHALL document `scryrs record --stdin` and `scryrs record --file <PATH>` as the only supported ingestion modes. It SHALL reference `.devagent/docs/docs/cli-v0-contract.md` for the deterministic output shape, exit codes (0/1/2), and rejection diagnostics. The contract SHALL NOT invent any alternate ingestion path, wrapper command, or IPC surface.
+The hook contract SHALL document that remote ingest, when configured, is a transport decision inside the CLI ingestion path rather than a new harness-facing protocol. Integrators SHALL continue to invoke scryrs through the documented CLI entrypoints, and the contract SHALL reference the CLI record contract for local and remote summary behavior. The contract SHALL NOT instruct Pi or Claude integrators to post trace events directly to the server from JavaScript or hook configuration.
 
-#### Scenario: Hook pipes events via stdin
+#### Scenario: Integrator keeps using the CLI in remote mode
 
-- **WHEN** a hook invokes `scryrs record --stdin` and writes newline-delimited TraceEvent JSON to its stdin
-- **THEN** scryrs validates, persists, and reports acceptance/rejection as documented in the CLI v0 contract
-- **AND** the hook contract references the CLI v0 contract for the full output specification
+- **WHEN** an integrator reads the hook contract for remote ingest guidance
+- **THEN** the contract directs them to the scryrs CLI entrypoints rather than a new direct HTTP protocol
+- **AND** remote transport is described as CLI-owned behavior
 
-#### Scenario: Record reads events from file
+#### Scenario: No direct server instructions appear in hook docs
 
-- **WHEN** a user or hook invokes `scryrs record --file session.jsonl`
-- **THEN** scryrs reads the file using the same ingestion path as stdin mode
-- **AND** the mode is documented as mutually exclusive with `--stdin`
-
-#### Scenario: No alternate ingestion paths exist
-
-- **WHEN** an integrator reads the contract
-- **THEN** the only documented ingestion modes are `--stdin` and `--file <PATH>`
-- **AND** no pipe wrapper, socket, HTTP endpoint, or inter-process mechanism is documented
+- **WHEN** an integrator reads the hook contract
+- **THEN** they do not find instructions to post trace events directly from Pi or Claude hook code
+- **AND** they do not find a new socket or alternate IPC ingestion path
 
 ### Requirement: scryrs.json manifest shape is documented with explicit scope boundary
 
@@ -250,3 +235,4 @@ The hook contract SHALL describe rewrite-tool co-installation semantics for both
 - **THEN** the document states that the Claude Code reference hook reads `tool_input.command` during PreToolUse
 - **AND** the document states that co-installed rewrite hooks may change what scryrs observes depending on hook order and platform forwarding behavior
 - **AND** the document does not guarantee preservation of both original and rewritten commands under the current single-string schema
+

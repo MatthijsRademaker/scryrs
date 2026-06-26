@@ -3,6 +3,7 @@
 
 mod dashboard;
 mod init;
+mod server;
 
 #[cfg(feature = "core")]
 mod chrono;
@@ -12,6 +13,10 @@ mod help_text;
 mod hook;
 mod hotspots;
 mod record;
+#[cfg(feature = "core")]
+mod remote_config;
+#[cfg(feature = "core")]
+mod remote_submit;
 #[cfg(feature = "core")]
 pub(crate) mod store_override;
 

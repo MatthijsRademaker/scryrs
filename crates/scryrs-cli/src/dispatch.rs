@@ -9,6 +9,7 @@ use crate::hook::execute_hook;
 use crate::hotspots::write_hotspots_json;
 use crate::init;
 use crate::record::execute_record;
+use crate::server::{execute_server, write_server_help};
 
 pub fn run<I, S>(args: I) -> i32
 where
@@ -52,6 +53,10 @@ where
         return write_dashboard_help(&mut out).map_or(1, |_| 0);
     }
 
+    if args.len() == 2 && args[0] == "server" && (args[1] == "--help" || args[1] == "-h") {
+        return write_server_help(&mut out).map_or(1, |_| 0);
+    }
+
     // Unknown command check before clap dispatch.
     // Only known root-level entrypoints pass through to clap.
     // Everything else produces the contract error: "unknown command: 'X'".
@@ -62,6 +67,7 @@ where
             && first != "hook"
             && first != "init"
             && first != "dashboard"
+            && first != "server"
             && first != "--help"
             && first != "-h"
             && first != "--version"
@@ -83,7 +89,8 @@ where
             || args[0] == "record"
             || args[0] == "hook"
             || args[0] == "init"
-            || args[0] == "dashboard")
+            || args[0] == "dashboard"
+            || args[0] == "server")
     {
         Some(args[0].as_str())
     } else {
@@ -205,6 +212,38 @@ where
                         .action(ArgAction::SetTrue)
                         .help("Serve from filesystem instead of embedded assets"),
                 ),
+        )
+        .subcommand(
+            Command::new("server")
+                .about("Start the central trace ingest server")
+                .disable_help_flag(true)
+                .disable_version_flag(true)
+                .arg(
+                    Arg::new("port")
+                        .long("port")
+                        .short('p')
+                        .value_name("PORT")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("TCP port to bind (default 8081)"),
+                )
+                .arg(
+                    Arg::new("bind")
+                        .long("bind")
+                        .short('b')
+                        .value_name("ADDR")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Bind address (default 127.0.0.1)"),
+                )
+                .arg(
+                    Arg::new("store")
+                        .long("store")
+                        .value_name("PATH")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Server-owned SQLite store path (default .scryrs/server.db)"),
+                ),
         );
 
     match cmd.try_get_matches_from(&args) {
@@ -244,6 +283,7 @@ where
                     }
                 }
                 Some(("dashboard", m)) => execute_dashboard(&mut err, m),
+                Some(("server", m)) => execute_server(&mut err, m),
                 // Bare invocation (no subcommand matched).
                 _ => write_help(&mut out).map_or(1, |_| 0),
             }
@@ -289,6 +329,16 @@ where
                         2
                     }
                 }
+                Some("server") => {
+                    if writeln!(err, "scryrs server: missing required argument").is_err()
+                        || writeln!(err, "Usage: scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]").is_err()
+                        || writeln!(err, "See `scryrs --help`").is_err()
+                    {
+                        1
+                    } else {
+                        2
+                    }
+                }
                 _ => {
                     if writeln!(err, "scryrs hotspots: missing required PATH argument").is_err()
                         || writeln!(err, "Usage: scryrs hotspots <PATH>").is_err()
@@ -316,6 +366,16 @@ where
                     Some("dashboard") => {
                         if writeln!(err, "scryrs dashboard: unexpected argument").is_err()
                             || writeln!(err, "Usage: scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]").is_err()
+                            || writeln!(err, "See `scryrs --help`").is_err()
+                        {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                    Some("server") => {
+                        if writeln!(err, "scryrs server: unexpected argument").is_err()
+                            || writeln!(err, "Usage: scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]").is_err()
                             || writeln!(err, "See `scryrs --help`").is_err()
                         {
                             1

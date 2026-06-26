@@ -11,11 +11,21 @@ name = "scryrs"
 path = "src/main.rs"
 
 [features]
-default = ["core", "dashboard", "graph", "curator", "markdown", "runtime", "guardrails"]
+default = [
+  "core",
+  "dashboard",
+  "graph",
+  "curator",
+  "markdown",
+  "runtime",
+  "guardrails",
+  "server",
+]
 full = ["default", "llm", "rspress"]
 guardrails = ["policy", "sandbox", "telemetry"]
 core = ["dep:scryrs-core"]
 dashboard = ["dep:scryrs-dashboard"]
+server = ["dep:scryrs-server"]
 graph = ["dep:scryrs-graph"]
 curator = ["dep:scryrs-curator"]
 llm = ["dep:scryrs-llm"]
@@ -40,8 +50,11 @@ scryrs-llm = { workspace = true, optional = true }
 scryrs-policy = { workspace = true, optional = true }
 scryrs-runtime = { workspace = true, optional = true }
 scryrs-sandbox = { workspace = true, optional = true }
+scryrs-server = { workspace = true, optional = true }
 scryrs-telemetry = { workspace = true, optional = true }
 scryrs-types.workspace = true
+sha2.workspace = true
+ureq.workspace = true
 
 [dev-dependencies]
 insta = { version = "1", features = ["json"] }
