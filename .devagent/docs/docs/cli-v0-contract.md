@@ -167,7 +167,7 @@ Starts a long-lived HTTP server for central trace event ingest and live hotspot 
   "accepted_count": 3,
   "duplicate_count": 1,
   "rejected_count": 2,
-  "received_count": 4,
+  "received_count": 3,
   "events": [
     {
       "index": 0,
@@ -185,7 +185,7 @@ Starts a long-lived HTTP server for central trace event ingest and live hotspot 
 - `accepted_count`: Number of new events accepted (first-writer-wins).
 - `duplicate_count`: Number of idempotent (previously stored) events.
 - `rejected_count`: Number of invalid events (malformed timestamp, schema-invalid TraceEvent, serialization error).
-- `received_count`: `accepted_count + duplicate_count` (backwards-compatible field).
+- `received_count`: `accepted_count` (accepted events only; duplicates are counted in `duplicate_count`).
 - Per-item `status` is one of `"accepted"`, `"idempotent"`, or `"rejected"`.
 - `server_event_id` is present only for accepted events, formatted as `"srv-{rowid}"`.
 - `error_reason` is present only for rejected events.

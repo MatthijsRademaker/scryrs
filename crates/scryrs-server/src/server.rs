@@ -233,7 +233,14 @@ async fn ingest_batch(State(state): State<AppState>, body: String) -> axum::resp
         // Collect signals created during this batch.
         let new_signals = store
             .get_signals_after(&repo_id, max_before)
-            .unwrap_or_default();
+            .unwrap_or_else(|e| {
+                use std::io::Write;
+                let _ = writeln!(
+                    std::io::stderr().lock(),
+                    "scryrs server: failed to collect signals after ingest for repo {repo_id}: {e}",
+                );
+                Vec::new()
+            });
 
         (acks, new_signals)
     };
