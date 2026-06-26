@@ -22,7 +22,8 @@ Supported harnesses: claude-code, pi
 scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]
 Start local dashboard server and open the browser dashboard.
 scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]
-Start the central trace ingest server for POST /v1/trace-events/batch.
+Start the central trace ingest server with live hotspot query
+and signal streaming endpoints.
 
 RECORD MODES
 Local mode (default): persisted to .scryrs/scryrs.db, no network calls.

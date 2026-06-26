@@ -138,15 +138,20 @@ pub(crate) fn cli_surface_doc() -> String {
             },
             {
                 "name": "server",
-                "description": "Start the central trace ingest server for POST /v1/trace-events/batch",
+                "description": "Start the central trace ingest server with live hotspot query and signal streaming endpoints",
                 "flags": [
                     {"name": "port", "short": "-p", "long": "--port", "type": "number", "default": 8081, "description": "TCP port to bind"},
                     {"name": "bind", "short": "-b", "long": "--bind", "type": "string", "default": "127.0.0.1", "description": "Bind address"},
                     {"name": "store", "long": "--store", "type": "string", "default": ".scryrs/server.db", "description": "Server-owned SQLite store path"}
                 ],
+                "endpoints": [
+                    {"method": "POST", "path": "/v1/trace-events/batch", "description": "Ingest trace event batches with idempotent first-writer-wins semantics"},
+                    {"method": "GET", "path": "/v1/repositories/{repository_id}/hotspots", "description": "Query live hotspot rankings from server-owned state; supports ?window=cumulative and optional ?session_id"},
+                    {"method": "GET", "path": "/v1/repositories/{repository_id}/signals", "description": "Server-Sent Events stream of HotspotSignal records; supports ?after=<signal_id> cursor replay/resume"}
+                ],
                 "output": {
                     "mimeType": "application/json",
-                    "description": "BatchIngestResponse returned by POST /v1/trace-events/batch with accepted_count, duplicate_count, rejected_count, received_count, and per-item EventAck diagnostics."
+                    "description": "BatchIngestResponse returned by POST /v1/trace-events/batch. LiveHotspotsResponse returned by GET .../hotspots. text/event-stream returned by GET .../signals."
                 }
             }
         ],
