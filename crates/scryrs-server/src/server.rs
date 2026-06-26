@@ -272,7 +272,7 @@ async fn ingest_batch(State(state): State<AppState>, body: String) -> axum::resp
         accepted_count,
         duplicate_count,
         rejected_count,
-        received_count: accepted_count + duplicate_count,
+        received_count: accepted_count,
         events: acks,
         received_at: chrono_now(),
     };
@@ -398,7 +398,17 @@ async fn get_signals_sse(
     let filtered_live = live_stream.filter_map(move |result| {
         let (signal_id, signal) = match result {
             Ok(tuple) => tuple,
-            Err(_) => return None,
+            Err(e) => {
+                // BroadcastStreamRecvError wraps RecvError (Lagged or Closed).
+                // Log lagged consumers so operators can detect slow subscribers;
+                // recovery is via after=<signal_id> cursor on reconnect.
+                use std::io::Write;
+                drop(writeln!(
+                    std::io::stderr().lock(),
+                    "SSE subscriber error for repo {repository_id}: {e:?}"
+                ));
+                return None;
+            }
         };
         // Filter to only this repository's signals, and only signals newer than
         // what we already replayed.

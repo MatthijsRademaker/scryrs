@@ -371,7 +371,7 @@ pub struct BatchIngestResponse {
     pub duplicate_count: u64,
     /// Count of rejected events in this batch.
     pub rejected_count: u64,
-    /// Count of accepted + idempotent items (backwards-compat field).
+    /// Count of accepted events in this batch (excluding idempotent).
     pub received_count: u64,
     pub events: Vec<EventAck>,
     pub received_at: String,
@@ -1177,7 +1177,7 @@ mod tests {
             accepted_count: 2,
             duplicate_count: 1,
             rejected_count: 0,
-            received_count: 3,
+            received_count: 2,
             events: vec![
                 EventAck {
                     index: 0,
@@ -1603,7 +1603,7 @@ mod tests {
             accepted_count: 3,
             duplicate_count: 1,
             rejected_count: 2,
-            received_count: 4,
+            received_count: 3,
             events: vec![
                 EventAck {
                     index: 0,
@@ -1638,7 +1638,7 @@ mod tests {
             "serialized BatchIngestResponse must include rejected_count"
         );
         assert!(
-            json.contains("\"received_count\":4"),
+            json.contains("\"received_count\":3"),
             "serialized BatchIngestResponse must include received_count"
         );
     }
@@ -1649,7 +1649,7 @@ mod tests {
             accepted_count: 5,
             duplicate_count: 3,
             rejected_count: 1,
-            received_count: 8,
+            received_count: 5,
             events: vec![],
             received_at: "2026-06-24T10:00:07Z".into(),
         };
