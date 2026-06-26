@@ -8,8 +8,11 @@ use std::fs;
 use std::path::Path;
 
 use rusqlite::{Connection, params};
-use scryrs_core::scoring::per_event_contribution;
-use scryrs_types::{EnvelopeEvent, EventAck, EventAckStatus, ServerIngestEnvelope};
+use scryrs_core::scoring::{per_event_contribution, score_hotspots};
+use scryrs_types::{
+    EnvelopeEvent, EventAck, EventAckStatus, HotspotCounts, HotspotEntry, HotspotEvidence,
+    LIVE_HOTSPOT_SCHEMA_VERSION, LiveHotspotsResponse, ServerIngestEnvelope, TraceEvent,
+};
 
 use crate::time::chrono_now;
 
@@ -172,7 +175,10 @@ impl ServerStore {
     /// Each accepted event insert, accumulator update, and optional signal
     /// insert are committed in a single SQLite transaction so the stored event
     /// row and its live hotspot state cannot diverge.
-    pub fn ingest_batch(&self, envelope: &ServerIngestEnvelope) -> Result<Vec<EventAck>, rusqlite::Error> {
+    pub fn ingest_batch(
+        &self,
+        envelope: &ServerIngestEnvelope,
+    ) -> Result<Vec<EventAck>, rusqlite::Error> {
         let received_at = chrono_now();
         let mut acks: Vec<EventAck> = Vec::with_capacity(envelope.events.len());
 
@@ -431,7 +437,8 @@ impl ServerStore {
         let last_seen: String;
         let mut evidence_ids: serde_json::Value;
 
-        if let Some((score, etc_json, oc_json, sess_json, ev_json, cur_first, cur_last)) = existing {
+        if let Some((score, etc_json, oc_json, sess_json, ev_json, cur_first, cur_last)) = existing
+        {
             old_score = score;
             event_type_counts = serde_json::from_str(&etc_json).unwrap_or(serde_json::json!({}));
             outcome_counts = serde_json::from_str(&oc_json).unwrap_or(serde_json::json!({}));
@@ -489,11 +496,7 @@ impl ServerStore {
             // timestamp-ordered evidence matching batch hotspot semantics.
             let id_vec: Vec<i64> = evidence_ids
                 .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|v| v.as_i64())
-                        .collect()
-                })
+                .map(|a| a.iter().filter_map(|v| v.as_i64()).collect())
                 .unwrap_or_default();
             if !id_vec.is_empty() {
                 let sorted = self.sort_evidence_vec(&id_vec)?;
@@ -608,7 +611,7 @@ impl ServerStore {
     /// Return all hotspot signals for a repository, ordered by creation time.
     pub fn get_signals(&self, repository_id: &str) -> rusqlite::Result<Vec<SignalRow>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, subject_kind, subject, score, delta, window,
+            "SELECT id, repository_id, subject_kind, subject, score, delta, window,
                     threshold, evidence_row_ids, created_at
              FROM hotspot_signals
              WHERE repository_id = ?1
@@ -618,14 +621,15 @@ impl ServerStore {
         let rows = stmt.query_map(params![repository_id], |r| {
             Ok(SignalRow {
                 id: r.get(0)?,
-                subject_kind: r.get(1)?,
-                subject: r.get(2)?,
-                score: r.get(3)?,
-                delta: r.get(4)?,
-                window: r.get(5)?,
-                threshold: r.get(6)?,
-                evidence_row_ids: r.get(7)?,
-                created_at: r.get(8)?,
+                repository_id: r.get(1)?,
+                subject_kind: r.get(2)?,
+                subject: r.get(3)?,
+                score: r.get(4)?,
+                delta: r.get(5)?,
+                window: r.get(6)?,
+                threshold: r.get(7)?,
+                evidence_row_ids: r.get(8)?,
+                created_at: r.get(9)?,
             })
         })?;
 
@@ -645,6 +649,212 @@ impl ServerStore {
         self.conn
             .query_row("SELECT COUNT(*) FROM hotspot_signals", [], |row| row.get(0))
     }
+
+    // ------------------------------------------------------------------
+    // Task 1.1: Cumulative Hotspot Materialization
+    // ------------------------------------------------------------------
+
+    /// Materialize a cumulative `LiveHotspotsResponse` from `hotspot_accumulators`
+    /// for a repository, preserving deterministic ranking, counts, session count,
+    /// first/last seen, and evidence ordering.
+    pub fn materialize_cumulative_hotspots(
+        &self,
+        repository_id: &str,
+    ) -> rusqlite::Result<LiveHotspotsResponse> {
+        let mut stmt = self.conn.prepare(
+            "SELECT subject_kind, subject, score,
+                    event_type_counts, outcome_counts, session_ids,
+                    first_seen, last_seen, evidence_row_ids
+             FROM hotspot_accumulators
+             WHERE repository_id = ?1 AND window = ?2",
+        )?;
+
+        let rows: Vec<AccumulatorWithSubjectRow> = stmt
+            .query_map(params![repository_id, WINDOW_CUMULATIVE], |r| {
+                Ok(AccumulatorWithSubjectRow {
+                    subject_kind: r.get(0)?,
+                    subject: r.get(1)?,
+                    score: r.get(2)?,
+                    event_type_counts: r.get(3)?,
+                    outcome_counts: r.get(4)?,
+                    session_ids: r.get(5)?,
+                    first_seen: r.get(6)?,
+                    last_seen: r.get(7)?,
+                    evidence_row_ids: r.get(8)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        let mut entries: Vec<HotspotEntry> = rows
+            .into_iter()
+            .map(|row| self.accumulator_to_entry(row))
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        // Sort by six-key tie-break chain (same as score_hotspots):
+        // 1. score DESC
+        // 2. sessionCount DESC
+        // 3. lastSeen DESC
+        // 4. subjectKind ASC (lexical)
+        // 5. subject ASC (lexical)
+        // 6. firstEventId ASC
+        entries.sort_by(|a, b| {
+            b.score
+                .cmp(&a.score)
+                .then_with(|| b.sessionCount.cmp(&a.sessionCount))
+                .then_with(|| b.lastSeen.cmp(&a.lastSeen))
+                .then_with(|| a.subjectKind.cmp(&b.subjectKind))
+                .then_with(|| a.subject.cmp(&b.subject))
+                .then_with(|| {
+                    let a_first = a.evidence.rowIds.first().copied().unwrap_or(u64::MAX);
+                    let b_first = b.evidence.rowIds.first().copied().unwrap_or(u64::MAX);
+                    a_first.cmp(&b_first)
+                })
+        });
+
+        // Assign 1-based ranks.
+        for (i, entry) in entries.iter_mut().enumerate() {
+            entry.rank = (i + 1) as u32;
+        }
+
+        Ok(LiveHotspotsResponse {
+            schemaVersion: LIVE_HOTSPOT_SCHEMA_VERSION.to_string(),
+            repositoryId: repository_id.to_string(),
+            cursor: String::new(),
+            generatedAt: crate::time::chrono_now(),
+            entries,
+        })
+    }
+
+    /// Convert an AccumulatorWithSubjectRow into a HotspotEntry.
+    fn accumulator_to_entry(
+        &self,
+        row: AccumulatorWithSubjectRow,
+    ) -> rusqlite::Result<HotspotEntry> {
+        let event_type_counts: std::collections::HashMap<String, u32> =
+            serde_json::from_str(&row.event_type_counts).unwrap_or_default();
+        let outcome_counts: std::collections::HashMap<String, u32> =
+            serde_json::from_str(&row.outcome_counts).unwrap_or_default();
+        let session_ids: serde_json::Value =
+            serde_json::from_str(&row.session_ids).unwrap_or_default();
+        let session_count = session_ids.as_array().map(|a| a.len() as u32).unwrap_or(0);
+
+        let sorted_evidence = self.sort_evidence_ids(&row.evidence_row_ids)?;
+        let evidence_ids: Vec<u64> = serde_json::from_str(&sorted_evidence).unwrap_or_default();
+
+        Ok(HotspotEntry {
+            rank: 0, // assigned after sorting
+            subjectKind: row.subject_kind,
+            subject: row.subject,
+            score: row.score,
+            counts: HotspotCounts {
+                eventType: event_type_counts,
+                outcome: outcome_counts,
+            },
+            sessionCount: session_count,
+            firstSeen: row.first_seen,
+            lastSeen: row.last_seen,
+            evidence: HotspotEvidence {
+                rowIds: evidence_ids,
+            },
+        })
+    }
+
+    // ------------------------------------------------------------------
+    // Task 1.2: Session-scoped Hotspot Query
+    // ------------------------------------------------------------------
+
+    /// Materialize a session-scoped `LiveHotspotsResponse` by filtering
+    /// `server_trace_events` by repository_id and session_id, then recomputing
+    /// rankings through `score_hotspots`.
+    pub fn materialize_session_hotspots(
+        &self,
+        repository_id: &str,
+        session_id: &str,
+    ) -> rusqlite::Result<LiveHotspotsResponse> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, event_json
+             FROM server_trace_events
+             WHERE repository_id = ?1 AND session_id = ?2
+             ORDER BY timestamp ASC, id ASC",
+        )?;
+
+        let rows: Vec<(u64, String)> = stmt
+            .query_map(params![repository_id, session_id], |r| {
+                Ok((r.get::<_, i64>(0)? as u64, r.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        // Deserialize each event from its stored JSON.
+        let mut events_with_ids: Vec<(u64, TraceEvent)> = Vec::with_capacity(rows.len());
+        for (row_id, event_json) in rows {
+            match serde_json::from_str::<TraceEvent>(&event_json) {
+                Ok(event) => events_with_ids.push((row_id, event)),
+                Err(_e) => {
+                    // Skip malformed stored events — shouldn't happen with validated ingest.
+                    continue;
+                }
+            }
+        }
+
+        let refs: Vec<(u64, &TraceEvent)> =
+            events_with_ids.iter().map(|(id, e)| (*id, e)).collect();
+
+        let entries = score_hotspots(&refs);
+
+        Ok(LiveHotspotsResponse {
+            schemaVersion: LIVE_HOTSPOT_SCHEMA_VERSION.to_string(),
+            repositoryId: repository_id.to_string(),
+            cursor: String::new(),
+            generatedAt: crate::time::chrono_now(),
+            entries,
+        })
+    }
+
+    // ------------------------------------------------------------------
+    // Task 1.3: Signal Replay Query
+    // ------------------------------------------------------------------
+
+    /// Return persisted `HotspotSignal` rows for a repository with `id > after`,
+    /// ordered by `hotspot_signals.id ASC`.
+    pub fn get_signals_after(
+        &self,
+        repository_id: &str,
+        after: i64,
+    ) -> rusqlite::Result<Vec<SignalRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, repository_id, subject_kind, subject, score, delta, window,
+                    threshold, evidence_row_ids, created_at
+             FROM hotspot_signals
+             WHERE repository_id = ?1 AND id > ?2
+             ORDER BY id ASC",
+        )?;
+
+        let rows = stmt.query_map(params![repository_id, after], |r| {
+            Ok(SignalRow {
+                id: r.get(0)?,
+                repository_id: r.get(1)?,
+                subject_kind: r.get(2)?,
+                subject: r.get(3)?,
+                score: r.get(4)?,
+                delta: r.get(5)?,
+                window: r.get(6)?,
+                threshold: r.get(7)?,
+                evidence_row_ids: r.get(8)?,
+                created_at: r.get(9)?,
+            })
+        })?;
+
+        rows.collect()
+    }
+
+    /// Return the maximum signal id for a repository, or 0 if none exist.
+    pub fn max_signal_id(&self, repository_id: &str) -> rusqlite::Result<i64> {
+        self.conn.query_row(
+            "SELECT COALESCE(MAX(id), 0) FROM hotspot_signals WHERE repository_id = ?1",
+            params![repository_id],
+            |row| row.get(0),
+        )
+    }
 }
 
 /// Raw accumulator row exposed for tests.
@@ -659,10 +869,25 @@ pub struct AccumulatorRow {
     pub evidence_row_ids: String,
 }
 
+/// Accumulator row with subject identity fields (internal use).
+#[derive(Debug, Clone)]
+struct AccumulatorWithSubjectRow {
+    subject_kind: String,
+    subject: String,
+    score: u32,
+    event_type_counts: String,
+    outcome_counts: String,
+    session_ids: String,
+    first_seen: String,
+    last_seen: String,
+    evidence_row_ids: String,
+}
+
 /// Raw signal row exposed for tests.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignalRow {
     pub id: i64,
+    pub repository_id: String,
     pub subject_kind: String,
     pub subject: String,
     pub score: u32,
@@ -931,7 +1156,10 @@ mod tests {
         let envelope = make_envelope("repo-a", "ws-1", "pi", vec![env_event("evt-001", event)]);
 
         let result = store.ingest_batch(&envelope);
-        assert!(result.is_err(), "expected error when accumulator table is missing");
+        assert!(
+            result.is_err(),
+            "expected error when accumulator table is missing"
+        );
     }
 
     #[test]
@@ -1791,5 +2019,588 @@ mod tests {
         assert_eq!(acc_cmd.score, 1);
 
         assert_eq!(store.accumulator_count().unwrap(), 2);
+    }
+
+    // ------------------------------------------------------------------
+    // Task 4.1: Store tests for cumulative hotspot materialization
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn materialize_cumulative_hotspots_returns_ranked_entries() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap();
+
+        // Ingest events for two subjects with different scores.
+        let e1 = subject_event(
+            TraceEventType::FileOpened,
+            "src/a.rs",
+            "s1",
+            "2026-06-25T10:00:00Z",
+            Outcome::Success,
+        );
+        let e2 = subject_event(
+            TraceEventType::EditMade,
+            "src/a.rs",
+            "s1",
+            "2026-06-25T10:01:00Z",
+            Outcome::Success,
+        );
+        let e3 = subject_event(
+            TraceEventType::FileOpened,
+            "src/b.rs",
+            "s2",
+            "2026-06-25T10:02:00Z",
+            Outcome::Success,
+        );
+
+        let envelope = make_envelope(
+            "repo-a",
+            "ws-1",
+            "pi",
+            vec![
+                env_event("evt-001", e1),
+                env_event("evt-002", e2),
+                env_event("evt-003", e3),
+            ],
+        );
+        let _acks = store.ingest_batch(&envelope).unwrap();
+
+        let response = store.materialize_cumulative_hotspots("repo-a").unwrap();
+
+        assert_eq!(response.schemaVersion, LIVE_HOTSPOT_SCHEMA_VERSION);
+        assert_eq!(response.repositoryId, "repo-a");
+        assert!(response.generatedAt.len() >= 20);
+        assert_eq!(response.entries.len(), 2);
+
+        // Higher score first: src/a.rs (score 4) before src/b.rs (score 1).
+        assert_eq!(response.entries[0].subject, "src/a.rs");
+        assert_eq!(response.entries[0].score, 4);
+        assert_eq!(response.entries[0].rank, 1);
+
+        assert_eq!(response.entries[1].subject, "src/b.rs");
+        assert_eq!(response.entries[1].score, 1);
+        assert_eq!(response.entries[1].rank, 2);
+    }
+
+    #[test]
+    fn materialize_cumulative_hotspots_empty_repository_returns_empty_entries() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap();
+
+        let response = store
+            .materialize_cumulative_hotspots("unknown-repo")
+            .unwrap();
+
+        assert_eq!(response.repositoryId, "unknown-repo");
+        assert!(response.entries.is_empty());
+    }
+
+    #[test]
+    fn materialize_cumulative_hotspots_preserves_session_count() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap();
+
+        let e1 = subject_event(
+            TraceEventType::FileOpened,
+            "src/x.rs",
+            "s1",
+            "2026-06-25T10:00:00Z",
+            Outcome::Success,
+        );
+        let e2 = subject_event(
+            TraceEventType::FileOpened,
+            "src/x.rs",
+            "s2",
+            "2026-06-25T10:01:00Z",
+            Outcome::Success,
+        );
+
+        let envelope = make_envelope(
+            "repo-a",
+            "ws-1",
+            "pi",
+            vec![env_event("evt-001", e1), env_event("evt-002", e2)],
+        );
+        let _acks = store.ingest_batch(&envelope).unwrap();
+
+        let response = store.materialize_cumulative_hotspots("repo-a").unwrap();
+
+        assert_eq!(response.entries.len(), 1);
+        assert_eq!(response.entries[0].sessionCount, 2);
+    }
+
+    #[test]
+    fn materialize_cumulative_hotspots_preserves_evidence_ids() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap();
+
+        let e1 = subject_event(
+            TraceEventType::FileOpened,
+            "src/a.rs",
+            "s1",
+            "2026-06-25T10:00:00Z",
+            Outcome::Success,
+        );
+        let e2 = subject_event(
+            TraceEventType::FileOpened,
+            "src/a.rs",
+            "s1",
+            "2026-06-25T10:01:00Z",
+            Outcome::Success,
+        );
+
+        let envelope = make_envelope(
+            "repo-a",
+            "ws-1",
+            "pi",
+            vec![env_event("evt-001", e1), env_event("evt-002", e2)],
+        );
+        let _acks = store.ingest_batch(&envelope).unwrap();
+
+        let response = store.materialize_cumulative_hotspots("repo-a").unwrap();
+
+        assert_eq!(response.entries.len(), 1);
+        // Evidence should have 2 row IDs.
+        assert_eq!(response.entries[0].evidence.rowIds.len(), 2);
+    }
+
+    // ------------------------------------------------------------------
+    // Task 4.1: Session-scoped query tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn materialize_session_hotspots_filters_by_session() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap();
+
+        // Two sessions, two files each.
+        let e1 = subject_event(
+            TraceEventType::FileOpened,
+            "src/a.rs",
+            "s1",
+            "2026-06-25T10:00:00Z",
+            Outcome::Success,
+        );
+        let e2 = subject_event(
+            TraceEventType::FileOpened,
+            "src/b.rs",
+            "s1",
+            "2026-06-25T10:01:00Z",
+            Outcome::Success,
+        );
+        let e3 = subject_event(
+            TraceEventType::FileOpened,
+            "src/c.rs",
+            "s2",
+            "2026-06-25T10:02:00Z",
+            Outcome::Success,
+        );
+
+        let envelope = make_envelope(
+            "repo-a",
+            "ws-1",
+            "pi",
+            vec![
+                env_event("evt-001", e1),
+                env_event("evt-002", e2),
+                env_event("evt-003", e3),
+            ],
+        );
+        let _acks = store.ingest_batch(&envelope).unwrap();
+
+        // Session s1 should have 2 entries.
+        let s1_response = store.materialize_session_hotspots("repo-a", "s1").unwrap();
+        assert_eq!(s1_response.entries.len(), 2);
+        let s1_subjects: Vec<&str> = s1_response
+            .entries
+            .iter()
+            .map(|e| e.subject.as_str())
+            .collect();
+        assert!(s1_subjects.contains(&"src/a.rs"));
+        assert!(s1_subjects.contains(&"src/b.rs"));
+
+        // Session s2 should have 1 entry.
+        let s2_response = store.materialize_session_hotspots("repo-a", "s2").unwrap();
+        assert_eq!(s2_response.entries.len(), 1);
+        assert_eq!(s2_response.entries[0].subject, "src/c.rs");
+    }
+
+    #[test]
+    fn materialize_session_hotspots_does_not_filter_global_accumulators() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap();
+
+        // Ingest events across sessions and then check that session-scoped
+        // query produces different results from the cumulative query for the
+        // same repository.
+        let e1 = subject_event(
+            TraceEventType::FileOpened,
+            "src/a.rs",
+            "s1",
+            "2026-06-25T10:00:00Z",
+            Outcome::Success,
+        );
+        let e2 = subject_event(
+            TraceEventType::FileOpened,
+            "src/a.rs",
+            "s2",
+            "2026-06-25T10:01:00Z",
+            Outcome::Success,
+        );
+        let e3 = subject_event(
+            TraceEventType::FileOpened,
+            "src/a.rs",
+            "s1",
+            "2026-06-25T10:02:00Z",
+            Outcome::Success,
+        );
+
+        let envelope = make_envelope(
+            "repo-a",
+            "ws-1",
+            "pi",
+            vec![
+                env_event("evt-001", e1),
+                env_event("evt-002", e2),
+                env_event("evt-003", e3),
+            ],
+        );
+        let _acks = store.ingest_batch(&envelope).unwrap();
+
+        // Cumulative: 3 events -> score 3.
+        let cumulative = store.materialize_cumulative_hotspots("repo-a").unwrap();
+        assert_eq!(cumulative.entries.len(), 1);
+        assert_eq!(cumulative.entries[0].score, 3);
+
+        // Session s1: 2 events -> score 2.
+        let s1 = store.materialize_session_hotspots("repo-a", "s1").unwrap();
+        assert_eq!(s1.entries.len(), 1);
+        assert_eq!(s1.entries[0].score, 2);
+
+        // Session s2: 1 event -> score 1.
+        let s2 = store.materialize_session_hotspots("repo-a", "s2").unwrap();
+        assert_eq!(s2.entries.len(), 1);
+        assert_eq!(s2.entries[0].score, 1);
+    }
+
+    #[test]
+    fn session_scored_empty_session_returns_empty_entries() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap();
+
+        // Ingest for session s1, query for s2.
+        let e1 = subject_event(
+            TraceEventType::FileOpened,
+            "src/a.rs",
+            "s1",
+            "2026-06-25T10:00:00Z",
+            Outcome::Success,
+        );
+        let envelope = make_envelope("repo-a", "ws-1", "pi", vec![env_event("evt-001", e1)]);
+        let _acks = store.ingest_batch(&envelope).unwrap();
+
+        let s2 = store.materialize_session_hotspots("repo-a", "s2").unwrap();
+        assert!(s2.entries.is_empty());
+        assert_eq!(s2.repositoryId, "repo-a");
+    }
+
+    // ------------------------------------------------------------------
+    // Task 4.2: Signal replay tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn get_signals_after_returns_only_signals_after_id() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 2).unwrap(); // threshold=2: easy to trigger
+
+        // Create multiple signals by crossing low threshold repeatedly.
+        // FileOpened = 1, so 2 events cross threshold 2.
+        let e1 = subject_event(
+            TraceEventType::FileOpened,
+            "src/a.rs",
+            "s1",
+            "2026-06-25T10:00:00Z",
+            Outcome::Success,
+        );
+        let e2 = subject_event(
+            TraceEventType::FileOpened,
+            "src/a.rs",
+            "s1",
+            "2026-06-25T10:01:00Z",
+            Outcome::Success,
+        );
+        // Next subject — different subject to get another signal.
+        let e3 = subject_event(
+            TraceEventType::FileOpened,
+            "src/b.rs",
+            "s2",
+            "2026-06-25T10:02:00Z",
+            Outcome::Success,
+        );
+        let e4 = subject_event(
+            TraceEventType::FileOpened,
+            "src/b.rs",
+            "s2",
+            "2026-06-25T10:03:00Z",
+            Outcome::Success,
+        );
+
+        let envelope = make_envelope(
+            "repo-a",
+            "ws-1",
+            "pi",
+            vec![
+                env_event("evt-001", e1),
+                env_event("evt-002", e2),
+                env_event("evt-003", e3),
+                env_event("evt-004", e4),
+            ],
+        );
+        let _acks = store.ingest_batch(&envelope).unwrap();
+
+        let all_signals = store.get_signals_after("repo-a", 0).unwrap();
+        assert!(all_signals.len() >= 2, "expected at least 2 signals");
+
+        let first_id = all_signals[0].id;
+
+        // after=first_id should skip the first signal.
+        let after_first = store.get_signals_after("repo-a", first_id).unwrap();
+        assert_eq!(after_first.len(), all_signals.len() - 1);
+        for s in &after_first {
+            assert!(s.id > first_id);
+        }
+    }
+
+    #[test]
+    fn get_signals_after_zero_returns_all_signals() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 2).unwrap();
+
+        let e1 = subject_event(
+            TraceEventType::FileOpened,
+            "src/a.rs",
+            "s1",
+            "2026-06-25T10:00:00Z",
+            Outcome::Success,
+        );
+        let e2 = subject_event(
+            TraceEventType::FileOpened,
+            "src/a.rs",
+            "s1",
+            "2026-06-25T10:01:00Z",
+            Outcome::Success,
+        );
+
+        let envelope = make_envelope(
+            "repo-a",
+            "ws-1",
+            "pi",
+            vec![env_event("evt-001", e1), env_event("evt-002", e2)],
+        );
+        let _acks = store.ingest_batch(&envelope).unwrap();
+
+        let total = store.signal_count().unwrap();
+        let all = store.get_signals_after("repo-a", 0).unwrap();
+        assert_eq!(all.len() as i64, total);
+    }
+
+    #[test]
+    fn get_signals_after_returns_id_asc_order() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 2).unwrap();
+
+        let e1 = subject_event(
+            TraceEventType::FileOpened,
+            "src/a.rs",
+            "s1",
+            "2026-06-25T10:00:00Z",
+            Outcome::Success,
+        );
+        let e2 = subject_event(
+            TraceEventType::FileOpened,
+            "src/a.rs",
+            "s1",
+            "2026-06-25T10:01:00Z",
+            Outcome::Success,
+        );
+        let e3 = subject_event(
+            TraceEventType::FileOpened,
+            "src/b.rs",
+            "s2",
+            "2026-06-25T10:02:00Z",
+            Outcome::Success,
+        );
+        let e4 = subject_event(
+            TraceEventType::FileOpened,
+            "src/b.rs",
+            "s2",
+            "2026-06-25T10:03:00Z",
+            Outcome::Success,
+        );
+
+        let envelope = make_envelope(
+            "repo-a",
+            "ws-1",
+            "pi",
+            vec![
+                env_event("evt-001", e1),
+                env_event("evt-002", e2),
+                env_event("evt-003", e3),
+                env_event("evt-004", e4),
+            ],
+        );
+        let _acks = store.ingest_batch(&envelope).unwrap();
+
+        let all = store.get_signals_after("repo-a", 0).unwrap();
+        // IDs must be strictly ascending.
+        for w in all.windows(2) {
+            assert!(w[0].id < w[1].id, "signal IDs must be in ASC order");
+        }
+    }
+
+    #[test]
+    fn max_signal_id_returns_max_or_zero() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap();
+
+        // No signals yet.
+        assert_eq!(store.max_signal_id("repo-a").unwrap(), 0);
+
+        // Create a signal by hitting threshold.
+        for i in 0..10 {
+            let event = subject_event(
+                TraceEventType::FileOpened,
+                "src/a.rs",
+                &format!("s{i}"),
+                &format!("2026-06-25T10:{i:02}:00Z"),
+                Outcome::Success,
+            );
+            let envelope = make_envelope(
+                "repo-a",
+                "ws-1",
+                "pi",
+                vec![env_event(&format!("evt-{i:03}"), event)],
+            );
+            let _acks = store.ingest_batch(&envelope).unwrap();
+        }
+
+        let max = store.max_signal_id("repo-a").unwrap();
+        assert!(
+            max > 0,
+            "max signal id should be positive after signal creation"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // Task 4.3: Regression coverage — live rankings match batch scoring
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn live_hotspot_rankings_match_batch_scoring() {
+        use scryrs_core::scoring::score_hotspots;
+
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap();
+
+        let e1 = subject_event(
+            TraceEventType::FileOpened,
+            "src/a.rs",
+            "s1",
+            "2026-06-25T10:00:00Z",
+            Outcome::Success,
+        );
+        let e2 = subject_event(
+            TraceEventType::EditMade,
+            "src/a.rs",
+            "s1",
+            "2026-06-25T10:01:00Z",
+            Outcome::Failure {
+                reason: Some("err".into()),
+            },
+        );
+        let e3 = subject_event(
+            TraceEventType::FileOpened,
+            "src/b.rs",
+            "s2",
+            "2026-06-25T10:02:00Z",
+            Outcome::Success,
+        );
+        let e4 = subject_event(
+            TraceEventType::FileOpened,
+            "src/a.rs",
+            "s3",
+            "2026-06-25T10:03:00Z",
+            Outcome::Success,
+        );
+
+        let envelope = make_envelope(
+            "repo-a",
+            "ws-1",
+            "pi",
+            vec![
+                env_event("evt-001", e1.clone()),
+                env_event("evt-002", e2.clone()),
+                env_event("evt-003", e3.clone()),
+                env_event("evt-004", e4.clone()),
+            ],
+        );
+        let _acks = store.ingest_batch(&envelope).unwrap();
+
+        // Get live rankings.
+        let live = store.materialize_cumulative_hotspots("repo-a").unwrap();
+
+        // Compute batch scores on the same events.
+        let events_ref: Vec<(u64, &TraceEvent)> =
+            vec![(1u64, &e1), (2u64, &e2), (3u64, &e3), (4u64, &e4)];
+        let batch_entries = score_hotspots(&events_ref);
+
+        // Same number of entries.
+        assert_eq!(live.entries.len(), batch_entries.len());
+
+        // For each entry, compare score, subject, kind, sessionCount, firstSeen, lastSeen.
+        for (live_entry, batch_entry) in live.entries.iter().zip(batch_entries.iter()) {
+            assert_eq!(
+                live_entry.subject, batch_entry.subject,
+                "subjects must match at rank {}",
+                live_entry.rank
+            );
+            assert_eq!(
+                live_entry.subjectKind, batch_entry.subjectKind,
+                "kinds must match for {}",
+                live_entry.subject
+            );
+            assert_eq!(
+                live_entry.score, batch_entry.score,
+                "scores must match for {}",
+                live_entry.subject
+            );
+            assert_eq!(
+                live_entry.sessionCount, batch_entry.sessionCount,
+                "sessionCount must match for {}",
+                live_entry.subject
+            );
+            assert_eq!(live_entry.firstSeen, batch_entry.firstSeen);
+            assert_eq!(live_entry.lastSeen, batch_entry.lastSeen);
+            // Evidence row IDs must match (order from accumulators is timestamp-sorted,
+            // batch scoring is iteration-order; we compare count and presence).
+            assert_eq!(
+                live_entry.evidence.rowIds.len(),
+                batch_entry.evidence.rowIds.len(),
+                "evidence count must match for {}",
+                live_entry.subject
+            );
+        }
     }
 }

@@ -763,7 +763,7 @@ mod remote_tests {
             accepted_count: accepted,
             duplicate_count: duplicate,
             rejected_count: rejected,
-            received_count: accepted + duplicate,
+            received_count: accepted,
             events,
             received_at: "2026-06-24T10:00:07Z".into(),
         }

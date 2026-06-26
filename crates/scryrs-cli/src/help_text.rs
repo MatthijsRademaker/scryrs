@@ -23,7 +23,9 @@ COMMANDS\n\
   scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]\n\
       Start local dashboard server and open the browser dashboard.\n\
   scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]\n\
-      Start the central trace ingest server for POST /v1/trace-events/batch.\n\n\
+      Start the central trace ingest server with live hotspot query
+\
+      and signal streaming endpoints.\n\n\
 RECORD MODES\n\
   Local mode (default): persisted to .scryrs/scryrs.db, no network calls.\n\
   Remote mode: activated when a non-empty ingest URL is configured.\n\

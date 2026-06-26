@@ -8,7 +8,8 @@ pub(crate) fn write_server_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(
         out,
         "scryrs server — start the central trace ingest server\n\n\
-Starts a long-lived HTTP server for `POST /v1/trace-events/batch`.\n\
+Starts a long-lived HTTP server for trace event ingest with\n\
+read-only live hotspot query and signal streaming endpoints.\n\
 Accepts versioned trace-event batches, validates them deterministically,\n\
 and persists accepted events into a server-owned SQLite store with\n\
 first-writer-wins idempotency.\n\n\
@@ -18,11 +19,18 @@ FLAGS\n\
   -b, --bind <ADDR>    Bind address (default 127.0.0.1)\n\
   -p, --port <PORT>    TCP port to bind (default 8081)\n\
       --store <PATH>   Server-owned SQLite store path (default .scryrs/server.db)\n\n\
-ENDPOINT\n\
+ENDPOINTS\n\
   POST /v1/trace-events/batch\n\
       Accepts JSON ServerIngestEnvelope, returns JSON BatchIngestResponse\n\
       with deterministic accepted_count, duplicate_count, rejected_count,\n\
-      received_count, and per-item diagnostics.\n"
+      received_count, and per-item diagnostics.\n\
+  GET /v1/repositories/{{repository_id}}/hotspots\n\
+      Query live hotspot rankings from server-owned state.\n\
+      Supports ?window=cumulative and optional ?session_id.\n\
+      Returns JSON LiveHotspotsResponse with ranked HotspotEntry items.\n\
+  GET /v1/repositories/{{repository_id}}/signals\n\
+      Server-Sent Events stream of HotspotSignal records.\n\
+      Supports ?after=<signal_id> for cursor-based replay/resume.\n"
     )
 }
 
