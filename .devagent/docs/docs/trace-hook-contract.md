@@ -408,6 +408,7 @@ No reference hooks for other harnesses are planned at this time. Harness authors
 - [CLI v0 Contract](./cli-v0-contract.md) — deterministic output and exit-code contract for `scryrs record` and `scryrs hotspots`.
 - [Product Roadmap](./roadmap.mdx) — delivery sequence including Phase 1 proxy capture and reference hook work.
 - [Architecture](./architecture.mdx) — crate topology and runtime flow.
+- [Hotspots](./hotspots.md) — domain concept and interpretation guide (this page covers the hook contract and event schema)
 
 ## Appendix: Remote Mode (Foundation 02+)
 

@@ -16,7 +16,8 @@
     "text": "Technical",
     "items": [
       { "text": "CLI v0 Contract", "link": "/cli-v0-contract" },
-      { "text": "Trace Hook Contract", "link": "/trace-hook-contract" }
+      { "text": "Trace Hook Contract", "link": "/trace-hook-contract" },
+      { "text": "Hotspots", "link": "/hotspots" }
     ]
   }
 ]
