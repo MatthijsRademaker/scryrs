@@ -114,16 +114,7 @@ To avoid misinterpreting the report, be clear about what hotspot scores are not:
 - **Not a correctness measure.** Correct code that agents reference often scores high; incorrect code that nobody touches scores zero.
 - **Not a priority list.** Use hotspot output as evidence for documentation investments, not as the sole input to roadmap ordering.
 
-## Related: Live Hotspot Server
-
-The live hotspot server (`scryrs server`) is a **separate deployment mode**, distinct from the local batch workflow described above. It provides:
-
-- A long-lived HTTP server with `POST /v1/trace-events/batch` for central trace ingestion
-- Live hotspot accumulators updated incrementally as events arrive
-- `GET /v1/repositories/{repository_id}/hotspots` for cumulative and session-scoped live rankings
-- `GET /v1/repositories/{repository_id}/signals` for Server-Sent Events (SSE) streaming of `HotspotSignal` records
-
-These features are part of a different operational model — a central server shared across agent instances — and are not part of the standalone `scryrs hotspots <PATH>` batch workflow. For full server API details, see the [CLI v0 Contract](./cli-v0-contract.md) and the [Product Roadmap](./roadmap.mdx).
+**Related: Live Hotspot Server** — The live hotspot server (`scryrs server`) is a separate deployment mode that provides central ingestion, shared live state, and signal streaming for multi-agent teams. See [Live Hotspots](./live-hotspots.md) for the domain narrative and mode comparison.
 
 ## Related Pages
 
