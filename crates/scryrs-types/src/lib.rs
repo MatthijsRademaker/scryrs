@@ -1,8 +1,10 @@
 //! Shared contracts for scryrs workspace crates.
 
 use std::collections::HashMap;
+use std::fmt::Write;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// Version for machine-facing contracts emitted by this scaffold.
 pub const SCHEMA_VERSION: &str = "0.1.0";
@@ -25,6 +27,12 @@ pub const GRAPH_SCHEMA_VERSION: &str = "1.0.0";
 /// `SCHEMA_VERSION`, `HOTSPOT_SCHEMA_VERSION`,
 /// `LIVE_HOTSPOT_SCHEMA_VERSION`, and `GRAPH_SCHEMA_VERSION`.
 pub const ROUTE_SCHEMA_VERSION: &str = "1.0.0";
+
+/// Version for the proposal document contract, independent of
+/// `SCHEMA_VERSION`, `HOTSPOT_SCHEMA_VERSION`,
+/// `LIVE_HOTSPOT_SCHEMA_VERSION`, `GRAPH_SCHEMA_VERSION`, and
+/// `ROUTE_SCHEMA_VERSION`.
+pub const PROPOSAL_SCHEMA_VERSION: &str = "1.0.0";
 
 /// Suite component metadata used by feature-gated crates and CLI output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -524,11 +532,192 @@ pub struct KnowledgeGraphDocument {
     pub edges: Vec<GraphEdge>,
 }
 
-/// Reviewable knowledge proposal placeholder.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KnowledgeProposal {
+// --- Proposal document contract types ---
+
+/// Closed set of proposal target types — each proposal must target exactly
+/// one kind of reviewable knowledge artifact. Serialized as snake_case strings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProposalTargetType {
+    DocsNote,
+    Adr,
+    Skill,
+    DebuggingPlaybook,
+    MemoryPatch,
+    SemanticGraphGrouping,
+}
+
+/// Target-type-specific proposed content carried in a `ProposalDocument`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ProposedContent {
+    /// Non-empty markdown text for `docs_note`, `adr`, `skill`, and
+    /// `debugging_playbook` targets. Must be tried first: a JSON string
+    /// is also a JSON value, so this must precede `MemoryPatch`.
+    Markdown(String),
+    /// Structured grouping object for `semantic_graph_grouping` targets.
+    /// Must precede `MemoryPatch` so concrete grouping objects are not
+    /// deserialized as opaque `serde_json::Value`.
+    SemanticGraphGrouping(SemanticGraphGrouping),
+    /// Structured JSON object for `memory_patch` targets.
+    /// Must be last: any JSON value can match, so it acts as a fallback
+    /// for everything that isn't a markdown string or a grouping object.
+    MemoryPatch(serde_json::Value),
+}
+
+impl ProposedContent {
+    /// Canonical serialized JSON representation for deterministic id computation.
+    /// Returns a stable, whitespace-free JSON string.
+    pub fn canonical_json(&self) -> Result<String, serde_json::Error> {
+        // Use compact serialization for deterministic content addressing.
+        serde_json::to_string(self)
+    }
+}
+
+/// Structured content payload for `semantic_graph_grouping` proposals.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticGraphGrouping {
+    /// Exact source graph node IDs that this grouping aggregates (non-empty).
+    pub source_node_ids: Vec<String>,
+    /// Proposed identifier for the parent group node.
+    pub target_group_node_id: String,
+    /// Human-readable label for the parent group node.
+    pub target_group_label: String,
+}
+
+/// Versioned proposal document — the review-only inbox artifact.
+///
+/// Proposal documents live under `.scryrs/proposals/` as individual JSON
+/// files. Each filename stem equals the deterministic SHA-256 `id` derived
+/// from `targetType` plus the canonical serialized `proposedContent`.
+/// Proposal files are review artifacts only and never directly mutate
+/// published docs, ADRs, skills, playbooks, memory truth, `.scryrs/graph.json`,
+/// or `.scryrs/routes.json`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProposalDocument {
+    /// Schema version, always equal to `PROPOSAL_SCHEMA_VERSION`.
+    pub schema_version: String,
+    /// Deterministic SHA-256 content address derived from `targetType` plus
+    /// the canonical serialized `proposedContent`.
+    pub id: String,
+    /// One of the six defined proposal target kinds.
+    pub target_type: ProposalTargetType,
+    /// Short human-readable title for the proposal.
     pub title: String,
+    /// Non-empty explanation of why this proposal should be considered.
     pub rationale: String,
+    /// Target-type-specific proposed content — must be non-empty.
+    pub proposed_content: ProposedContent,
+    /// Evidence provenance links — must be non-empty.
+    pub evidence: Vec<EvidenceLink>,
+    /// RFC 3339 creation timestamp.
+    pub created_at: String,
+}
+
+impl ProposalDocument {
+    /// Compute the deterministic proposal `id` from its type and content.
+    ///
+    /// The id is a hex-encoded SHA-256 digest of `targetType` (snake_case
+    /// string) concatenated with a colon separator and the canonical
+    /// serialized `proposedContent`.
+    ///
+    /// This produces stable fingerprints: two proposals with the same target
+    /// type and same proposed content always receive the same id.
+    pub fn compute_id(
+        target_type: &ProposalTargetType,
+        proposed_content: &ProposedContent,
+    ) -> Result<String, serde_json::Error> {
+        let type_str = serde_json::to_string(target_type)?;
+        // Strip surrounding quotes from the serialized enum string (e.g. `"docs_note"` -> `docs_note`).
+        let type_str = type_str.trim_matches('"');
+        let content_json = proposed_content.canonical_json()?;
+        let input = format!("{type_str}:{content_json}");
+        let mut hasher = Sha256::new();
+        hasher.update(input.as_bytes());
+        let result = hasher.finalize();
+        let mut hex = String::with_capacity(64);
+        for byte in &result {
+            write!(&mut hex, "{byte:02x}").map_err(|e| serde::ser::Error::custom(e.to_string()))?;
+        }
+        Ok(hex)
+    }
+
+    /// Validate semantic invariants for a proposal that has passed
+    /// structural deserialization. Returns `Ok(())` when `schema_version`
+    /// equals `PROPOSAL_SCHEMA_VERSION`, `title` is non-empty,
+    /// `rationale` is non-empty, `evidence` is non-empty, and
+    /// `proposed_content` satisfies target-type specific rules.
+    #[must_use = "callers must check semantic invariants; discarded Result hides invalid proposals"]
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema_version != PROPOSAL_SCHEMA_VERSION {
+            return Err(format!(
+                "proposal schema_version mismatch: got '{}', expected '{}'",
+                self.schema_version, PROPOSAL_SCHEMA_VERSION,
+            ));
+        }
+        if self.title.trim().is_empty() {
+            return Err("proposal title must be non-empty".into());
+        }
+        if self.rationale.trim().is_empty() {
+            return Err("proposal rationale must be non-empty".into());
+        }
+        if self.evidence.is_empty() {
+            return Err("proposal evidence must be non-empty".into());
+        }
+
+        // Cross-field invariant: proposed_content variant must match target_type.
+        match (&self.target_type, &self.proposed_content) {
+            (
+                ProposalTargetType::DocsNote
+                | ProposalTargetType::Adr
+                | ProposalTargetType::Skill
+                | ProposalTargetType::DebuggingPlaybook,
+                ProposedContent::Markdown(_),
+            ) => {}
+            (ProposalTargetType::MemoryPatch, ProposedContent::MemoryPatch(_)) => {}
+            (
+                ProposalTargetType::SemanticGraphGrouping,
+                ProposedContent::SemanticGraphGrouping(_),
+            ) => {}
+            (target_type, content) => {
+                return Err(format!(
+                    "proposal target_type mismatch: {:?} does not accept {:?} proposed_content",
+                    target_type, content,
+                ));
+            }
+        }
+
+        match &self.proposed_content {
+            ProposedContent::Markdown(text) => {
+                if text.trim().is_empty() {
+                    return Err("proposal proposed_content markdown must be non-empty".into());
+                }
+            }
+            ProposedContent::MemoryPatch(value) => {
+                if value.is_null() {
+                    return Err("proposal proposed_content memory_patch must be non-null".into());
+                }
+            }
+            ProposedContent::SemanticGraphGrouping(grouping) => {
+                if grouping.source_node_ids.is_empty() {
+                    return Err(
+                        "semantic graph grouping proposal must have non-empty sourceNodeIds".into(),
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Return the deterministic inbox filename for this proposal.
+    /// The file should be written as `.scryrs/proposals/{filename}.json`.
+    #[must_use]
+    pub fn inbox_filename(&self) -> String {
+        format!("{}.json", self.id)
+    }
 }
 
 /// Optional grouping for a route entry, derived from an explicit
@@ -2469,5 +2658,407 @@ mod tests {
             reconstructed.metadata.repository_id.as_deref(),
             Some("repo-a")
         );
+    }
+
+    // --- Proposal document contract tests ---
+
+    fn make_evidence_link(subject: &str) -> EvidenceLink {
+        EvidenceLink {
+            source_kind: EvidenceSourceKind::HotspotSubject,
+            subject: subject.into(),
+            row_ids: vec![1],
+            doc_ref: None,
+            description: None,
+            score: Some(5),
+            metadata: None,
+        }
+    }
+
+    fn make_valid_proposal(
+        target_type: ProposalTargetType,
+        content: ProposedContent,
+    ) -> ProposalDocument {
+        let id = ProposalDocument::compute_id(&target_type, &content)
+            .unwrap_or_else(|e| panic!("compute_id: {e}"));
+        ProposalDocument {
+            schema_version: PROPOSAL_SCHEMA_VERSION.into(),
+            id,
+            target_type,
+            title: "Test proposal".into(),
+            rationale: "This is a test rationale".into(),
+            proposed_content: content,
+            evidence: vec![make_evidence_link("test-subject")],
+            created_at: "2026-06-27T12:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn proposal_schema_version_is_independent() {
+        assert_eq!(PROPOSAL_SCHEMA_VERSION, "1.0.0");
+        assert_ne!(PROPOSAL_SCHEMA_VERSION, SCHEMA_VERSION);
+        // Same string value as other contract versions but semantically independent.
+        assert_eq!(PROPOSAL_SCHEMA_VERSION, HOTSPOT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn proposal_target_type_serializes_as_snake_case() {
+        let json = serialize_json(&ProposalTargetType::DocsNote);
+        assert!(json.contains("\"docs_note\""), "got: {json}");
+        let json = serialize_json(&ProposalTargetType::Adr);
+        assert!(json.contains("\"adr\""), "got: {json}");
+        let json = serialize_json(&ProposalTargetType::Skill);
+        assert!(json.contains("\"skill\""), "got: {json}");
+        let json = serialize_json(&ProposalTargetType::DebuggingPlaybook);
+        assert!(json.contains("\"debugging_playbook\""), "got: {json}");
+        let json = serialize_json(&ProposalTargetType::MemoryPatch);
+        assert!(json.contains("\"memory_patch\""), "got: {json}");
+        let json = serialize_json(&ProposalTargetType::SemanticGraphGrouping);
+        assert!(json.contains("\"semantic_graph_grouping\""), "got: {json}");
+    }
+
+    #[test]
+    fn proposal_target_type_round_trips() {
+        for target_type in &[
+            ProposalTargetType::DocsNote,
+            ProposalTargetType::Adr,
+            ProposalTargetType::Skill,
+            ProposalTargetType::DebuggingPlaybook,
+            ProposalTargetType::MemoryPatch,
+            ProposalTargetType::SemanticGraphGrouping,
+        ] {
+            let json = serialize_json(target_type);
+            let reconstructed: ProposalTargetType = deserialize_json(&json);
+            assert_eq!(reconstructed, *target_type);
+        }
+    }
+
+    #[test]
+    fn proposal_document_round_trip_markdown_target() {
+        let content = ProposedContent::Markdown("# Hello\n\nThis is a test.".into());
+        let doc = make_valid_proposal(ProposalTargetType::DocsNote, content);
+
+        let json = serialize_json(&doc);
+        assert!(json.contains("\"schemaVersion\":\"1.0.0\""));
+        assert!(json.contains("\"targetType\":\"docs_note\""));
+        assert!(json.contains("\"rationale\":\"This is a test rationale\""));
+        assert!(json.contains("\"proposedContent\":\"# Hello"));
+
+        let reconstructed: ProposalDocument = deserialize_json(&json);
+        assert_eq!(reconstructed, doc);
+    }
+
+    #[test]
+    fn proposal_document_round_trip_memory_patch_target() {
+        let patch: serde_json::Value = serde_json::json!({"key": "value", "op": "upsert"});
+        let content = ProposedContent::MemoryPatch(patch);
+        let doc = make_valid_proposal(ProposalTargetType::MemoryPatch, content);
+
+        let json = serialize_json(&doc);
+        assert!(json.contains("\"targetType\":\"memory_patch\""));
+
+        let reconstructed: ProposalDocument = deserialize_json(&json);
+        assert_eq!(reconstructed, doc);
+    }
+
+    #[test]
+    fn proposal_document_round_trip_semantic_graph_grouping_target() {
+        let grouping = SemanticGraphGrouping {
+            source_node_ids: vec![
+                "file:auth".into(),
+                "search:auth".into(),
+                "symbol:auth".into(),
+            ],
+            target_group_node_id: "domain_term:auth".into(),
+            target_group_label: "auth".into(),
+        };
+        let content = ProposedContent::SemanticGraphGrouping(grouping);
+        let doc = make_valid_proposal(ProposalTargetType::SemanticGraphGrouping, content);
+
+        let json = serialize_json(&doc);
+        assert!(json.contains("\"targetType\":\"semantic_graph_grouping\""));
+        assert!(json.contains("\"sourceNodeIds\":[\"file:auth\",\"search:auth\",\"symbol:auth\"]"));
+        assert!(json.contains("\"targetGroupNodeId\":\"domain_term:auth\""));
+        assert!(json.contains("\"targetGroupLabel\":\"auth\""));
+
+        let reconstructed: ProposalDocument = deserialize_json(&json);
+        assert_eq!(reconstructed, doc);
+    }
+
+    #[test]
+    fn validate_accepts_valid_markdown_proposal() {
+        let content = ProposedContent::Markdown("# Test".into());
+        let doc = make_valid_proposal(ProposalTargetType::DocsNote, content);
+        assert!(doc.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_valid_memory_patch_proposal() {
+        let patch: serde_json::Value = serde_json::json!({"op": "upsert"});
+        let content = ProposedContent::MemoryPatch(patch);
+        let doc = make_valid_proposal(ProposalTargetType::MemoryPatch, content);
+        assert!(doc.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_valid_semantic_graph_grouping_proposal() {
+        let grouping = SemanticGraphGrouping {
+            source_node_ids: vec!["file:auth".into()],
+            target_group_node_id: "domain_term:auth".into(),
+            target_group_label: "auth".into(),
+        };
+        let content = ProposedContent::SemanticGraphGrouping(grouping);
+        let doc = make_valid_proposal(ProposalTargetType::SemanticGraphGrouping, content);
+        assert!(doc.validate().is_ok());
+    }
+
+    #[test]
+    fn proposal_validate_rejects_wrong_schema_version() {
+        let content = ProposedContent::Markdown("# Test".into());
+        let mut doc = make_valid_proposal(ProposalTargetType::DocsNote, content);
+        doc.schema_version = "0.9.9".into();
+        let result = doc.validate();
+        assert!(
+            result.is_err(),
+            "schema version mismatch should be rejected"
+        );
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => String::new(),
+        };
+        assert!(err.contains("schema_version mismatch"));
+        assert!(err.contains("0.9.9"));
+        assert!(err.contains(PROPOSAL_SCHEMA_VERSION));
+    }
+
+    #[test]
+    fn validate_rejects_empty_rationale() {
+        let content = ProposedContent::Markdown("# Test".into());
+        let mut doc = make_valid_proposal(ProposalTargetType::Adr, content);
+        doc.rationale = String::new();
+        let result = doc.validate();
+        assert!(result.is_err(), "empty rationale should be rejected");
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => String::new(),
+        };
+        assert!(err.contains("rationale"));
+    }
+
+    #[test]
+    fn validate_rejects_whitespace_only_rationale() {
+        let content = ProposedContent::Markdown("# Test".into());
+        let mut doc = make_valid_proposal(ProposalTargetType::Adr, content);
+        doc.rationale = "   ".into();
+        let result = doc.validate();
+        assert!(
+            result.is_err(),
+            "whitespace-only rationale should be rejected"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_empty_evidence() {
+        let content = ProposedContent::Markdown("# Test".into());
+        let mut doc = make_valid_proposal(ProposalTargetType::Skill, content);
+        doc.evidence = vec![];
+        let result = doc.validate();
+        assert!(result.is_err(), "empty evidence should be rejected");
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => String::new(),
+        };
+        assert!(err.contains("evidence"));
+    }
+
+    #[test]
+    fn validate_rejects_empty_markdown_proposed_content() {
+        let content = ProposedContent::Markdown(String::new());
+        let doc = make_valid_proposal(ProposalTargetType::DebuggingPlaybook, content);
+        let result = doc.validate();
+        assert!(result.is_err(), "empty markdown content should be rejected");
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => String::new(),
+        };
+        assert!(err.contains("markdown"));
+    }
+
+    #[test]
+    fn validate_rejects_whitespace_only_markdown_proposed_content() {
+        let content = ProposedContent::Markdown("  \n ".into());
+        let doc = make_valid_proposal(ProposalTargetType::DocsNote, content);
+        let result = doc.validate();
+        assert!(
+            result.is_err(),
+            "whitespace-only markdown should be rejected"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_null_memory_patch_proposed_content() {
+        let content = ProposedContent::MemoryPatch(serde_json::Value::Null);
+        let doc = make_valid_proposal(ProposalTargetType::MemoryPatch, content);
+        let result = doc.validate();
+        assert!(result.is_err(), "null memory patch should be rejected");
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => String::new(),
+        };
+        assert!(err.contains("memory_patch"));
+    }
+
+    #[test]
+    fn validate_rejects_empty_title() {
+        let content = ProposedContent::Markdown("# Test".into());
+        let mut doc = make_valid_proposal(ProposalTargetType::DocsNote, content);
+        doc.title = String::new();
+        let result = doc.validate();
+        assert!(result.is_err(), "empty title should be rejected");
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => String::new(),
+        };
+        assert!(err.contains("title"));
+    }
+
+    #[test]
+    fn validate_rejects_whitespace_only_title() {
+        let content = ProposedContent::Markdown("# Test".into());
+        let mut doc = make_valid_proposal(ProposalTargetType::DocsNote, content);
+        doc.title = "  \n ".into();
+        let result = doc.validate();
+        assert!(result.is_err(), "whitespace-only title should be rejected");
+    }
+
+    #[test]
+    fn validate_rejects_empty_source_node_ids_for_graph_grouping() {
+        let grouping = SemanticGraphGrouping {
+            source_node_ids: vec![],
+            target_group_node_id: "domain_term:auth".into(),
+            target_group_label: "auth".into(),
+        };
+        let content = ProposedContent::SemanticGraphGrouping(grouping);
+        let doc = make_valid_proposal(ProposalTargetType::SemanticGraphGrouping, content);
+        let result = doc.validate();
+        assert!(result.is_err(), "empty sourceNodeIds should be rejected");
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => String::new(),
+        };
+        assert!(err.contains("sourceNodeIds"));
+    }
+
+    #[test]
+    fn validate_rejects_markdown_target_with_memory_patch_content() {
+        let patch: serde_json::Value = serde_json::json!({"op": "upsert"});
+        let content = ProposedContent::MemoryPatch(patch);
+        let doc = make_valid_proposal(ProposalTargetType::DocsNote, content);
+        let result = doc.validate();
+        assert!(
+            result.is_err(),
+            "DocsNote target with MemoryPatch content should be rejected"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_memory_patch_target_with_markdown_content() {
+        let content = ProposedContent::Markdown("# Test".into());
+        let doc = make_valid_proposal(ProposalTargetType::MemoryPatch, content);
+        let result = doc.validate();
+        assert!(
+            result.is_err(),
+            "MemoryPatch target with Markdown content should be rejected"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_semantic_graph_grouping_target_with_markdown_content() {
+        let content = ProposedContent::Markdown("# Test".into());
+        let doc = make_valid_proposal(ProposalTargetType::SemanticGraphGrouping, content);
+        let result = doc.validate();
+        assert!(
+            result.is_err(),
+            "SemanticGraphGrouping target with Markdown content should be rejected"
+        );
+    }
+
+    #[test]
+    fn deterministic_id_produces_stable_fingerprint() {
+        let content = ProposedContent::Markdown("# Same Content".into());
+        let id1 = ProposalDocument::compute_id(&ProposalTargetType::DocsNote, &content)
+            .unwrap_or_else(|e| panic!("compute_id: {e}"));
+        let id2 = ProposalDocument::compute_id(&ProposalTargetType::DocsNote, &content)
+            .unwrap_or_else(|e| panic!("compute_id: {e}"));
+        assert_eq!(id1, id2, "same target type and content must yield same id");
+    }
+
+    #[test]
+    fn deterministic_id_differs_by_target_type() {
+        let content = ProposedContent::Markdown("# Content".into());
+        let id_docs = ProposalDocument::compute_id(&ProposalTargetType::DocsNote, &content)
+            .unwrap_or_else(|e| panic!("compute_id: {e}"));
+        let id_adr = ProposalDocument::compute_id(&ProposalTargetType::Adr, &content)
+            .unwrap_or_else(|e| panic!("compute_id: {e}"));
+        assert_ne!(
+            id_docs, id_adr,
+            "different target types must yield different ids"
+        );
+    }
+
+    #[test]
+    fn deterministic_id_differs_by_content() {
+        let content1 = ProposedContent::Markdown("# Content A".into());
+        let content2 = ProposedContent::Markdown("# Content B".into());
+        let id1 = ProposalDocument::compute_id(&ProposalTargetType::DocsNote, &content1)
+            .unwrap_or_else(|e| panic!("compute_id: {e}"));
+        let id2 = ProposalDocument::compute_id(&ProposalTargetType::DocsNote, &content2)
+            .unwrap_or_else(|e| panic!("compute_id: {e}"));
+        assert_ne!(id1, id2, "different content must yield different ids");
+    }
+
+    #[test]
+    fn deterministic_id_is_hex_string() {
+        let content = ProposedContent::Markdown("# Test".into());
+        let id = ProposalDocument::compute_id(&ProposalTargetType::DocsNote, &content)
+            .unwrap_or_else(|e| panic!("compute_id: {e}"));
+        // SHA-256 produces 64 hex characters.
+        assert_eq!(id.len(), 64);
+        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn inbox_filename_uses_id_with_json_extension() {
+        let content = ProposedContent::Markdown("# Test".into());
+        let doc = make_valid_proposal(ProposalTargetType::DocsNote, content);
+        let filename = doc.inbox_filename();
+        assert!(filename.ends_with(".json"));
+        assert!(filename.starts_with(&doc.id));
+        assert_eq!(filename.len(), doc.id.len() + 5); // id + ".json"
+    }
+
+    #[test]
+    fn proposal_evidence_uses_evidence_link_vocabulary() {
+        let content = ProposedContent::Markdown("# Test".into());
+        let doc = make_valid_proposal(ProposalTargetType::DocsNote, content);
+        let json = serialize_json(&doc);
+
+        // Evidence fields should use EvidenceLink camelCase serialization.
+        assert!(json.contains("\"sourceKind\":\"hotspot_subject\""));
+        assert!(json.contains("\"subject\":\"test-subject\""));
+        assert!(json.contains("\"rowIds\":[1]"));
+        assert!(json.contains("\"score\":5"));
+    }
+
+    #[test]
+    fn proposal_document_has_no_acceptance_lifecycle_fields() {
+        let content = ProposedContent::Markdown("# Test".into());
+        let doc = make_valid_proposal(ProposalTargetType::Adr, content);
+        let json = serialize_json(&doc);
+
+        // Must NOT contain review lifecycle fields.
+        assert!(!json.contains("\"status\""));
+        assert!(!json.contains("\"reviewer\""));
+        assert!(!json.contains("\"accepted"));
+        assert!(!json.contains("\"rejected"));
     }
 }
