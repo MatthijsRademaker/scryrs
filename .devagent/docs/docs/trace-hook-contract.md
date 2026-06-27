@@ -409,6 +409,7 @@ No reference hooks for other harnesses are planned at this time. Harness authors
 - [Product Roadmap](./roadmap.mdx) — delivery sequence including Phase 1 proxy capture and reference hook work.
 - [Architecture](./architecture.mdx) — crate topology and runtime flow.
 - [Hotspots](./hotspots.md) — domain concept and interpretation guide (this page covers the hook contract and event schema)
+- [Graph](./graph.md) — domain-oriented explanation of the knowledge graph and how evidence becomes routing context
 
 ## Appendix: Remote Mode (Foundation 02+)
 
