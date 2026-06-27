@@ -667,6 +667,28 @@ impl ProposalDocument {
             return Err("proposal evidence must be non-empty".into());
         }
 
+        // Cross-field invariant: proposed_content variant must match target_type.
+        match (&self.target_type, &self.proposed_content) {
+            (
+                ProposalTargetType::DocsNote
+                | ProposalTargetType::Adr
+                | ProposalTargetType::Skill
+                | ProposalTargetType::DebuggingPlaybook,
+                ProposedContent::Markdown(_),
+            ) => {}
+            (ProposalTargetType::MemoryPatch, ProposedContent::MemoryPatch(_)) => {}
+            (
+                ProposalTargetType::SemanticGraphGrouping,
+                ProposedContent::SemanticGraphGrouping(_),
+            ) => {}
+            (target_type, content) => {
+                return Err(format!(
+                    "proposal target_type mismatch: {:?} does not accept {:?} proposed_content",
+                    target_type, content,
+                ));
+            }
+        }
+
         match &self.proposed_content {
             ProposedContent::Markdown(text) => {
                 if text.trim().is_empty() {
@@ -2924,6 +2946,40 @@ mod tests {
             Ok(_) => String::new(),
         };
         assert!(err.contains("sourceNodeIds"));
+    }
+
+    #[test]
+    fn validate_rejects_markdown_target_with_memory_patch_content() {
+        let patch: serde_json::Value = serde_json::json!({"op": "upsert"});
+        let content = ProposedContent::MemoryPatch(patch);
+        let doc = make_valid_proposal(ProposalTargetType::DocsNote, content);
+        let result = doc.validate();
+        assert!(
+            result.is_err(),
+            "DocsNote target with MemoryPatch content should be rejected"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_memory_patch_target_with_markdown_content() {
+        let content = ProposedContent::Markdown("# Test".into());
+        let doc = make_valid_proposal(ProposalTargetType::MemoryPatch, content);
+        let result = doc.validate();
+        assert!(
+            result.is_err(),
+            "MemoryPatch target with Markdown content should be rejected"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_semantic_graph_grouping_target_with_markdown_content() {
+        let content = ProposedContent::Markdown("# Test".into());
+        let doc = make_valid_proposal(ProposalTargetType::SemanticGraphGrouping, content);
+        let result = doc.validate();
+        assert!(
+            result.is_err(),
+            "SemanticGraphGrouping target with Markdown content should be rejected"
+        );
     }
 
     #[test]
