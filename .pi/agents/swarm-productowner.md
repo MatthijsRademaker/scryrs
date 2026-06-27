@@ -61,4 +61,4 @@ For full container and runtime execution details, see the `runtime-environment.m
 
 ## Runtime Requirements
 
-After producing your analysis output, call the `report_refinement_outcome` tool with `"finished"`. This writes the structured outcome artifact required by the swarm runtime. This is a runtime requirement — always do this regardless of the output format.
+After producing your analysis output, call the `report_refinement_outcome` tool with `"finished"` exactly once. This writes the terminal outcome artifact required by the swarm runtime. Assistant prose or JSON is never terminal outcome authority. This is a runtime requirement — always do this regardless of the output format.

@@ -3,32 +3,32 @@
   "sourceVersion": "local",
   "files": {
     "agents/swarm-architect.md": {
-      "sourceHash": "91ad72d54f6d71bc1bdc465b912e896df4c24628f8a80ab59c1fec8349e621fb",
-      "installedHash": "91ad72d54f6d71bc1bdc465b912e896df4c24628f8a80ab59c1fec8349e621fb"
+      "sourceHash": "71db2c897597326b318bc6b0887200ec86cf2c6e40b6708c667c6d3ce984c4df",
+      "installedHash": "71db2c897597326b318bc6b0887200ec86cf2c6e40b6708c667c6d3ce984c4df"
     },
     "agents/swarm-lead-dev.md": {
-      "sourceHash": "62cc9b22f26f5b5870df5e9dc4bb62f46a2dd81dc1f588296b9d618ca39ef93b",
-      "installedHash": "62cc9b22f26f5b5870df5e9dc4bb62f46a2dd81dc1f588296b9d618ca39ef93b"
+      "sourceHash": "6aca7e4018672f2ba86037dfa93ea460799c87f737e5c9c854e2179238cc4d33",
+      "installedHash": "6aca7e4018672f2ba86037dfa93ea460799c87f737e5c9c854e2179238cc4d33"
     },
     "agents/swarm-productowner.md": {
-      "sourceHash": "7f6f7d500048c2f96bcfe47664eaaebf2ecda8524db1105e04f8a4a2d3918152",
-      "installedHash": "7f6f7d500048c2f96bcfe47664eaaebf2ecda8524db1105e04f8a4a2d3918152"
+      "sourceHash": "f7dc451f4411339fb93fb705389f5f34d8eea77aa39b2d054c1edac620963f4d",
+      "installedHash": "f7dc451f4411339fb93fb705389f5f34d8eea77aa39b2d054c1edac620963f4d"
     },
     "agents/swarm-reviewer.md": {
-      "sourceHash": "d75373f55b63bf69752b24cf9683f404a4c9b47c22fc5a4e8989ef92bea3aa05",
-      "installedHash": "d75373f55b63bf69752b24cf9683f404a4c9b47c22fc5a4e8989ef92bea3aa05"
+      "sourceHash": "c11de4c46df8bafcc7d7834b9beae42136eafc39b48472757ad325e11226e572",
+      "installedHash": "c11de4c46df8bafcc7d7834b9beae42136eafc39b48472757ad325e11226e572"
     },
     "agents/swarm-room-controller.md": {
-      "sourceHash": "943a91d2a526542c07699accb0878eb04148ba0f759ffb69da47fb6aa81bc36a",
-      "installedHash": "943a91d2a526542c07699accb0878eb04148ba0f759ffb69da47fb6aa81bc36a"
+      "sourceHash": "91498747e72af0993e1d9c6395df84fd2445530a95303f2719429cce9c02afbc",
+      "installedHash": "91498747e72af0993e1d9c6395df84fd2445530a95303f2719429cce9c02afbc"
     },
     "agents/swarm-spec-writer.md": {
-      "sourceHash": "9b9c84f81b71264f8805be4cd787a930c0023bab15fa29932bbbd45a7bbe5256",
-      "installedHash": "9b9c84f81b71264f8805be4cd787a930c0023bab15fa29932bbbd45a7bbe5256"
+      "sourceHash": "0ad918f1c7898a74ae83330d1c95da587f5f017175574235cf5d582bd2f937c3",
+      "installedHash": "0ad918f1c7898a74ae83330d1c95da587f5f017175574235cf5d582bd2f937c3"
     },
     "agents/swarm-worker.md": {
-      "sourceHash": "c509f19bfa5ba8fccc2ff9756533a0641c02754297f671b302e08881a3af066e",
-      "installedHash": "c509f19bfa5ba8fccc2ff9756533a0641c02754297f671b302e08881a3af066e"
+      "sourceHash": "608e914859d6aa3a7ae0030ffb22e7359ffcadfcdc37749369b2e2c9f17085a2",
+      "installedHash": "608e914859d6aa3a7ae0030ffb22e7359ffcadfcdc37749369b2e2c9f17085a2"
     },
     "config/agents.yaml": {
       "sourceHash": "b21482dc79d8cc68730df5f1dcb8f4b8bd2572eff71ba1c13b5eb0d81a3f97ea",
@@ -47,8 +47,8 @@
       "installedHash": "4a72ca56d2e876abee0e1fd817f6295dce67a3fca421c34218830a1be1bc23b3"
     },
     "prompts/investigate-swarm-run.md": {
-      "sourceHash": "648900654b354909941a16d80b7945540b95e807a38f5fbcc5b9ae20dafc3dbb",
-      "installedHash": "648900654b354909941a16d80b7945540b95e807a38f5fbcc5b9ae20dafc3dbb"
+      "sourceHash": "76a9fa22dfdb015a94b31b673857f81498e7bc7b7ba9a2fc787fdf0f2dbf6bd8",
+      "installedHash": "76a9fa22dfdb015a94b31b673857f81498e7bc7b7ba9a2fc787fdf0f2dbf6bd8"
     },
     "prompts/investigate.md": {
       "sourceHash": "2eb7dad20e32d42360a168ac84130f93821439175c805045e2c04ab2295077ed",
@@ -59,36 +59,36 @@
       "installedHash": "e9e64e6644b5f41db274206494b29592fa954d11101592c90dd6014330782d86"
     },
     "prompts/opsx-apply.md": {
-      "sourceHash": "9e8e2291460fb85bf89e7d968e109403737f1c231d9efe4759a1c45e3fe46a98",
-      "installedHash": "9e8e2291460fb85bf89e7d968e109403737f1c231d9efe4759a1c45e3fe46a98"
+      "sourceHash": "665f986c1fb5ba0a74235e7abbf83f34568157a26542e1e8531858256615cad1",
+      "installedHash": "665f986c1fb5ba0a74235e7abbf83f34568157a26542e1e8531858256615cad1"
     },
     "prompts/opsx-archive.md": {
       "sourceHash": "d75e9c8bb1e81b5b47669463cc639bd96c91aa03557b46e58de568808db429ec",
       "installedHash": "d75e9c8bb1e81b5b47669463cc639bd96c91aa03557b46e58de568808db429ec"
     },
     "prompts/opsx-explore.md": {
-      "sourceHash": "894fc46af2a61c51a1a8a2178ad1527553d7c0cb8a95179b68d69a1f9451b22c",
-      "installedHash": "894fc46af2a61c51a1a8a2178ad1527553d7c0cb8a95179b68d69a1f9451b22c"
+      "sourceHash": "19bf2e210f990755544184d90d97e32c021d1288625a4b492060d084697d964c",
+      "installedHash": "19bf2e210f990755544184d90d97e32c021d1288625a4b492060d084697d964c"
     },
     "prompts/opsx-propose.md": {
-      "sourceHash": "bcc21e672d8dd951ef5349a04b1eda4a7fe2f5577846d91c775bd44ad4bb1197",
-      "installedHash": "bcc21e672d8dd951ef5349a04b1eda4a7fe2f5577846d91c775bd44ad4bb1197"
+      "sourceHash": "48ca1365846bfde389d56de6bc4d269b1dc4402867641441b15ed36b5ee0bbe8",
+      "installedHash": "48ca1365846bfde389d56de6bc4d269b1dc4402867641441b15ed36b5ee0bbe8"
     },
     "prompts/opsx-refinement-explore.md": {
-      "sourceHash": "bc13bb77c54282bfe66b96f85231c2ac4184ad7c213cc40bf16e98a8ade333a1",
-      "installedHash": "bc13bb77c54282bfe66b96f85231c2ac4184ad7c213cc40bf16e98a8ade333a1"
+      "sourceHash": "d9707bff0e1fa5cbfe27a0f3c96ddfb213a7b6c7677df38e0c5ac4505c1ecbe8",
+      "installedHash": "d9707bff0e1fa5cbfe27a0f3c96ddfb213a7b6c7677df38e0c5ac4505c1ecbe8"
     },
     "prompts/opsx-refinement-propose.md": {
       "sourceHash": "f3e34db351df659346e1b0b7ce1811bbdac59796efb13b414f16881fb62ede51",
       "installedHash": "f3e34db351df659346e1b0b7ce1811bbdac59796efb13b414f16881fb62ede51"
     },
     "prompts/opsx-validate.md": {
-      "sourceHash": "ff68c06ae90f33397927ecb8dbc26cc113d05a515630ea03ca5028548c4eca43",
-      "installedHash": "ff68c06ae90f33397927ecb8dbc26cc113d05a515630ea03ca5028548c4eca43"
+      "sourceHash": "af557064e2fbf8fd75ab1ea2f8acc9d890d6812da6e32704319d38e6eb036875",
+      "installedHash": "af557064e2fbf8fd75ab1ea2f8acc9d890d6812da6e32704319d38e6eb036875"
     },
     "prompts/swarm-architecture-review.md": {
-      "sourceHash": "9108096073c03e74daa3f3a26c291b95becdc7c1413872c42ed4f263cbe5b641",
-      "installedHash": "9108096073c03e74daa3f3a26c291b95becdc7c1413872c42ed4f263cbe5b641"
+      "sourceHash": "d58499310539c59ab39bb0241a83f32679afef6e98c017cb0b897db352846ac5",
+      "installedHash": "d58499310539c59ab39bb0241a83f32679afef6e98c017cb0b897db352846ac5"
     },
     "prompts/swarm-execute-plan.md": {
       "sourceHash": "2f3122aa01cf62bd1aaa697c6bab9023bd0b1b410a960455658f6e6509f9ecc1",
@@ -99,40 +99,40 @@
       "installedHash": "fa2f10c4aa013a5674c36dc7817082aefcdf372e614c20ae6f80f40db414a7ea"
     },
     "prompts/swarm-execute.md": {
-      "sourceHash": "55268a313a30f0e040151b49fef82faa17aae2e7867d9bbcb0215bc3ce0aaf00",
-      "installedHash": "55268a313a30f0e040151b49fef82faa17aae2e7867d9bbcb0215bc3ce0aaf00"
+      "sourceHash": "6ad67a9f1cc8af4f9f7d0cd47ac91dcbad2fd18e42640099dbd7a599be715363",
+      "installedHash": "6ad67a9f1cc8af4f9f7d0cd47ac91dcbad2fd18e42640099dbd7a599be715363"
     },
     "prompts/swarm-get-feedback.md": {
-      "sourceHash": "a58c706d17dbb0f2b4e6be120e5ad358f84c02463be7196f9b8b01336f8c04ec",
-      "installedHash": "a58c706d17dbb0f2b4e6be120e5ad358f84c02463be7196f9b8b01336f8c04ec"
+      "sourceHash": "fbd125896aaa2ce9b8429822aad7f6e720c690ede13c518896ab3c31c65de921",
+      "installedHash": "fbd125896aaa2ce9b8429822aad7f6e720c690ede13c518896ab3c31c65de921"
     },
     "prompts/swarm-lead-dev-review.md": {
-      "sourceHash": "7a425c4dc61eb04b9d62ebc1c149f8e697d12c6e0d45f166e4c12e9207bc400a",
-      "installedHash": "7a425c4dc61eb04b9d62ebc1c149f8e697d12c6e0d45f166e4c12e9207bc400a"
+      "sourceHash": "f37e45d20e013e5674882a784b943dc8fefaa58ab73747ebaf347add0b06d1f6",
+      "installedHash": "f37e45d20e013e5674882a784b943dc8fefaa58ab73747ebaf347add0b06d1f6"
     },
     "prompts/swarm-plan.md": {
       "sourceHash": "2b4b82479c5b3063d378e7136ab421d2733f503e4a19e8f483d0f92f85e63a71",
       "installedHash": "2b4b82479c5b3063d378e7136ab421d2733f503e4a19e8f483d0f92f85e63a71"
     },
     "prompts/swarm-refinement-room.md": {
-      "sourceHash": "d7d86c7e2e8b9bd7cd881a67d9b068b2ed89ae82d39fe04e1b585892e43acb1a",
-      "installedHash": "d7d86c7e2e8b9bd7cd881a67d9b068b2ed89ae82d39fe04e1b585892e43acb1a"
+      "sourceHash": "8032b90ec5401aad0d67286ffeee7a077bfc9ef19a9b2cd406bae1a172d1fe90",
+      "installedHash": "8032b90ec5401aad0d67286ffeee7a077bfc9ef19a9b2cd406bae1a172d1fe90"
     },
     "prompts/swarm-refinement.md": {
-      "sourceHash": "5b859d3db025661d1ae50fbc964633b34d19c3cbec0265a7475b5cada69a7308",
-      "installedHash": "5b859d3db025661d1ae50fbc964633b34d19c3cbec0265a7475b5cada69a7308"
+      "sourceHash": "bce4466876aa1e215431725bc258f219807c007fa7dba5d788b68640058e3920",
+      "installedHash": "bce4466876aa1e215431725bc258f219807c007fa7dba5d788b68640058e3920"
     },
     "prompts/swarm-repair-commit.md": {
       "sourceHash": "1bb94989d133c03306b2407db213ed37f2734e274765b32d3a9bbe62ee86d8cf",
       "installedHash": "1bb94989d133c03306b2407db213ed37f2734e274765b32d3a9bbe62ee86d8cf"
     },
     "prompts/swarm-reviewer-review.md": {
-      "sourceHash": "a54202e8fa5bb2cc062a4684060b4aa5b89904c0ca4ab3d56f0b91f46923d123",
-      "installedHash": "a54202e8fa5bb2cc062a4684060b4aa5b89904c0ca4ab3d56f0b91f46923d123"
+      "sourceHash": "d735fa5b26058185e23be45cb0410f43ad8429002f77198c857714aabf789b04",
+      "installedHash": "d735fa5b26058185e23be45cb0410f43ad8429002f77198c857714aabf789b04"
     },
     "prompts/swarm-self-improve-worker.md": {
-      "sourceHash": "2ba5378fc2656762f0a93f6592c7ee912b57fba4a567eeb34ab5297fb9a2bb8d",
-      "installedHash": "2ba5378fc2656762f0a93f6592c7ee912b57fba4a567eeb34ab5297fb9a2bb8d"
+      "sourceHash": "7120565225205f4f237a51f0e7648b8c6f2109955fcd19ad3c0361a849362eba",
+      "installedHash": "7120565225205f4f237a51f0e7648b8c6f2109955fcd19ad3c0361a849362eba"
     },
     "prompts/swarm-spec-write.md": {
       "sourceHash": "c92bda888a277f61a93c3cfa2258f31024f51a727d34301e706ac63ee9eb027e",
@@ -152,7 +152,7 @@
     },
     "skills/docs-writer/SKILL.md": {
       "sourceHash": "32e0ea24900fdd0319a9eafdab38e8b6c3b460b780febd96250ad8f8ef345a1c",
-      "installedHash": "32e0ea24900fdd0319a9eafdab38e8b6c3b460b780febd96250ad8f8ef345a1c"
+      "installedHash": "600c7e2cba85c28e188ef1b398345835813cd555a95185f4301a09fb13cc51be"
     },
     "skills/frontend-design/LICENSE.txt": {
       "sourceHash": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
@@ -373,6 +373,10 @@
     "skills/workflow-taskflow-expert/SKILL.md": {
       "sourceHash": "1fd3a5d7f0c30c6c18c43316ad2a00b9d4ef27dff651ec0dea17c825c5c63628",
       "installedHash": "1fd3a5d7f0c30c6c18c43316ad2a00b9d4ef27dff651ec0dea17c825c5c63628"
+    },
+    "prompts/opsx-archive-auto.md": {
+      "sourceHash": "0308c61b51c331169db4b477c3ba75b9d1d743930a743f32359bc5c2fed423b3",
+      "installedHash": "0308c61b51c331169db4b477c3ba75b9d1d743930a743f32359bc5c2fed423b3"
     }
   }
 }

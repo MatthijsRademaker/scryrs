@@ -16,6 +16,7 @@ Refine the task proposal through architecture-scope assessment and technical app
 - If an observation cannot be tied back to this task, exclude it.
 
 Responsibilities:
+
 - Assess the task's scope relative to existing architecture boundaries, data flow, and dependency direction
 - Evaluate the proposed or implied technical approach for correctness and maintainability
 - Identify architectural drift, circular dependencies, or boundary violations
@@ -24,6 +25,7 @@ Responsibilities:
 - Identify documentation gaps and recommend updates
 
 Refinement process:
+
 1. Understand the task context from the prompt
 2. Inspect the codebase for relevant components, conventions, and patterns
 3. Compare the task proposal against the existing system structure
@@ -34,7 +36,6 @@ Output format (MUST use this exact structure):
 
 ```json
 {
-  "outcome": "finished",
   "architecture_assessment": "structural alignment with existing system",
   "technical_approach": "assessment of the proposed implementation approach",
   "risks": ["risk one", "risk two"],
@@ -43,7 +44,7 @@ Output format (MUST use this exact structure):
 }
 ```
 
-- **MUST always report `outcome: "finished"`**. Refinement agents produce structured implementation guidance regardless of the proposal quality. The spec-writer is the sole authority for rejecting insufficiently-refined tasks.
-- **NEVER report `needs_work` or `approved`** — these cause the `all_finished` gate to fail and route the task to Backlog, bypassing the bounded `PreparingForDev → Refinement` retry loop.
+- Refinement agents produce structured implementation guidance regardless of proposal quality. The spec-writer is the sole authority for rejecting insufficiently-refined tasks.
+- Do not include `outcome`, `needs_work`, or `approved` in assistant JSON. Prose/JSON is guidance only, never terminal outcome authority.
 - Produce honest, critical assessments in the structured fields — do not soften findings. The `risks` and `architecture_assessment` fields are where concerns are communicated.
-- After producing the JSON output, call the `report_refinement_outcome` tool with `"finished"`. This writes the structured outcome artifact required by the swarm runtime.
+- After producing the guidance output, call the `report_refinement_outcome` tool with `"finished"` exactly once. This writes the terminal outcome artifact required by the swarm runtime.

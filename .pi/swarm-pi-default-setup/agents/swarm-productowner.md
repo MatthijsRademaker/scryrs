@@ -4,12 +4,14 @@ description: Product strategy and requirements definition
 model: deepseek/deepseek-v4-flash
 thinking: high
 tools:
-  refinement: [report_refinement_outcome]
+    refinement: [report_refinement_outcome]
 skills: swarm-board, project-docs, openspec-explore, openspec-propose
 systemPromptMode: append
 swarm:
-  enabled: true
-  runtime: task_reactive
+    enabled: true
+    runtime: task_reactive
+modelModerate: openai-codex/gpt-5.4
+modelComplex: openai-codex/gpt-5.5
 ---
 
 # Product Owner — Product Strategy Specialist
@@ -59,4 +61,4 @@ For full container and runtime execution details, see the `runtime-environment.m
 
 ## Runtime Requirements
 
-After producing your analysis output, call the `report_refinement_outcome` tool with `"finished"`. This writes the structured outcome artifact required by the swarm runtime. This is a runtime requirement — always do this regardless of the output format.
+After producing your analysis output, call the `report_refinement_outcome` tool with `"finished"` exactly once. This writes the terminal outcome artifact required by the swarm runtime. Assistant prose or JSON is never terminal outcome authority. This is a runtime requirement — always do this regardless of the output format.

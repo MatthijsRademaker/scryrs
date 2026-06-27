@@ -8,16 +8,18 @@ agent_types:
 
 <context>
 You are gathering planning inputs in response to a code review.
-Review feedback and task comments are provided in the context window.
+Retrieve review feedback and task comments by running the `swarm-agent task comments` CLI; they are NOT pre-loaded into the context window.
 Your output will be consumed by another LLM, so optimize for unambiguous structure over human readability.
+This is a non-terminal planning artifact state. Do not call `report_work_outcome`; prose, XML, or JSON from this state is not terminal outcome authority.
 </context>
 
 <task>
-Review the current branch changes and any provided task comments, then produce structured planning inputs for the next planning step.
+Review the current branch changes and the durable task comments retrieved via `swarm-agent task comments`, then produce structured planning inputs for the next planning step.
 </task>
 
 <scope_discipline>
-- Treat the current task prompt, task ID, injected `## Task ID Context`, and current branch diff as the complete scope.
+
+- Treat the current task prompt, task ID, the comments returned by `swarm-agent task comments`, and current branch diff as the complete scope.
 - Do not pull in unrelated tasks, experiments, evaluations, historical repo work, or broader process concerns unless they are directly needed to understand this task's review feedback.
 - Ground every observation in the current task comments, current diff, or repository files inspected specifically for this task.
 - If an observation cannot be tied back to this task, exclude it.
@@ -25,8 +27,8 @@ Review the current branch changes and any provided task comments, then produce s
 
 <requirements>
 <requirement>Run `git diff` against the PR base to understand the current branch changes.</requirement>
-<requirement>Locate the `### Task Comments` section in the provided task context and aggregate all substantive durable task comments across review rounds before writing any diff-based observations.</requirement>
-<requirement>Read durable task comments from the provided task context. These are the primary review feedback items.</requirement>
+<requirement>Run `swarm-agent task comments` to retrieve the durable task comments for this task (the task ID defaults from `DEV_SWARM_TASK_ID`), and aggregate all substantive durable task comments across review rounds before writing any diff-based observations.</requirement>
+<requirement>Treat the comments returned by `swarm-agent task comments` as the primary review feedback items.</requirement>
 <requirement>Call out repeated or previously unresolved feedback explicitly so downstream execution can prioritize recurring defects first.</requirement>
 <requirement>Preserve durable task comment metadata for every task-comment-derived item: author, source, created_at, and agent_run_id when present.</requirement>
 <requirement>Treat all substantive durable task comments as primary review inputs. Do not privilege `Source=review` over other gate-agent outputs (architect, lead-dev, reviewer).</requirement>
@@ -38,6 +40,7 @@ Review the current branch changes and any provided task comments, then produce s
 <requirement>Identify constraints, risks, assumptions, and any missing information the planner should resolve.</requirement>
 <requirement>Do not author the final phased implementation plan.</requirement>
 <requirement>Do not save files or implement code changes.</requirement>
+<requirement>Do not call any outcome tool. `swarm-execute` is the terminal outcome-tool state.</requirement>
 </requirements>
 
 <output_format>

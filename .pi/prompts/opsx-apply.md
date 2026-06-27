@@ -7,6 +7,8 @@ agent_types:
 
 Implement tasks from an OpenSpec change.
 
+This workflow state is non-terminal. It implements the change and updates the OpenSpec tasks file; it must not call `report_work_outcome`, and any prose/JSON summary is diagnostic only. The terminal outcome is reported by the later archive state.
+
 $ARGUMENTS
 
 **Input**: `$ARGUMENTS` is the change name followed by any extra context or instructions (e.g., `/opsx-apply add-auth focus on the API layer only`). If the change name is omitted, check if it can be inferred from conversation context. If vague or ambiguous you MUST prompt for available changes. Any text after the change name is additional context for the implementation.

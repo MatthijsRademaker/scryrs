@@ -5,57 +5,63 @@ agent_types:
   - swarm-reviewer
 ---
 
-Review the pull request associated with the current task and produce a merge recommendation.
+Review current task pull request and produce merge recommendation.
 
 ## Scope Discipline
 
-- Treat the current task prompt, task ID, injected task context/comments, and current branch/PR diff as the complete review scope.
-- Do not pull in unrelated tasks, experiments, evaluations, historical repo work, or broader backlog/process concerns unless they are directly needed to assess this task.
-- Ground every finding and verdict in the current task requirements, task comments, diff, PR metadata, or repository files inspected specifically for this review.
-- If an observation cannot be tied back to this task, exclude it from the verdict.
+- Treat current task prompt, task ID, review-context dossier from `swarm-agent task review-context --json`, and current branch/PR diff as complete review scope.
+- Do not pull in unrelated tasks, experiments, evaluations, historical repo work, or broader backlog/process concerns unless directly needed to assess this task.
+- Ground every finding and verdict in current task requirements, review-context dossier, diff, PR metadata, or repository files inspected specifically for this review.
+- If observation cannot be tied back to this task, exclude it from verdict.
+
+## Required review-context dossier
+
+1. Run `swarm-agent task review-context --json` before grading.
+2. Treat dossier as shared durable evidence: task metadata, durable comments from all authors/sources, current git/PR facts, reconciliation ledger, and warnings.
+3. Reconcile each substantive prior feedback item against current diff and inspected files before deciding whether it still blocks.
+4. Do not re-block on stale, already-addressed, superseded, contradicted, or out-of-scope historical feedback without fresh current evidence.
+5. If dossier includes warnings, note limitation and continue with current task/code evidence.
 
 ## Pre-review checks
 
-1. If the task has a PR URL (in metadata or description), extract the PR number.
-2. Check merge status: `gh pr view <number> --json mergeable,mergeStateStatus`
+1. Run `swarm-agent task review-context --json` and read returned dossier.
+2. Extract PR number from dossier `pr.number` or `task.pr_url` when available.
+3. Check merge status with `gh pr view <number> --json mergeable,mergeStateStatus` when PR number is available.
    - If `mergeable` is `CONFLICTING` or `mergeStateStatus` contains `dirty` or `conflicting`:
-     Report `outcome: "needs_work"` with the specific conflict state. Do NOT approve.
-3. Fetch the PR diff: `gh pr diff <number>`
+     record specific conflict state, grade below `DEV_SWARM_REVIEW_THRESHOLD`, and do NOT approve.
+4. Fetch PR diff with `gh pr diff <number>` when PR number is available. Otherwise inspect current branch diff from dossier `git.base_ref` / `git.base_sha`.
 
 ## Review criteria
 
-- **Correctness**: Does the code correctly implement the task requirements?
-- **Security**: Are there any security vulnerabilities, exposed secrets, or unsafe patterns?
-- **Maintainability**: Does the code follow existing conventions and patterns?
+- **Correctness**: Does code correctly implement task requirements?
+- **Security**: Any security vulnerabilities, exposed secrets, or unsafe patterns?
+- **Maintainability**: Does code follow existing conventions and patterns?
 - **Completeness**: Are tests included? Are edge cases handled?
-- **Conflicts**: Are there merge conflicts (checked above)?
+- **Conflicts**: Are merge conflicts present?
+- **Feedback reconciliation**: Do prior durable comments remain valid against current code?
 
 ## Review process
 
-1. Understand the task context from the prompt.
-2. Extract every stated requirement, acceptance criterion, and user-facing goal from the task description.
-3. Fetch the PR diff: `gh pr diff <number>`.
-4. Map each requirement to the PR changes. For each requirement, locate the specific code or behavior that satisfies it.
-5. Examine changed files for quality, security, and style issues.
-6. Check for merge conflicts via `gh pr view --json mergeable,mergeStateStatus`.
-7. Populate the `requirements_checked` array in the output — one entry per requirement.
-8. Post a review comment on the PR via:
-   ```
-   gh pr comment <number> --body "## Review Result: <APPROVED|NEEDS_WORK> ..."
-   ```
-9. Produce the JSON output.
+1. Understand task context from prompt and review-context dossier.
+2. Extract every stated requirement, acceptance criterion, and user-facing goal from task description.
+3. Use dossier to identify prior durable feedback, repeated concerns, contradictions, and limitations before diff inspection.
+4. Fetch PR diff with `gh pr diff <number>` when PR exists; otherwise inspect current branch diff using dossier git facts.
+5. Map each requirement to current changes. For each requirement, locate specific code or behavior that satisfies it.
+6. Examine changed files for quality, security, and style issues.
+7. Re-check merge conflicts via `gh pr view --json mergeable,mergeStateStatus` when PR exists.
+8. Populate `requirements_checked` array — one entry per requirement.
+9. Produce JSON output. Runtime persists review evidence and task comments; do not post GitHub PR comments from this prompt.
 
 ## Output format (MUST use this exact structure)
 
-Your ENTIRE response must be a single valid JSON object. Do not write any text before or after the JSON. Do not use markdown fences. Do not include commentary, explanations, or summaries outside the JSON.
+Your ENTIRE response must be single valid JSON object. Do not write text before or after JSON. Do not use markdown fences. Do not include commentary, explanations, or summaries outside JSON.
 
 ```json
 {
-  "outcome": "approved|needs_work",
-  "feedback": "summary of the review assessment",
+  "feedback": "summary of review assessment",
   "requirements_checked": [
     {
-      "requirement": "requirement text from the task",
+      "requirement": "requirement text from task",
       "status": "satisfied|not_satisfied|not_applicable",
       "evidence": "file path and brief explanation of how this requirement is met or why it is not"
     }
@@ -66,16 +72,17 @@ Your ENTIRE response must be a single valid JSON object. Do not write any text b
       "file": "path/to/file.go",
       "line": 42,
       "category": "security|quality|style|logic|test|alignment|performance",
-      "description": "description of the issue",
-      "suggestion": "how to fix the issue"
+      "description": "description of issue",
+      "suggestion": "how to fix issue"
     }
   ]
 }
 ```
 
-- `"outcome": "approved"` is valid ONLY when every stated requirement has `status: "satisfied"` or `"not_applicable"`. Any `"not_satisfied"` requirement forces `"needs_work"`.
-- Use `"outcome": "needs_work"` when changes are required before merging.
-- Merge conflicts are always `"outcome": "needs_work"` with severity `critical`.
-- Always include both the `requirements_checked` array and the `issues` array, even if empty.
-- After producing the JSON output, call the `report_review_outcome` tool with `"approved"` or `"needs_work"`. This writes the structured outcome artifact required by the swarm runtime.
-- Post a review comment on the PR BEFORE producing your final JSON output.
+- JSON output must not include `outcome` property; binary review outcome is derived by runtime from tool grade as `approved` or `needs_work`.
+- Grade at or above `DEV_SWARM_REVIEW_THRESHOLD` only when every stated requirement has `status: "satisfied"` or `"not_applicable"` and no fresh blocking evidence remains from prior feedback reconciliation; runtime derives `approved`.
+- Use grade below `DEV_SWARM_REVIEW_THRESHOLD` when changes are required before merging; runtime derives `needs_work`.
+- Merge conflicts always require below-threshold grade with severity `critical`.
+- Always include both `requirements_checked` array and `issues` array, even if empty.
+- After producing review output, call `report_review_outcome` tool with `grade` only, exactly once. This writes terminal outcome artifact required by swarm runtime.
+- Assistant JSON is review evidence only; it is never terminal outcome authority.

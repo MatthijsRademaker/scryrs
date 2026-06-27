@@ -41,21 +41,37 @@ $ARGUMENTS
 
 3. **If validation succeeds**
 
+   This is a non-terminal validation state. Do not call an outcome tool and do not emit terminal outcome JSON.
+
    Emit exactly these two lines, with the resolved change name substituted:
 
    ```text
    OPSX_VALIDATE_PASSED: <change>
-   {"outcome":"finished","change":"<change>"}
+   {"validation":"passed","change":"<change>"}
    ```
 
-4. **If validation fails**
+4. **If the change does not exist in the workspace**
+
+   If the validation output indicates the change is unknown / not present (for example OpenSpec prints `Unknown item '<change>'`, `not found`, or lists "Did you mean" alternatives), this is a **missing-change** condition, NOT a validation failure. The change directory was expected at `openspec/changes/<change>/` but is absent — this usually means the worktree was re-pointed or the artifacts were never delivered.
+
+   Do NOT repair, recreate, re-propose, or substitute a different change.
+
+   Emit exactly one JSON object in this shape, with the raw CLI output verbatim:
+
+   ```json
+   {"validation":"change_not_found","change":"<change>","openspec_output":"<raw OpenSpec CLI output>"}
+   ```
+
+   Do NOT emit the `OPSX_VALIDATE_PASSED:` marker. The recorded failure cause MUST be the missing change, not a generic missing-marker error.
+
+5. **If validation fails (change exists but is invalid)**
 
    Do NOT repair, rewrite, delete, archive, sync, or invent OpenSpec artifacts.
 
-   Emit exactly one JSON object in this shape:
+   Emit exactly one validation JSON object in this shape:
 
    ```json
-   {"outcome":"failed","change":"<change>","openspec_output":"<raw OpenSpec CLI output>"}
+   {"validation":"failed","change":"<change>","openspec_output":"<raw OpenSpec CLI output>"}
    ```
 
    The `openspec_output` value MUST contain the raw validation output verbatim as a JSON string.
@@ -66,4 +82,5 @@ $ARGUMENTS
 - Never select a different change.
 - Never run repair actions after validation failure.
 - Never omit `--strict`, `--json`, or `--no-interactive`.
-- On failure, report the failed outcome and raw OpenSpec output; do not claim success.
+- On failure, report the failed validation and raw OpenSpec output; do not claim success.
+- This prompt is not terminal outcome authority. Assistant JSON from this state must never satisfy a swarm gate outcome.

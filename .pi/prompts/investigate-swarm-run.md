@@ -11,6 +11,7 @@ OpenCode execution → evidence-backed verdict.
 $ARGUMENTS
 
 You will receive either:
+
 - A `run_id` (agent run UUID) — trace that specific run
 - A `task_id` (task UUID) — trace the full task lifecycle
 - A container hostname + timestamp (e.g. `c9357a81-agent-swarm-reviewer-1 | 8:53PM`)
@@ -28,6 +29,7 @@ Before starting, confirm these are available:
 
 The project prefix is derived from the first 8 chars of the `.devagent/.env` UUID.
 By default this is `swarm` (no prefix). Container patterns:
+
 - Postgres:    `${PREFIX}-postgres`
 - Manager:     `${PREFIX}-manager`
 - Agents:      `${PREFIX}-agent-<def>-1` (e.g. `${PREFIX}-agent-swarm-worker-1`)
@@ -39,8 +41,8 @@ scripts/inspect-task <PREFIX> <TASK_ID>
 scripts/inspect-task <PREFIX> <TASK_ID> --deep   # includes OpenCode log file tails
 ```
 
-This dumps 12 investigative sections in one shot. Use it as a starting point, then
-follow the sections below for deeper analysis.
+This dumps task/gate/run evidence plus the outcome finalization chain in one shot.
+Use it as a starting point, then follow the sections below for deeper analysis.
 
 ---
 
@@ -96,6 +98,10 @@ SELECT id, agent_definition_id, outcome::text, trigger_status::text,
        round(extract(epoch from (completed_at - claimed_at))::numeric, 1) AS duration_sec
 FROM agent_runs WHERE task_id = '<task_id>'
 ORDER BY created_at DESC;
+
+-- Latest outcome finalization diagnostic, if any
+SELECT metadata::jsonb #> '{last_failure,outcome_finalization}'
+FROM tasks WHERE id = '<task_id>';
 ```
 
 ---
@@ -182,11 +188,18 @@ Common causes:
 - Model error / API failure — check OpenCode log files for error messages
 - Tool call permission denied — check for `permission requested: ...; auto-rejecting`
 - Timeout — check for "deadline exceeded" in agent logs
-- Outcome artifact not written — check for "Outcome artifact missing" warning
+- Outcome finalization failed — check `last_failure.outcome_finalization` for expected tool, exact artifact path, validation status, tool-event status, deterministic recovery, and LLM recovery
 
-### Q5: What happened inside OpenCode?
+### Q5: What happened inside OpenCode and outcome finalization?
 
-> Read the execution log files at `.devagent/logs/<task_id>-<suffix>-<timestamp>.log`
+> First use `scripts/inspect-task` section `4b. OUTCOME FINALIZATION CHAIN` or
+> `tasks.metadata.last_failure.outcome_finalization`. The authoritative artifact
+> is the exact `artifact_path` recorded there, or the current-run path
+> `.devagent/cache/swarm/outcomes/<run_id>.json`. Validate that exact file only.
+> Do not scan the outcome cache directory looking for fallback artifacts; files
+> from other runs are stale evidence and must not determine the outcome.
+>
+> Then read the execution log files at `.devagent/logs/<task_id>-<suffix>-<timestamp>.log`
 > inside the agent container. These contain the full OpenCode session output.
 
 ```bash
@@ -217,12 +230,17 @@ Key patterns in OpenCode log files:
 | `permission requested: ...; auto-rejecting` | OS permission was denied (e.g. `.devagent/tmp/`) |
 | `exit 243` | Docker-in-Docker failure (no socket) |
 | `exit 124` | `timeout` command killed the process |
-| `No outcome artifact written` | Agent didn't call `report_work_outcome` tool |
-| `outcome artifact not found: <run_id>` | Recovery prompt failed or was ignored |
+| `No outcome artifact written` | Expected outcome tool did not produce the exact current-run artifact |
+| `outcome artifact not found: <run_id>` | Exact current-run artifact missing after recovery |
+| `outcome_finalization.artifact_validation_result` | Exact artifact path was `valid`, `missing`, or `invalid` |
+| `outcome_finalization.outcome_tool_event_observed` | Runtime saw an outcome tool event in current Pi session |
+| `outcome_finalization.deterministic_recovery_result` | Tool-event recovery wrote artifact or failed |
+| `outcome_finalization.llm_recovery_result` | LLM recovery status; provider quota/rate failures appear in `recovery_error_*` |
 
 ### Q6: Was the gate evaluation raced?
 
 > Check the **timeline** (chronological order) of events. Specifically:
+>
 > 1. When did each agent report its outcome?
 > 2. When did the gate transition?
 > 3. Did any agent report *after* the gate had already resolved?
@@ -264,7 +282,7 @@ Compare what the system did against what it should have done.
 |---|---|---|
 | Reviewer executes OpenCode review | Agent starts OpenCode with PR diff | Fails before OpenCode (git/prompt error) |
 | All 3 review agents complete | architect + lead-dev + reviewer all finish | Gate terminates early on first failure |
-| Architect writes outcome artifact | JSON outcome via `report_work_outcome` tool | 125KB plain text, no artifact |
+| Agent writes exact outcome artifact | Outcome tool writes `.devagent/cache/swarm/outcomes/<run_id>.json` | Missing/invalid exact artifact, or tool/recovery failure |
 | Gate waits for pending agents | AllApproved collects all results | Fail-fast terminates immediately |
 
 ---
@@ -299,6 +317,7 @@ Use this template:
 ```
 
 ## Rules
+
 - Every claim must cite evidence (log line, DB row, file:line).
 - Label confidence: high / medium / low.
 - Do not fix code — this is investigation only.

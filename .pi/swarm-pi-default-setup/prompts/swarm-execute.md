@@ -34,6 +34,6 @@ Use the current session context, gathered review feedback, and inspected reposit
 
 ## Outcome & Output
 
-Use the `test-driven-development` skill for behavioral changes.
+For behavioral changes: write a failing test first, confirm it fails for the right reason, implement the fix, then deliberately break the implementation and confirm the test catches it.
 
-After all edits, call `report_work_outcome` once with `finished`, `needs_work`, `failed`, or `skipped`.
+After all edits and verification, call `report_work_outcome` exactly once with `finished`, `needs_work`, `failed`, or `skipped`. This outcome tool writes the terminal artifact consumed by the swarm runtime. Do not emit assistant JSON as a substitute for the tool call.

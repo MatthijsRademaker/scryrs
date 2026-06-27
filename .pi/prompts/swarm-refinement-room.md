@@ -30,4 +30,4 @@ npm run room:controller -- reduce-round --ledger "<room-ledger.json>" --json
 npm run room:controller -- finalize --ledger "<room-ledger.json>" --json
 ```
 
-Return structured JSON with `outcome: "finished"` only after the room has published canonical OpenSpec artifacts and the handoff is ready, or with `outcome: "needs_work"` if the room reports blockers requiring Product Owner/user resolution.
+After the controller publishes canonical OpenSpec artifacts and the handoff is ready, call `report_refinement_outcome` with `finished` exactly once. Assistant JSON or controller prose is diagnostic only and is never terminal outcome authority. If the room reports blockers requiring Product Owner/user resolution, report the blocker in task comments/diagnostics and fail loudly; do not fabricate a terminal prose outcome.

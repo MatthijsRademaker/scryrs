@@ -24,11 +24,8 @@ winning changes into `.opencode/`.
 </task>
 
 <pre_work>
-1. Load the `swarm-eval-loop` skill. It contains the heuristics, failure-to-surface mappings,
-   stop conditions, candidate creation rules, promotion rules, and output analysis guidance
-   needed at every step.
-2. Read `evaluation/experiments/README.md` to understand the experiment framework if this
-   is your first time.
+Read `evaluation/experiments/README.md` to understand the experiment framework if this
+is your first time.
 </pre_work>
 
 <workflow>
@@ -38,6 +35,7 @@ Run the baseline experiment on the specified tasks. If <request> specifies task 
 `--fixture <path>`. Default to `v1-baseline` as the baseline experiment name.
 
 The eval run command is:
+
 ```
 scripts/eval-run --experiment v1-baseline --workflow-task <task-id> --keep-workspace --mlflow-uri ""
 ```
@@ -51,7 +49,8 @@ Read the most recent baseline outputs:
 - `evaluation/outputs/experiment_v1-baseline_*.json` (machine-readable)
 - `evaluation/outputs/experiment_report_v1-baseline_*.txt` (human-readable)
 
-Use the skill's heuristics to:
+Failure analysis heuristics:
+
 - Identify all tasks classified as "worse"
 - For each worse task, extract reviewer issues from `reviewer_parsed.issues[]`
 - Read `worker_output` to understand root cause
@@ -61,7 +60,7 @@ Use the skill's heuristics to:
 </step>
 
 <step number="3" label="Create candidate variant (iteration 1)">
-Create a candidate experiment. Follow the skill's candidate creation rules exactly:
+Create a candidate experiment:
 
 1. Choose a variant name: `worker-v1-<short-description>` (kebab-case, max 40 chars).
 2. Create `evaluation/experiments/prompts/<variant>/<filename>` by copying the current
@@ -69,6 +68,7 @@ Create a candidate experiment. Follow the skill's candidate creation rules exact
 3. Create `evaluation/experiments/manifests/<variant>.json` referencing only the changed files.
 
 Rules:
+
 - Only change the prompt surface(s) the failure analysis identified.
 - Change the smallest number of lines that address the failure.
 - Never add instructions that duplicate what another surface already says.
@@ -82,12 +82,14 @@ Run the candidate experiment on the same tasks:
 scripts/eval-run --experiment <variant> --workflow-task <task-id> --keep-workspace --mlflow-uri ""
 ```
 
-Compare baseline vs candidate using the skill's comparison rules:
+Compare baseline vs candidate:
+
 - Read both JSON output files
-- Compare per-task scores
+- Compare per-task scores in `outcome_agreement`, `avg_total_score`
 - Check for regressions (any task with lower outcome_agreement, new critical issues, or errors)
 
 Stop if:
+
 - No improvement in avg_total_score
 - Any regression detected
 - All tasks are now "equivalent" or better
@@ -108,8 +110,8 @@ If max_iterations (2) would be exceeded by further iteration:
 </step>
 
 <step number="6" label="Iteration 2">
-Re-classify remaining failures using the skill's heuristics. Some failures may have been
-fixed by iteration 1's changes.
+Re-classify remaining failures: review updated eval outputs for tasks still marked "worse".
+Some failures may have been fixed by iteration 1's changes.
 
 Choose the next-highest-priority prompt surface not yet modified in this session.
 Create a NEW variant (e.g. `worker-v2-<description>`) — do not mutate the iteration-1 variant.
@@ -126,12 +128,14 @@ For each variant that showed improvement with no regressions:
 2. Apply the exact same changes to the corresponding live file(s) under `.opencode/`.
    Use `edit` for surgical changes — do not wholesale replace the file.
 3. For each promoted file, output:
+
    ```
    PROMOTED: .opencode/commands/<filename>
      Baseline score: X.XXX
      Candidate score: X.XXX
      Reason: <why this change improved the replay>
    ```
+
 4. Do NOT touch any file under `src/cli/scaffolding/`.
 
 After all promotions, run a final verification: re-run the baseline experiment (which now
@@ -157,6 +161,7 @@ SELF-IMPROVE WORKER SUMMARY
   Files promoted to .opencode/: <list or "none">
   Remaining worse tasks requiring manual review: <list of task IDs or "none">
 ```
+
 </step>
 </workflow>
 
