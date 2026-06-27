@@ -25,6 +25,9 @@ COMMANDS\n\
       --mode live: remote ingest via scryrs server (writes project scryrs.json).\n\
         Live mode requires --ingest-url, --workspace-id, and --agent-id.\n\
         --repository-id is derived from Git remote origin when omitted.\n\
+  scryrs graph <PATH>\n\
+      Build a repository knowledge graph from hotspot evidence and docs structure.\n\
+      Emits a single-line KnowledgeGraphDocument JSON to stdout and .scryrs/graph.json.\n\
   scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]\n\
       Start local dashboard server and open the browser dashboard.\n\
   scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]\n\
@@ -94,7 +97,8 @@ EXAMPLES\n\
   scryrs dashboard\n\
   scryrs dashboard --port 9090 --no-open\n\
   scryrs server\n\
-  scryrs server --port 9091\n\n\
+  scryrs server --port 9091\n\
+  scryrs graph .\n\n\
 OPTIONS\n\
   -h, --help       Print this help message and exit\n\
   -V, --version    Print version and exit\n\

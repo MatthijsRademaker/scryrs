@@ -168,15 +168,17 @@ The graph foundation today provides the contract and the container. The build pi
 
 | Shipped | Deferred (Future Phase 5+) |
 |---------|---------------------------|
-| `KnowledgeGraphDocument` wire contract (`GRAPH_SCHEMA_VERSION = "1.0.0"`) | Graph build pipeline (populating nodes and edges from hotspots, docs, traces) |
-| `GraphNode`, `GraphEdge`, `EvidenceLink`, `EvidenceSourceKind` types | `scryrs graph` CLI command |
-| `KnowledgeGraph` container: add nodes/edges, validate structural references, materialize deterministic document | Route-manifest generator |
-| Deterministic serialization (node/edge/evidence-link ordering) | Docs crawler for automatic doc→node extraction |
-| Structural validation rejecting dangling edge references | Adapter integration for publishing graph data into docs systems |
-| Independent schema versioning from trace and hotspot contracts | Server endpoints for graph query or retrieval |
-| | Runtime retrieval (agents consuming graph relationships to load context) |
+| `KnowledgeGraphDocument` wire contract (`GRAPH_SCHEMA_VERSION = "1.0.0"`) | Graph build pipeline (populating nodes and edges from hotspots, docs, traces) — partial: structural `contains` edges from docs nav hierarchy shipped; full pipeline including cross-domain edges deferred |
+| `GraphNode`, `GraphEdge`, `EvidenceLink`, `EvidenceSourceKind` types | Route-manifest generator |
+| `KnowledgeGraph` container: add nodes/edges, validate structural references, materialize deterministic document | Docs crawler for automatic doc→node extraction |
+| Deterministic serialization (node/edge/evidence-link ordering) | Adapter integration for publishing graph data into docs systems |
+| Structural validation rejecting dangling edge references | Server endpoints for graph query or retrieval |
+| Independent schema versioning from trace and hotspot contracts | Runtime retrieval (agents consuming graph relationships to load context) |
+| `scryrs graph <PATH>` CLI command | |
+| Graph build from hotspot evidence (all five subject kinds) and docs nav hierarchy | |
+| Output to stdout and `.scryrs/graph.json` | |
 
-No `scryrs graph build` command exists. No route-manifest generator exists. No docs crawler or runtime retrieval behavior exists. The graph foundation provides the contract so evidence can be organized; the pipeline that fills the graph and the routing infrastructure that reads it are Phase 5+ work.
+The `scryrs graph <PATH>` command assembles graph nodes from hotspot evidence (`.scryrs/hotspots.json`) and docs navigation hierarchy (`.devagent/docs/docs/_nav.json`). It emits a deterministic `KnowledgeGraphDocument` to stdout and persists it to `.scryrs/graph.json`. See `scryrs --help` for usage. Route-manifest generation, runtime retrieval, and cross-domain edge derivation remain deferred future work. The graph foundation provides the contract so evidence can be organized; the full pipeline that fills the graph with cross-domain edges and the routing infrastructure that reads it are Phase 5+ work.
 
 ## Future Scope
 
