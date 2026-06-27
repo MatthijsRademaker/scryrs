@@ -131,3 +131,4 @@ These features are part of a different operational model — a central server sh
 - [Trace Hook Contract](./trace-hook-contract.md) — how harness hooks capture `TraceEvent` records that feed hotspot analysis
 - [Architecture](./architecture.mdx) — crate topology including `scryrs-core` scoring and the `HotspotsReport` data flow
 - [Vision & Goals](./vision.md) — product positioning and the "Observe → Detect → Promote → Route" product loop
+- [Graph](./graph.md) — domain-oriented explanation of the knowledge graph and how evidence becomes routing context
