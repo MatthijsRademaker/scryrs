@@ -137,8 +137,9 @@ mod tests {
         HotspotEntry, HotspotEvidence, KnowledgeGraphDocument, ProposalDocument,
         ProposalTargetType,
     };
+    use sha2::{Digest, Sha256};
     use std::collections::HashMap;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     fn make_graph_doc(nodes: Vec<GraphNode>, edges: Vec<GraphEdge>) -> KnowledgeGraphDocument {
         KnowledgeGraphDocument {
@@ -174,6 +175,138 @@ mod tests {
             serde_json::to_string(doc).expect("serialize"),
         )
         .expect("write graph");
+    }
+
+    fn write_test_routes(dir: &Path, content: &str) {
+        let scryrs_dir = dir.join(".scryrs");
+        std::fs::create_dir_all(&scryrs_dir).expect("create .scryrs");
+        std::fs::write(scryrs_dir.join("routes.json"), content).expect("write routes");
+    }
+
+    fn write_test_docs(dir: &Path) {
+        let docs_dir = dir.join(".devagent/docs/docs");
+        std::fs::create_dir_all(&docs_dir).expect("create .devagent/docs/docs");
+        std::fs::write(docs_dir.join("_nav.json"), "[]").expect("write _nav.json");
+        std::fs::write(
+            docs_dir.join("vision.md"),
+            "# Vision\n\nProject vision document.\n",
+        )
+        .expect("write vision.md");
+    }
+
+    /// Returns relative file paths mapped to SHA-256 hex digests of file contents.
+    fn compute_file_inventory(root: &Path) -> HashMap<PathBuf, String> {
+        let mut inventory = HashMap::new();
+        walk_dir(root, root, &mut inventory);
+        inventory
+    }
+
+    fn walk_dir(root: &Path, dir: &Path, inventory: &mut HashMap<PathBuf, String>) {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk_dir(root, &path, inventory);
+            } else if path.is_file() {
+                let contents = std::fs::read(&path).expect("read file for inventory");
+                let hash = format!("{:x}", Sha256::digest(&contents));
+                let relative = path.strip_prefix(root).expect("relative path");
+                inventory.insert(relative.to_path_buf(), hash);
+            }
+        }
+    }
+
+    /// Verification helper: runs `write_proposals` and asserts:
+    /// - Every protected path is byte-for-byte identical before and after.
+    /// - Any file added or modified after the run is under `.scryrs/proposals/`.
+    fn verify_proposal_writes_confined(root: &Path, protected_paths: &[&str]) {
+        // (a) Snapshot byte-for-byte content of every protected path.
+        let mut protected_snapshots: HashMap<&str, Vec<u8>> = HashMap::new();
+        for pp in protected_paths {
+            protected_snapshots.insert(pp, snapshot_dir_or_file(&root.join(pp)));
+        }
+
+        // (b) Compute full file inventory before write_proposals.
+        let inventory_before = compute_file_inventory(root);
+
+        // (c) Run write_proposals.
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        assert_eq!(
+            write_proposals(&mut out, &mut err, root.to_str().unwrap()),
+            0
+        );
+
+        // (d) Assert byte-for-byte identity of every protected path.
+        for pp in protected_paths {
+            let after = snapshot_dir_or_file(&root.join(pp));
+            let before = protected_snapshots
+                .get(pp)
+                .expect("protected snapshot must exist");
+            assert_eq!(before, &after, "protected path must not be modified: {pp}");
+        }
+
+        // (e) Compute full file inventory after write_proposals.
+        let inventory_after = compute_file_inventory(root);
+
+        // (f) Assert that any file added or modified is under .scryrs/proposals/.
+        for (path, hash_after) in &inventory_after {
+            let path_str = path.to_string_lossy();
+            if path_str.starts_with(".scryrs/proposals/") || path_str == ".scryrs/proposals" {
+                continue;
+            }
+            match inventory_before.get(path) {
+                Some(hash_before) => {
+                    assert_eq!(
+                        hash_before, hash_after,
+                        "file outside .scryrs/proposals/ must not be modified: {path_str}"
+                    );
+                }
+                None => {
+                    panic!("new file created outside .scryrs/proposals/: {path_str}");
+                }
+            }
+        }
+
+        // No files should be deleted either (non-proposals files still present).
+        for path in inventory_before.keys() {
+            assert!(
+                inventory_after.contains_key(path),
+                "file must not be deleted: {}",
+                path.display()
+            );
+        }
+    }
+
+    /// Recursively read a file or directory into a single byte buffer for
+    /// deterministic comparison. Directory snapshots concatenate relative
+    /// file paths and their contents in sorted order.
+    fn snapshot_dir_or_file(path: &Path) -> Vec<u8> {
+        if path.is_file() {
+            return std::fs::read(path).expect("read protected file");
+        }
+        if path.is_dir() {
+            let mut entries: Vec<PathBuf> = std::fs::read_dir(path)
+                .expect("read protected dir")
+                .flatten()
+                .map(|e| e.path())
+                .collect();
+            entries.sort();
+            let mut buf = Vec::new();
+            for entry in entries {
+                let relative = entry.strip_prefix(path).expect("relative path");
+                buf.extend_from_slice(relative.to_string_lossy().as_bytes());
+                buf.push(b'\n');
+                let contents = snapshot_dir_or_file(&entry);
+                buf.extend_from_slice(&contents);
+            }
+            return buf;
+        }
+        // If the path doesn't exist, snapshot is empty.
+        Vec::new()
     }
 
     fn make_hotspot(
@@ -390,37 +523,25 @@ mod tests {
         use tempfile::TempDir;
 
         let tmp = TempDir::new().expect("tempdir");
+
+        // Seed input artifacts.
         let entries = vec![make_hotspot("file", "src/main.rs", 10, 1, vec![1], 0, 5)];
         write_test_hotspots(tmp.path(), &entries, "2026-06-27T12:00:00Z");
         let graph = make_graph_doc(vec![], vec![]);
         write_test_graph(tmp.path(), &graph);
 
-        // Snapshot original content.
-        let graph_original =
-            std::fs::read_to_string(tmp.path().join(".scryrs/graph.json")).expect("read graph");
-        let hotspots_original = std::fs::read_to_string(tmp.path().join(".scryrs/hotspots.json"))
-            .expect("read hotspots");
+        // Seed protected source-of-truth artifacts.
+        write_test_routes(tmp.path(), "{}");
+        write_test_docs(tmp.path());
 
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-        assert_eq!(
-            write_proposals(&mut out, &mut err, tmp.path().to_str().unwrap()),
-            0
-        );
-
-        // Verify source files unchanged.
-        let graph_after =
-            std::fs::read_to_string(tmp.path().join(".scryrs/graph.json")).expect("read graph");
-        let hotspots_after = std::fs::read_to_string(tmp.path().join(".scryrs/hotspots.json"))
-            .expect("read hotspots");
-
-        assert_eq!(
-            graph_original, graph_after,
-            ".scryrs/graph.json must not be modified"
-        );
-        assert_eq!(
-            hotspots_original, hotspots_after,
-            ".scryrs/hotspots.json must not be modified"
+        // Verify: no protected path is mutated, and all writes are confined.
+        verify_proposal_writes_confined(
+            tmp.path(),
+            &[
+                ".scryrs/graph.json",
+                ".scryrs/routes.json",
+                ".devagent/docs/",
+            ],
         );
     }
 
@@ -593,6 +714,4 @@ mod tests {
         }
         assert!(found, "semantic_graph_grouping proposal must exist");
     }
-
-
 }
