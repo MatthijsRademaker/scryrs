@@ -3,6 +3,7 @@ use std::io::{self, Read, Write};
 use clap::{Arg, ArgAction, Command};
 
 use crate::dashboard::{execute_dashboard, write_dashboard_help};
+use crate::graph::write_graph_json;
 use crate::help_json::write_cli_surface;
 use crate::help_text::write_help;
 use crate::hook::execute_hook;
@@ -68,6 +69,7 @@ where
             && first != "init"
             && first != "dashboard"
             && first != "server"
+            && first != "graph"
             && first != "--help"
             && first != "-h"
             && first != "--version"
@@ -90,7 +92,8 @@ where
             || args[0] == "hook"
             || args[0] == "init"
             || args[0] == "dashboard"
-            || args[0] == "server")
+            || args[0] == "server"
+            || args[0] == "graph")
     {
         Some(args[0].as_str())
     } else {
@@ -173,6 +176,46 @@ where
                         .required(true)
                         .action(ArgAction::Set)
                         .help("Agent harness name (claude-code or pi)"),
+                )
+                .arg(
+                    Arg::new("mode")
+                        .long("mode")
+                        .value_name("MODE")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Install mode: local (default) or live"),
+                )
+                .arg(
+                    Arg::new("ingest-url")
+                        .long("ingest-url")
+                        .value_name("URL")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Live-mode remote ingest URL (required with --mode live)"),
+                )
+                .arg(
+                    Arg::new("workspace-id")
+                        .long("workspace-id")
+                        .value_name("ID")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Live-mode workspace identity (required with --mode live)"),
+                )
+                .arg(
+                    Arg::new("agent-id")
+                        .long("agent-id")
+                        .value_name("ID")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Live-mode agent identity (required with --mode live)"),
+                )
+                .arg(
+                    Arg::new("repository-id")
+                        .long("repository-id")
+                        .value_name("ID")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Live-mode repository identity (derived from Git remote origin if omitted)"),
                 ),
         )
         .subcommand(
@@ -244,6 +287,13 @@ where
                         .action(ArgAction::Set)
                         .help("Server-owned SQLite store path (default .scryrs/server.db)"),
                 ),
+        )
+        .subcommand(
+            Command::new("graph")
+                .about("Build the repository knowledge graph")
+                .disable_help_flag(true)
+                .disable_version_flag(true)
+                .arg(Arg::new("PATH").required(true).value_name("PATH")),
         );
 
     match cmd.try_get_matches_from(&args) {
@@ -279,11 +329,48 @@ where
                             2
                         }
                     } else {
-                        init::execute_init(&mut out, &mut err, agent)
+                        let mode_str = m.get_one::<String>("mode").map(|s| s.as_str()).unwrap_or("local");
+                        if mode_str != "local" && mode_str != "live" {
+                            if writeln!(err, "scryrs init: --mode must be local or live").is_err()
+                                || writeln!(err, "Usage: scryrs init --agent <NAME> [--mode local|live]").is_err()
+                                || writeln!(err, "See `scryrs --help`").is_err()
+                            {
+                                1
+                            } else {
+                                2
+                            }
+                        } else {
+                            let mode = if mode_str == "live" {
+                                init::InitMode::Live
+                            } else {
+                                init::InitMode::Local
+                            };
+                            let ingest_url = m.get_one::<String>("ingest-url").map(|s| s.as_str()).unwrap_or("");
+                            let workspace_id = m.get_one::<String>("workspace-id").map(|s| s.as_str()).unwrap_or("");
+                            let agent_id = m.get_one::<String>("agent-id").map(|s| s.as_str()).unwrap_or("");
+                            let repository_id = m.get_one::<String>("repository-id").map(|s| s.as_str());
+                            init::execute_init(
+                                &mut out,
+                                &mut err,
+                                agent,
+                                mode,
+                                ingest_url,
+                                workspace_id,
+                                agent_id,
+                                repository_id,
+                            )
+                        }
                     }
                 }
                 Some(("dashboard", m)) => execute_dashboard(&mut err, m),
                 Some(("server", m)) => execute_server(&mut err, m),
+                Some(("graph", m)) => {
+                    let path = m
+                        .get_one::<String>("PATH")
+                        .map(|s| s.as_str())
+                        .unwrap_or(".");
+                    write_graph_json(&mut out, &mut err, path)
+                }
                 // Bare invocation (no subcommand matched).
                 _ => write_help(&mut out).map_or(1, |_| 0),
             }
@@ -339,6 +426,16 @@ where
                         2
                     }
                 }
+                Some("graph") => {
+                    if writeln!(err, "scryrs graph: missing required PATH argument").is_err()
+                        || writeln!(err, "Usage: scryrs graph <PATH>").is_err()
+                        || writeln!(err, "See `scryrs --help`").is_err()
+                    {
+                        1
+                    } else {
+                        2
+                    }
+                }
                 _ => {
                     if writeln!(err, "scryrs hotspots: missing required PATH argument").is_err()
                         || writeln!(err, "Usage: scryrs hotspots <PATH>").is_err()
@@ -387,6 +484,16 @@ where
                         if writeln!(err, "scryrs record: unexpected argument").is_err()
                             || writeln!(err, "Usage: scryrs record --stdin").is_err()
                             || writeln!(err, "Usage: scryrs record --file <PATH>").is_err()
+                            || writeln!(err, "See `scryrs --help`").is_err()
+                        {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                    Some("graph") => {
+                        if writeln!(err, "scryrs graph: unexpected argument").is_err()
+                            || writeln!(err, "Usage: scryrs graph <PATH>").is_err()
                             || writeln!(err, "See `scryrs --help`").is_err()
                         {
                             1

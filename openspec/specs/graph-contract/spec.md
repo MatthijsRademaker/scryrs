@@ -142,10 +142,10 @@ Graph documents SHALL serialize deterministically for the same logical input. Th
 - **THEN** the graph is rejected as invalid
 - **AND** the invalid edge is not silently preserved as successful output
 
-#### Scenario: Contract foundation adds no graph build surface
+#### Scenario: Graph crate remains build-pipeline-free; build command is a separate CLI consumer
 
-- **WHEN** this change is implemented
-- **THEN** no `scryrs graph build` command is introduced
-- **AND** no route-manifest generator is introduced
-- **AND** no docs crawler, server endpoint, or runtime retrieval behavior is introduced
+- **WHEN** the graph build capability is introduced
+- **THEN** the `crates/scryrs-graph` crate does not implement graph build, CLI commands, route-manifest generation, docs crawling, or input I/O
+- **AND** the CLI command `scryrs graph build` lives in `crates/scryrs-cli` as a separate consumer that assembles and materializes graph documents through `KnowledgeGraph::add_node()`, `KnowledgeGraph::add_edge()`, and `KnowledgeGraph::to_document()`
+- **AND** the graph crate's public API remains a pure container/contract interface
 

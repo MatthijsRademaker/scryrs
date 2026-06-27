@@ -167,6 +167,8 @@ Required deliverables:
 
 This phase is where scryrs stops being only a recorder and starts becoming routing infrastructure.
 
+**Partial delivery (2026-06-27):** The `scryrs graph <PATH>` command is shipped. It builds graph nodes from all five hotspot subject kinds and docs navigation hierarchy, producing structural `contains` edges and a deterministic `KnowledgeGraphDocument` to stdout and `.scryrs/graph.json`. Full cross-domain edge derivation and route-manifest generation remain future work within Phase 5.
+
 ## Phase 6 - Proposal Engine
 
 This phase turns evidence into reviewable change suggestions.
@@ -268,3 +270,5 @@ If roadmap starts to sprawl, cut work using these rules:
 - [Vision & Goals](./vision.md) - product destination, principles, and anti-goals.
 - [Architecture](./architecture.md) - current crate topology and runtime flow.
 - [CLI v0 Contract](./cli-v0-contract.md) - current public CLI contract before roadmap phases land.
+- [Graph](./graph.md) — domain-oriented explanation of the knowledge graph and how evidence becomes routing context
+- [Live Hotspots](./live-hotspots.md) — domain narrative and usage guidance for Phase 4 live server features

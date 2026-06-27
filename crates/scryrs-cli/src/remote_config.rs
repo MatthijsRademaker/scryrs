@@ -80,10 +80,16 @@ fn env_key(field: &str) -> &'static str {
 /// reading its optional `remote` section, applying environment overrides, and
 /// determining transport mode.
 ///
+/// When `base_path` is provided, ancestor discovery starts from that directory
+/// (used by hook-triggered resolution rooted at the event cwd). When `None`,
+/// ancestor discovery starts from `std::env::current_dir()` (record path).
+///
 /// Returns `Ok(None)` when no ingest URL resolves (local mode).
 /// Returns `Err(RemoteConfigError)` when remote mode is active but missing required identity.
-pub(crate) fn resolve_remote_config() -> Result<Option<ResolvedRemote>, RemoteConfigError> {
-    let manifest_remote = discover_manifest_remote();
+pub(crate) fn resolve_remote_config(
+    base_path: Option<&Path>,
+) -> Result<Option<ResolvedRemote>, RemoteConfigError> {
+    let manifest_remote = discover_manifest_remote(base_path);
 
     // Apply env overrides on top of manifest defaults.
     let ingest_url = env_or(ENV_INGEST_URL, manifest_remote.ingest_url.clone());
@@ -148,10 +154,11 @@ struct ManifestRemote {
     timeout_ms: Option<u64>,
 }
 
-/// Walk ancestor directories from CWD and read the first `scryrs.json` found.
-/// Return its `remote` section defaults, or empty defaults if none found.
-fn discover_manifest_remote() -> ManifestRemote {
-    let manifest_path = match find_nearest_ancestor("scryrs.json") {
+/// Walk ancestor directories from `base_path` (or CWD if None) and read the
+/// first `scryrs.json` found. Return its `remote` section defaults, or empty
+/// defaults if none found.
+fn discover_manifest_remote(base_path: Option<&Path>) -> ManifestRemote {
+    let manifest_path = match find_nearest_ancestor("scryrs.json", base_path) {
         Some(p) => p,
         None => return ManifestRemote::default(),
     };
@@ -196,11 +203,15 @@ fn discover_manifest_remote() -> ManifestRemote {
     }
 }
 
-/// Walk ancestor directories starting from the current working directory,
+/// Walk ancestor directories starting from `base_path` (or CWD if `None`),
 /// return the first path where `filename` exists.
-fn find_nearest_ancestor(filename: &str) -> Option<PathBuf> {
-    let cwd = std::env::current_dir().ok()?;
-    let mut dir: Option<&Path> = Some(&cwd);
+fn find_nearest_ancestor(filename: &str, base_path: Option<&Path>) -> Option<PathBuf> {
+    let start = match base_path {
+        Some(p) if p.is_absolute() => p.to_path_buf(),
+        Some(p) => std::env::current_dir().ok()?.join(p),
+        None => std::env::current_dir().ok()?,
+    };
+    let mut dir: Option<&Path> = Some(&start);
 
     while let Some(current) = dir {
         let candidate = current.join(filename);

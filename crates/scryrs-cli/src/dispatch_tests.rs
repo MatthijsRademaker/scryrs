@@ -314,7 +314,6 @@ fn previously_stubbed_commands_exit_2() {
     for cmd in &[
         "trace",
         "propose",
-        "graph",
         "route",
         "adapters",
         "report",
@@ -503,4 +502,256 @@ fn server_with_unknown_flag_exits_2() {
         !err_str.contains("unknown command"),
         "must not say 'unknown command'"
     );
+}
+
+// --- Graph command tests ---
+
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[test]
+fn graph_without_path_exits_2_with_error() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(run_with_writers(["graph"], &mut out, &mut err), 2);
+    assert!(out.is_empty());
+    let err_str = String::from_utf8_lossy(&err);
+    assert!(err_str.contains("scryrs graph:"));
+    assert!(err_str.contains("missing required PATH argument"));
+    assert!(err_str.contains("Usage: scryrs graph <PATH>"));
+    assert!(err_str.contains("See `scryrs --help`"));
+}
+
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[test]
+fn graph_with_missing_hotspots_exits_2() {
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(["graph", tmp.path().to_str().unwrap()], &mut out, &mut err,),
+        2
+    );
+    assert!(out.is_empty());
+    let err_str = String::from_utf8_lossy(&err);
+    assert!(
+        err_str.contains("hotspots artifact not found"),
+        "must report missing hotspots, got: {err_str}"
+    );
+}
+
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[test]
+fn graph_with_malformed_hotspots_exits_2() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let scryrs_dir = tmp.path().join(".scryrs");
+    fs::create_dir(&scryrs_dir).expect("create .scryrs");
+    fs::write(scryrs_dir.join("hotspots.json"), "not json").expect("write hotspots");
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(["graph", tmp.path().to_str().unwrap()], &mut out, &mut err,),
+        2
+    );
+    assert!(out.is_empty());
+    let err_str = String::from_utf8_lossy(&err);
+    assert!(
+        err_str.contains("malformed hotspots file"),
+        "must report malformed hotspots, got: {err_str}"
+    );
+}
+
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[test]
+fn graph_with_valid_hotspot_and_docs_exits_0() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let scryrs_dir = tmp.path().join(".scryrs");
+    fs::create_dir(&scryrs_dir).expect("create .scryrs");
+
+    // Write a minimal valid hotspots.json.
+    let hotspots = serde_json::json!({
+        "entries": []
+    });
+    fs::write(
+        scryrs_dir.join("hotspots.json"),
+        serde_json::to_string(&hotspots).expect("serialize"),
+    )
+    .expect("write hotspots");
+
+    // Create docs dir with _nav.json and a page.
+    let docs_dir = tmp.path().join(".devagent/docs/docs");
+    fs::create_dir_all(&docs_dir).expect("create docs dir");
+    fs::write(docs_dir.join("graph.md"), "# Graph").expect("write page");
+    let nav = serde_json::json!([
+        {
+            "text": "Technical",
+            "items": [
+                { "text": "Graph", "link": "/graph" }
+            ]
+        }
+    ]);
+    fs::write(
+        docs_dir.join("_nav.json"),
+        serde_json::to_string(&nav).expect("serialize"),
+    )
+    .expect("write _nav.json");
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(["graph", tmp.path().to_str().unwrap()], &mut out, &mut err,),
+        0
+    );
+
+    // stdout must be valid JSON matching KnowledgeGraphDocument shape.
+    let stdout = String::from_utf8_lossy(&out);
+    let doc: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
+    assert!(doc.get("schemaVersion").is_some());
+    assert!(doc.get("metadata").is_some());
+    assert!(doc.get("nodes").is_some());
+    assert!(doc.get("edges").is_some());
+
+    // Artifact was written.
+    assert!(tmp.path().join(".scryrs/graph.json").exists());
+}
+
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[test]
+fn graph_repeated_runs_produce_byte_identical_output() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let scryrs_dir = tmp.path().join(".scryrs");
+    fs::create_dir(&scryrs_dir).expect("create .scryrs");
+
+    let hotspots = serde_json::json!({
+        "entries": [
+            {
+                "rank": 1,
+                "subjectKind": "file",
+                "subject": "src/main.rs",
+                "score": 10,
+                "counts": { "eventType": {}, "outcome": {} },
+                "sessionCount": 1,
+                "firstSeen": "2026-01-01T00:00:00Z",
+                "lastSeen": "2026-01-01T00:00:00Z",
+                "evidence": { "rowIds": [1, 2] }
+            }
+        ]
+    });
+    fs::write(
+        scryrs_dir.join("hotspots.json"),
+        serde_json::to_string(&hotspots).expect("serialize"),
+    )
+    .expect("write hotspots");
+
+    let docs_dir = tmp.path().join(".devagent/docs/docs");
+    fs::create_dir_all(&docs_dir).expect("create docs dir");
+    fs::write(docs_dir.join("graph.md"), "# Graph").expect("write page");
+    let nav = serde_json::json!([
+        {
+            "text": "Technical",
+            "items": [
+                { "text": "Graph", "link": "/graph" }
+            ]
+        }
+    ]);
+    fs::write(
+        docs_dir.join("_nav.json"),
+        serde_json::to_string(&nav).expect("serialize"),
+    )
+    .expect("write _nav.json");
+
+    let mut out1 = Vec::new();
+    let mut err1 = Vec::new();
+    assert_eq!(
+        run_with_writers(
+            ["graph", tmp.path().to_str().unwrap()],
+            &mut out1,
+            &mut err1,
+        ),
+        0
+    );
+
+    let mut out2 = Vec::new();
+    let mut err2 = Vec::new();
+    assert_eq!(
+        run_with_writers(
+            ["graph", tmp.path().to_str().unwrap()],
+            &mut out2,
+            &mut err2,
+        ),
+        0
+    );
+
+    assert_eq!(
+        out1, out2,
+        "repeated runs must produce byte-identical stdout"
+    );
+}
+
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[test]
+fn graph_with_empty_docs_exits_0_with_warning() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let scryrs_dir = tmp.path().join(".scryrs");
+    fs::create_dir(&scryrs_dir).expect("create .scryrs");
+
+    let hotspots = serde_json::json!({
+        "entries": [
+            {
+                "rank": 1,
+                "subjectKind": "file",
+                "subject": "src/main.rs",
+                "score": 10,
+                "counts": { "eventType": {}, "outcome": {} },
+                "sessionCount": 1,
+                "firstSeen": "2026-01-01T00:00:00Z",
+                "lastSeen": "2026-01-01T00:00:00Z",
+                "evidence": { "rowIds": [1] }
+            }
+        ]
+    });
+    fs::write(
+        scryrs_dir.join("hotspots.json"),
+        serde_json::to_string(&hotspots).expect("serialize"),
+    )
+    .expect("write hotspots");
+
+    // No docs directory at all.
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(["graph", tmp.path().to_str().unwrap()], &mut out, &mut err,),
+        0
+    );
+
+    let stderr = String::from_utf8_lossy(&err);
+    assert!(
+        stderr.contains("docs directory not found"),
+        "must warn about missing docs, got: {stderr}"
+    );
+
+    // stdout must still be valid graph JSON with hotspot-only nodes.
+    let stdout = String::from_utf8_lossy(&out);
+    let doc: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
+    assert!(doc.get("nodes").is_some());
 }

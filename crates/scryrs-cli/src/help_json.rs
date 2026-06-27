@@ -115,6 +115,38 @@ pub(crate) fn cli_surface_doc() -> String {
                         "type": "string",
                         "required": true,
                         "description": "Agent harness name (claude-code or pi)"
+                    },
+                    {
+                        "name": "mode",
+                        "flag": "--mode",
+                        "type": "string",
+                        "values": ["local", "live"],
+                        "default": "local",
+                        "description": "Install mode: local for SQLite trace store, live for remote ingest via scryrs server"
+                    },
+                    {
+                        "name": "ingest-url",
+                        "flag": "--ingest-url",
+                        "type": "string",
+                        "description": "Live-mode remote ingest URL (required with --mode live)"
+                    },
+                    {
+                        "name": "workspace-id",
+                        "flag": "--workspace-id",
+                        "type": "string",
+                        "description": "Live-mode workspace identity (required with --mode live)"
+                    },
+                    {
+                        "name": "agent-id",
+                        "flag": "--agent-id",
+                        "type": "string",
+                        "description": "Live-mode agent identity (required with --mode live)"
+                    },
+                    {
+                        "name": "repository-id",
+                        "flag": "--repository-id",
+                        "type": "string",
+                        "description": "Live-mode repository identity (derived from Git remote origin if omitted)"
                     }
                 ],
                 "output": {
@@ -153,6 +185,22 @@ pub(crate) fn cli_surface_doc() -> String {
                     "mimeType": "application/json",
                     "description": "BatchIngestResponse returned by POST /v1/trace-events/batch. LiveHotspotsResponse returned by GET .../hotspots. text/event-stream returned by GET .../signals."
                 }
+            },
+            {
+                "name": "graph",
+                "description": "Build a repository knowledge graph from hotspot evidence and docs structure",
+                "arguments": [
+                    {
+                        "name": "PATH",
+                        "type": "string",
+                        "required": true,
+                        "description": "Path to the repository root directory"
+                    }
+                ],
+                "output": {
+                    "mimeType": "application/json",
+                    "description": "Single-line KnowledgeGraphDocument JSON written to stdout. Also persisted to .scryrs/graph.json."
+                }
             }
         ],
         "globalFlags": [
@@ -164,7 +212,7 @@ pub(crate) fn cli_surface_doc() -> String {
         "exitCodes": {
             "0": "Success (hotspots: JSON written, including empty entries; record local: all events accepted; record remote: no rejections or failures; init: hook installed; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)",
             "1": "Hotspots: storage error. Record: one or more events rejected (local or server), or I/O error writing output. Init: I/O error. Dashboard: port in use or artifact read error. Server: port in use or store error.",
-            "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, or self-install refusal; dashboard: invalid flags; server: invalid flags or bind failure."
+            "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, self-install refusal, invalid mode, or missing/invalid live-mode configuration; dashboard: invalid flags; server: invalid flags or bind failure."
         }
     });
     serde_json::to_string(&doc).unwrap_or_else(|_| "{}".into())

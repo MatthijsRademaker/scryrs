@@ -38,6 +38,7 @@ telemetry = ["dep:scryrs-telemetry"]
 
 [dependencies]
 clap = { workspace = true }
+serde.workspace = true
 serde_json.workspace = true
 scryrs-adapter-harness.workspace = true
 scryrs-adapter-markdown = { workspace = true, optional = true }

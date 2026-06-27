@@ -1,6 +1,17 @@
-# CLI v0 Contract
+# CLI Reference
 
-The v0 CLI surface for `scryrs` provides five implemented commands: `hotspots`, `record`, `init`, `dashboard`, and `server`. This contract serves agent integrators and follow-up feature developers.
+scryrs CLI helps teams observe agent coding activity, detect knowledge hotspots, inspect them locally, and optionally centralize ingest for live monitoring. It solves the problem of invisible, repeated agent effort: when AI coding assistants spend session after session rediscovering the same files, searching the same terms, and failing the same lookups, scryrs surfaces those patterns so you can document, investigate, or fix the underlying issues.
+
+scryrs supports two main workflow paths:
+
+- **Local observe → detect loop:** Run `scryrs hook` or `scryrs record` to capture trace events locally, then `scryrs hotspots` to score them, and `scryrs dashboard` to visually browse ranked hotspots, sessions, and events — all from `.scryrs/` in your project root.
+- **Central live-ingest flow:** Configure a remote ingest URL (via `scryrs.json` or `SCRYRS_REMOTE_*` env vars), then `scryrs record` or `scryrs hook` submits events to a `scryrs server` running centrally. The server provides live hotspot rankings and an SSE signal stream for real-time monitoring across multiple agent instances.
+
+For hotspot interpretation and scoring rationale, see [Hotspots](./hotspots.md). For harness integration rules and fail-open guarantees, see [Trace Hook Contract](./trace-hook-contract.md).
+
+---
+
+The v0 CLI surface provides six implemented commands: `hotspots`, `record`, `hook`, `init`, `dashboard`, and `server`. This document serves agent integrators and follow-up feature developers.
 
 ## Binary
 
@@ -12,6 +23,10 @@ The v0 CLI surface for `scryrs` provides five implemented commands: `hotspots`, 
 
 Ingest JSONL trace events from stdin or a file. `--stdin` and `--file` are mutually exclusive; providing both or neither exits 2.
 
+`record` supports two transport modes: local (default) and remote (when explicitly configured). The mode is selected before ingestion begins.
+
+#### Local mode (default)
+
 | Field | Value |
 |-------|-------|
 | Input | `--stdin` reads newline-delimited `TraceEvent` JSON from stdin; `--file <PATH>` reads from a JSONL file |
@@ -20,7 +35,7 @@ Ingest JSONL trace events from stdin or a file. `--stdin` and `--file` are mutua
 | Exit 1 | Ingestion completed but one or more non-empty lines were rejected; or I/O error writing output |
 | Exit 2 | Fatal usage error (invalid mode, unreadable file, store failure) |
 
-**Stdout summary envelope:**
+**Local stdout summary envelope:**
 
 ```json
 {"command":"record","schemaVersion":"0.1.0","accepted":5,"rejected":2}
@@ -43,6 +58,74 @@ Ingest JSONL trace events from stdin or a file. `--stdin` and `--file` are mutua
 **Ingestion behavior:** Blank or whitespace-only lines are skipped without incrementing accepted or rejected counts. Malformed JSON and schema-invalid `TraceEvent` lines are rejected with diagnostics, and ingestion continues with later lines.
 
 **Persistence:** Accepted events are persisted to `.scryrs/scryrs.db` (the canonical SQLite trace datastore) in the current working directory. This store is append-only and ingestion-only; no query, delete, or analysis APIs are provided. `.scryrs/events.jsonl` is the ingestion input format and is NOT used as the canonical persistence store.
+
+#### Remote mode
+
+Remote mode activates when a non-empty ingest URL is configured — via `SCRYRS_REMOTE_INGEST_URL` environment variable or the `remote.ingest_url` field in a `scryrs.json` manifest discovered in an ancestor directory.
+
+**Config precedence (highest to lowest):**
+
+1. Environment variables (`SCRYRS_REMOTE_INGEST_URL`, `SCRYRS_REPOSITORY_ID`, `SCRYRS_WORKSPACE_ID`, `SCRYRS_AGENT_ID`, `SCRYRS_REMOTE_TIMEOUT_MS`)
+2. `scryrs.json` `remote` section (nearest ancestor)
+3. Git remote origin URL (`repository_id` fallback only)
+
+**Required identity fields for remote mode:** `repository_id`, `workspace_id`, `agent_id`. Missing any of these when an ingest URL is configured exits 2 with a diagnostic.
+
+**Remote semantics:**
+
+- **No dual-write, no local fallback.** Remote mode skips `.scryrs/scryrs.db` entirely — events are submitted to the server and are NOT written locally.
+- **No retry spool.** Failed submissions return diagnostics but are not queued for retry.
+- **Default timeout:** 3000 ms, overridable via `SCRYRS_REMOTE_TIMEOUT_MS`.
+
+**Remote stdout summary envelope:**
+
+```json
+{"command":"record","schemaVersion":"0.1.0","transport":"remote","accepted":5,"duplicate":2,"rejected":1,"failed":0}
+```
+
+- `transport` is always `"remote"` when remote mode is active.
+- `accepted`: count of events the server accepted (first-writer-wins).
+- `duplicate`: count of idempotent (previously stored) events — non-fatal, exit 0 still applies when all non-duplicate events are accepted.
+- `rejected`: count of events rejected (local validation failures).
+- `failed`: count of server-rejected items (server responded with rejections).
+
+**Remote exit codes:**
+
+- 0: All events accepted (duplicates non-fatal).
+- 1: One or more rejections or I/O error.
+- 2: Missing remote identity, transport timeout, connection failure, non-2xx response, or malformed response.
+
+For the server-side ingest API, see the [server command section](#scryrs-server---bind-addr---port-port---store-path) below.
+
+### `scryrs hook <HARNESS> [--stdin | --file <PATH>]`
+
+Translate a harness's native tool event into a canonical `TraceEvent` and persist it (locally or remotely). This is the harness-facing integration entry point.
+
+**Fail-open contract:** `scryrs hook` **always exits 0 with empty stdout** and never blocks the harness. Any error — malformed input, unknown harness, translation failure, store error, remote submission failure — produces a timestamped warning line in `.scryrs/hooks/<harness>-warnings.log` (relative to the event's `cwd`) and exits 0. This is the inverse of `record`'s 1/2 exit policy.
+
+**Supported harnesses:**
+
+| Harness | Transport | Input | Details |
+|---------|-----------|-------|---------|
+| `claude-code` | Native command hook (no JavaScript) | stdin (`PreToolUse` event JSON) | Claude Code spawns `scryrs hook claude-code` as a subprocess and pipes the event on stdin |
+| `pi` | Thin in-process extension delegating to CLI | `--file <PATH>` (raw event JSON) | Pi loads a transport shim module; the shim forwards events to `scryrs hook pi --file <tmp>` |
+
+Transport asymmetry is intentional: Claude Code uses stdin because its `command` hooks spawn subprocesses with piped input; Pi uses `--file` because its `exec()` opens stdin as `/dev/null`.
+
+**Warning log channel:** Errors are appended to `.scryrs/hooks/<harness>-warnings.log` (timestamped ISO 8601 lines). Warnings are never written to stdout or stderr — the agent-visible tool output is unchanged.
+
+**Input modes (mutually exclusive, but mismatch is non-fatal — surfaces as a warning):**
+
+| Mode | Flag | Description |
+|------|------|-------------|
+| stdin (default) | `--stdin` | Read the harness event from stdin |
+| file | `--file <PATH>` | Read the harness event from PATH |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Always — fail-open, never blocks the harness |
 
 ### `scryrs hotspots <PATH>`
 
@@ -121,6 +204,29 @@ Analyzes persisted trace events in `.scryrs/scryrs.db` and emits a deterministic
 | `FailedLookup` | 4 (+2 failure bonus) |
 
 Per-subject score = sum of event weights multiplied by per-type counts. `FailedLookup` events add a fixed `FAILURE_BONUS` of 2 per occurrence in addition to the weight.
+
+### `scryrs init --agent <NAME>`
+
+Install the scryrs trace hook for a supported agent harness into the current working directory.
+
+| Field | Value |
+|-------|-------|
+| Input | Required `--agent <NAME>` argument. Supported harnesses: `claude-code`, `pi`. |
+| Output | Deterministic next-step instructions on stdout (plain text). Error diagnostics on stderr. |
+| Exit 0 | Hook installed successfully |
+| Exit 1 | I/O error (cannot create directory or write file) |
+| Exit 2 | Usage error (unsupported harness, target file collision, self-install refusal, missing or empty `--agent`) |
+
+**Installation targets:**
+
+- `claude-code`: Create-or-merges `.claude/settings.json` (relative to CWD) with the native command hook `{"type":"command","command":"scryrs hook claude-code"}` under `PreToolUse`. No hook file is written.
+- `pi`: Writes `.pi/extensions/pi-trace/index.ts` (the transport shim) relative to CWD.
+
+**Runtime store scaffolding:** Before installing the hook, `init` eagerly scaffolds the `.scryrs/` runtime directory (relative to the resolved target base): a schema-initialized `.scryrs/scryrs.db` and a `.scryrs/.gitignore` that excludes runtime trace data from version control. This makes setup visible immediately and lets `scryrs hotspots` / `scryrs dashboard` succeed (returning an empty report) before any events are recorded; the hook still creates the store lazily as a fallback. Scaffolding is idempotent — an existing store is opened, never clobbered, and an existing `.gitignore` is preserved. It runs only after the harness name is validated, so an unsupported harness leaves the filesystem untouched.
+
+**Collision behavior:** For `claude-code`, the installer merges into an existing `.claude/settings.json` — preserving unrelated keys and existing hooks, idempotent on re-run (the hook appears exactly once). For `pi`, if the target file already exists the installer exits 2 with remediation instructions rather than overwriting.
+
+**Self-install guard:** The installer refuses to run inside the scryrs source repository (detected via dual-marker heuristic).
 
 ### `scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]`
 
@@ -203,12 +309,12 @@ Starts a long-lived HTTP server for central trace event ingest and live hotspot 
   "entries": [
     {
       "rank": 1,
-      "subjectKind": "File",
+      "subjectKind": "file",
       "subject": "src/a.rs",
       "score": 42,
       "counts": {
         "eventType": { "FileOpened": 5, "EditMade": 3 },
-        "outcome": { "Success": 8 }
+        "outcome": { "success": 8 }
       },
       "sessionCount": 3,
       "firstSeen": "2026-06-24T10:00:00Z",
@@ -232,7 +338,7 @@ Starts a long-lived HTTP server for central trace event ingest and live hotspot 
 ```json
 {
   "repositoryId": "repo-a",
-  "subjectKind": "File",
+  "subjectKind": "file",
   "subject": "src/a.rs",
   "score": 42,
   "delta": 1,
@@ -254,21 +360,23 @@ Starts a local HTTP server and serves an embedded Vue.js SPA dashboard for visua
 
 | Field | Value |
 |-------|-------|
-| Input | No required arguments. Optional flags: `--port` (default `8080`), `--bind` (default `127.0.0.1`), `--no-open` (suppress browser open), `--dev` (serve from filesystem instead of embedded assets) |
-| Output | HTTP server with REST API at `GET /api/hotspots`, `GET /api/sessions`, `GET /api/events`. SPA served at `GET /` and `GET /assets/*`. Non-API, non-asset paths fall through to `index.html` for Vue Router push-state. |
+| Input | No required arguments. Optional flags: `--port` (default `8080`), `-p <PORT>`, `--bind` (default `127.0.0.1`), `-b <ADDR>`, `--no-open` (flag, no value), `--dev` (flag, no value) |
+| Output | HTTP server with REST API at `GET /api/hotspots`, `GET /api/sessions`, `GET /api/sessions/:sessionId`, `GET /api/events`, `GET /api/meta`. SPA served at `GET /` and `GET /assets/*`. Non-API, non-asset paths fall through to `index.html` for Vue Router push-state. |
 | Exit 0 | Server shut down cleanly (SIGINT/SIGTERM) |
 | Exit 1 | Port already in use or server startup I/O failure |
 | Exit 2 | Usage error (invalid `--port` or `--bind`) |
 
-**Startup behavior:** Prints "Dashboard available at <http://127.0.0.1:8080>" to stderr (adjusting for `--port` and `--bind` flags). Opens the default browser unless `--no-open` is set. In `--dev` mode, appends "(dev mode)" to the startup message and serves from the filesystem `frontend/dist/` directory.
+**Startup behavior:** Prints "Dashboard available at <http://127.0.0.1:8080>" to stderr (adjusting for `--port` and `--bind` flags). Opens the default browser unless `--no-open` is set. In `--dev` mode, appends "(dev mode)" to the startup message and serves from the filesystem `crates/scryrs-dashboard/frontend/dist/` directory.
 
 **REST API contract:**
 
 | Endpoint | Method | Response |
 |----------|--------|----------|
-| `/api/hotspots` | GET | `200 OK` with `.scryrs/hotspots.json` content as JSON. `404 Not Found` if no hotspot report exists. |
-| `/api/sessions` | GET | `200 OK` with JSON array of session objects (`sessionId`, `startedAt`, `endedAt`, `eventCount`, `source`), ordered by `startedAt DESC`, default limit 50. `404 Not Found` if no `.scryrs/scryrs.db`. `502 Bad Gateway` if store is corrupt. |
-| `/api/events` | GET | `200 OK` with JSON object `{ events: [...], nextCursor: string|null }`, cursor-based pagination via`?limit=N&cursor=<token>`. Each event has`eventId`,`eventType`,`timestamp`,`subjectKind`,`subject`,`payload`.`404 Not Found` if no store. `502 Bad Gateway` if corrupt. |
+| `GET /api/meta` | GET | `200 OK` with `{ "repositoryPath": "<absolute path>" }`. Available while the dashboard is running. |
+| `GET /api/hotspots` | GET | `200 OK` with `.scryrs/hotspots.json` content as JSON. `404 Not Found` if no hotspot report exists. |
+| `GET /api/sessions` | GET | `200 OK` with JSON array of session objects (`sessionId`, `startedAt`, `endedAt`, `eventCount`, `source`), ordered by `startedAt DESC`, default limit 50. `404 Not Found` if no `.scryrs/scryrs.db`. `502 Bad Gateway` if store is corrupt. |
+| `GET /api/sessions/:sessionId` | GET | `200 OK` with `{ "session": { ... }, "events": [ ... ] }` — full session detail including all events. `404 Not Found` if session does not exist. `502 Bad Gateway` if store is corrupt. |
+| `GET /api/events` | GET | `200 OK` with JSON object `{ events: [...], nextCursor: string|null }`, cursor-based pagination via`?limit=N&cursor=<token>&session_id=<id>`. Each event has`eventId`,`sessionId`,`eventType`,`timestamp`,`subjectKind`,`subject`,`payload`.`404 Not Found` if no store. `502 Bad Gateway` if corrupt. |
 
 **SPA contract:** The SPA is a Vue 3 application built with Vite, Bun, Tailwind CSS v4, and shadcn-vue, then embedded in the binary via `rust-embed`. Views: `/` (hotspot table, landing page), `/subjects/:subjectKind/:subject` (subject detail), `/sessions` (session list), `/sessions/:sessionId` (session detail), `/events` (event distribution visualization), `/about` (version info). Unknown routes display a 404 page with a link back to the landing page.
 
@@ -320,9 +428,9 @@ Agents should check `surfaceVersion` before parsing to detect format changes. Th
 
 | Code | Meaning |
 |------|---------|
-| 0 | Hotspots: report written successfully (may have zero entries). Record: all processed non-empty lines were accepted. Dashboard: server shut down cleanly. Server: server shut down cleanly. Help/version/surface display. |
-| 1 | Hotspots: I/O error writing stdout or artifact file. Record: one or more events rejected, or I/O error writing output. Dashboard: port in use or server startup I/O failure. Server: port in use, bind failure, or server I/O error. |
-| 2 | Hotspots: missing PATH, store not found, corrupt store. Dashboard: invalid flags or bind address. Server: invalid port/bind/store, or feature not compiled. Unknown commands, missing required arguments, invalid arguments, unsupported paths (usage errors). Record: fatal I/O error (unreadable file or store failure). |
+| 0 | Hotspots: report written successfully (may have zero entries). Record local: all events accepted. Record remote: all events accepted (duplicates non-fatal). Init: hook installed. Dashboard: server shut down cleanly. Server: server shut down cleanly. Hook: always — fail-open, never blocks the harness. Help/version/surface display. |
+| 1 | Hotspots: I/O error writing stdout or artifact file. Record: one or more events rejected (local or server), or I/O error writing output. Init: I/O error. Dashboard: port in use or server startup I/O failure. Server: port in use, bind failure, or server I/O error. |
+| 2 | Hotspots: missing PATH, store not found, corrupt store. Record local: fatal I/O error (unreadable file, store failure). Record remote: missing remote identity, transport timeout, connection failure, non-2xx response, malformed response. Init: unsupported harness, collision, self-install refusal, missing/empty `--agent`. Dashboard: invalid flags or bind address. Server: invalid port/bind/store, or feature not compiled. Unknown commands, missing required arguments, invalid arguments (usage errors). |
 
 All error messages and human-facing diagnostics are written to stderr.
 
@@ -365,22 +473,31 @@ All error messages and human-facing diagnostics are written to stderr.
 
 **Output:**
 
-- Stdout: One JSON summary `{"command":"record","schemaVersion":"...","accepted":N,"rejected":M}`.
+- Stdout: One JSON summary. Local mode: `{"command":"record","schemaVersion":"...","accepted":N,"rejected":M}`. Remote mode: `{"command":"record","schemaVersion":"...","transport":"remote","accepted":N,"duplicate":N,"rejected":N,"failed":N}`.
 - Stderr: One JSON rejection diagnostic per rejected non-empty line (empty on 0 accept + 0 reject or when no rejections occur).
 
 **Exit codes:**
 
-- 0: All processed non-empty lines were accepted.
-- 1: One or more rejected lines (ingestion continued).
-- 2: Usage error (both/neither mode specified, unknown flags) or fatal I/O error (unreadable file, unwritable store).
+- 0: All processed non-empty lines were accepted (local mode) or all events accepted/duplicate (remote mode).
+- 1: One or more rejected lines (ingestion continued) or I/O error.
+- 2: Usage error (both/neither mode specified, unknown flags), fatal I/O error (unreadable file, store failure), or remote mode identity/transport failures (missing remote identity, transport timeout, connection failure, non-2xx response, malformed response).
 
-**Fail-fast paths:** The following always exit 2 and write an error to stderr:
+### Hook command
 
-- Any command other than `hotspots`, `dashboard`, `record`, `init`, or `server` (including `components`, `trace`, `propose`, `graph`, `route`, `adapters`, `report`, `suggest-docs`). `scryrs dashboard` and `scryrs server` are valid implemented commands.
-- `scryrs hotspots` without a PATH argument
-- `scryrs record` with neither or both input modes (mutually exclusive)
-- `scryrs record --file` with an unreadable path
-- `scryrs hotspots <FLAG>` / `scryrs record <FLAG>` — flags after a command fall through to the positional argument parser and are rejected as invalid arguments (no per-command introspection in v0)
+**When to call:** A harness hook should call `scryrs hook <HARNESS>` to translate a native tool event and persist it through the canonical store. This is the harness-facing integration entry point — agents never call `hook` directly.
+
+**Input:**
+
+- Positional `<HARNESS>` argument (required): `claude-code` or `pi`.
+- Event data via stdin (default) or `--file <PATH>` (mutually exclusive, but mismatch is non-fatal — surfaces as a warning).
+
+**Output:** Empty stdout. Always. No exceptions.
+
+**Exit codes:**
+
+- Exit 0: Always — fail-open, never blocks the harness. Errors append to `.scryrs/hooks/<harness>-warnings.log`.
+
+**Warning log:** Timestamped error lines at `.scryrs/hooks/<harness>-warnings.log` under the event's `cwd`. Warnings cover: malformed input, unknown harness, translation failure, store errors, remote submission failures.
 
 ### Init command
 
@@ -399,24 +516,13 @@ All error messages and human-facing diagnostics are written to stderr.
 - 1: I/O error (cannot create directory or write file).
 - 2: Usage error (unsupported harness, target file collision, self-install refusal, missing `--agent`).
 
-**Installation targets:**
-
-- `claude-code`: Create-or-merges `.claude/settings.json` (relative to CWD) with the native command hook `{"type":"command","command":"scryrs hook claude-code"}` under `PreToolUse`. No hook file is written.
-- `pi`: Writes `.pi/extensions/pi-trace/index.ts` (the transport shim) relative to CWD.
-
-**Runtime store scaffolding:** Before installing the hook, `init` eagerly scaffolds the `.scryrs/` runtime directory (relative to the resolved target base): a schema-initialized `.scryrs/scryrs.db` and a `.scryrs/.gitignore` that excludes runtime trace data from version control. This makes setup visible immediately and lets `scryrs hotspots` / `scryrs dashboard` succeed (returning an empty report) before any events are recorded; the hook still creates the store lazily as a fallback. Scaffolding is idempotent — an existing store is opened, never clobbered, and an existing `.gitignore` is preserved. It runs only after the harness name is validated, so an unsupported harness leaves the filesystem untouched.
-
-**Collision behavior:** For `claude-code`, the installer merges into an existing `.claude/settings.json` — preserving unrelated keys and existing hooks, idempotent on re-run (the hook appears exactly once). For `pi`, if the target file already exists the installer exits 2 with remediation instructions rather than overwriting.
-
-**Self-install guard:** The installer refuses to run inside the scryrs source repository (detected via dual-marker heuristic).
-
 ### Server command
 
 **When to call:** An agent or CI pipeline should call `scryrs server` to start a long-lived central trace ingest server. Multiple agent containers can then POST trace event batches to `POST /v1/trace-events/batch` without writing to the same SQLite file directly.
 
 **Input:** No required positional arguments. Optional flags: `--port <PORT>` (default `8081`), `-p <PORT>`, `--bind <ADDR>` (default `127.0.0.1`), `-b <ADDR>`, `--store <PATH>` (default `.scryrs/server.db`).
 
-**Output:** HTTP server with a single POST endpoint. Startup message written to stderr (e.g., `scryrs server listening on http://127.0.0.1:8081, store .scryrs/server.db`).
+**Output:** HTTP server with a single POST endpoint and two GET endpoints. Startup message written to stderr (e.g., `scryrs server listening on http://127.0.0.1:8081, store .scryrs/server.db`).
 
 **Exit codes:**
 
@@ -428,18 +534,7 @@ All error messages and human-facing diagnostics are written to stderr.
 
 ## Out of scope for v0
 
-The following commands are **not** defined in the v0 contract and will exit 2 with a usage error if invoked:
-
-- `components`
-- `trace`
-- `propose`
-- `graph`
-- `route`
-- `adapters`
-- `report`
-- `suggest-docs`
-
-These names align with the vision document's future command vocabulary but are not part of the v0 surface.
+Any command other than the six implemented commands (`hotspots`, `record`, `hook`, `init`, `dashboard`, `server`) is unrecognized and exits 2 with a usage error.
 
 ## Local Development Testing
 
@@ -479,3 +574,10 @@ cargo insta review
 ```bash
 cargo install cargo-insta
 ```
+
+## Related Pages
+
+- [Hotspots](./hotspots.md) — domain concept and interpretation guide (this page covers the CLI output contract and exit codes)
+- [Live Hotspots](./live-hotspots.md) — domain narrative, mode comparison, and end-to-end live workflow
+- [Trace Hook Contract](./trace-hook-contract.md) — how harness hooks capture TraceEvent records for hotspot analysis
+- [Architecture](./architecture.mdx) — crate topology including scryrs-core scoring and the HotspotsReport data flow

@@ -679,7 +679,507 @@ fn init_pi_stdout_has_next_steps() {
     });
 }
 
-// --- 7.16: all existing tests remain unchanged ---
+// --- 7.17: default local behavior is unchanged ---
+
+#[test]
+fn init_default_mode_is_local_with_unchanged_behavior() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        // Default (no --mode) should produce local mode behavior.
+        assert_eq!(
+            run_with_writers(["init", "--agent", "claude-code"], &mut out, &mut err),
+            0
+        );
+        assert!(err.is_empty());
+
+        // Local mode creates .scryrs/scryrs.db
+        assert!(dir.path().join(".scryrs/scryrs.db").exists());
+        // Local mode does NOT create scryrs.json
+        assert!(!dir.path().join("scryrs.json").exists());
+
+        let stdout = String::from_utf8_lossy(&out);
+        assert!(stdout.contains("Next steps:"));
+        assert!(stdout.contains("scryrs is on your PATH"));
+        // Local mode does not mention Docker or remote ingest
+        assert!(!stdout.contains("Docker"));
+        assert!(!stdout.contains("live ingest"));
+        assert!(!stdout.contains("scryrs-server"));
+    });
+}
+
+#[test]
+fn init_explicit_local_mode_creates_db_and_not_manifest() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(
+                ["init", "--agent", "pi", "--mode", "local"],
+                &mut out,
+                &mut err
+            ),
+            0
+        );
+        assert!(err.is_empty());
+
+        assert!(dir.path().join(".scryrs/scryrs.db").exists());
+        assert!(!dir.path().join("scryrs.json").exists());
+
+        let stdout = String::from_utf8_lossy(&out);
+        assert!(!stdout.contains("Docker"));
+        assert!(!stdout.contains("live ingest"));
+    });
+}
+
+// --- 7.18: live-mode validation before writes ---
+
+#[test]
+fn init_live_missing_ingest_url_exits_2_without_writes() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(
+                [
+                    "init",
+                    "--agent",
+                    "pi",
+                    "--mode",
+                    "live",
+                    "--workspace-id",
+                    "ws1",
+                    "--agent-id",
+                    "a1"
+                ],
+                &mut out,
+                &mut err,
+            ),
+            2
+        );
+        let err_str = String::from_utf8_lossy(&err);
+        assert!(err_str.contains("--ingest-url is required for live mode"));
+        assert!(err_str.contains("live-mode configuration is incomplete"));
+
+        // No filesystem writes occurred.
+        assert!(!dir.path().join(".scryrs").exists());
+        assert!(!dir.path().join(".pi").exists());
+        assert!(!dir.path().join("scryrs.json").exists());
+    });
+}
+
+#[test]
+fn init_live_missing_workspace_id_exits_2_without_writes() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(
+                [
+                    "init",
+                    "--agent",
+                    "pi",
+                    "--mode",
+                    "live",
+                    "--ingest-url",
+                    "http://localhost:8081",
+                    "--agent-id",
+                    "a1"
+                ],
+                &mut out,
+                &mut err,
+            ),
+            2
+        );
+        let err_str = String::from_utf8_lossy(&err);
+        assert!(err_str.contains("--workspace-id is required for live mode"));
+
+        // No filesystem writes occurred.
+        assert!(!dir.path().join(".scryrs").exists());
+        assert!(!dir.path().join("scryrs.json").exists());
+    });
+}
+
+#[test]
+fn init_live_missing_agent_id_exits_2_without_writes() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(
+                [
+                    "init",
+                    "--agent",
+                    "pi",
+                    "--mode",
+                    "live",
+                    "--ingest-url",
+                    "http://localhost:8081",
+                    "--workspace-id",
+                    "ws1"
+                ],
+                &mut out,
+                &mut err,
+            ),
+            2
+        );
+        let err_str = String::from_utf8_lossy(&err);
+        assert!(err_str.contains("--agent-id is required for live mode"));
+
+        // No filesystem writes occurred.
+        assert!(!dir.path().join(".scryrs").exists());
+        assert!(!dir.path().join("scryrs.json").exists());
+    });
+}
+
+// --- 7.19: live-mode scryrs.json creation and .scryrs/ scaffolding ---
+
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn init_live_creates_scryrs_json_and_skips_scryrs_db() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    with_cwd(dir.path(), || {
+        // Set up a Git repo so repository_id can be derived.
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap_or_else(|e| panic!("git init: {e}"));
+        std::process::Command::new("git")
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/example/repo.git",
+            ])
+            .current_dir(dir.path())
+            .output()
+            .unwrap_or_else(|e| panic!("git remote: {e}"));
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(
+                [
+                    "init",
+                    "--agent",
+                    "claude-code",
+                    "--mode",
+                    "live",
+                    "--ingest-url",
+                    "http://localhost:8081",
+                    "--workspace-id",
+                    "ws1",
+                    "--agent-id",
+                    "a1",
+                ],
+                &mut out,
+                &mut err,
+            ),
+            0
+        );
+        assert!(err.is_empty(), "stderr: {}", String::from_utf8_lossy(&err));
+
+        // scryrs.json is created.
+        let manifest_path = dir.path().join("scryrs.json");
+        assert!(manifest_path.exists(), "scryrs.json must be created");
+        let manifest = std::fs::read_to_string(&manifest_path)
+            .unwrap_or_else(|e| panic!("read manifest: {e}"));
+        let parsed: serde_json::Value =
+            serde_json::from_str(&manifest).unwrap_or_else(|e| panic!("parse manifest: {e}"));
+        assert_eq!(parsed["remote"]["ingest_url"], "http://localhost:8081");
+        assert_eq!(parsed["remote"]["workspace_id"], "ws1");
+        assert_eq!(parsed["remote"]["agent_id"], "a1");
+        assert_eq!(
+            parsed["remote"]["repository_id"],
+            "https://github.com/example/repo"
+        );
+
+        // .scryrs/ is created but .scryrs/scryrs.db is NOT.
+        assert!(dir.path().join(".scryrs").exists());
+        assert!(dir.path().join(".scryrs/.gitignore").exists());
+        assert!(dir.path().join(".scryrs/hooks").exists());
+        assert!(
+            !dir.path().join(".scryrs/scryrs.db").exists(),
+            "scryrs.db must NOT be created in live mode"
+        );
+
+        let stdout = String::from_utf8_lossy(&out);
+        assert!(stdout.contains("live-mode remote ingest"));
+        assert!(stdout.contains("Docker"));
+        assert!(stdout.contains("scryrs-server"));
+    });
+}
+
+#[test]
+fn init_live_with_explicit_repository_id() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    with_cwd(dir.path(), || {
+        // No git repo — repository_id is explicit.
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(
+                [
+                    "init",
+                    "--agent",
+                    "pi",
+                    "--mode",
+                    "live",
+                    "--ingest-url",
+                    "http://localhost:8081",
+                    "--workspace-id",
+                    "ws1",
+                    "--agent-id",
+                    "a1",
+                    "--repository-id",
+                    "repo-explicit",
+                ],
+                &mut out,
+                &mut err,
+            ),
+            0
+        );
+        assert!(err.is_empty());
+
+        let manifest_path = dir.path().join("scryrs.json");
+        let manifest = std::fs::read_to_string(&manifest_path)
+            .unwrap_or_else(|e| panic!("read manifest: {e}"));
+        let parsed: serde_json::Value =
+            serde_json::from_str(&manifest).unwrap_or_else(|e| panic!("parse manifest: {e}"));
+        assert_eq!(parsed["remote"]["repository_id"], "repo-explicit");
+    });
+}
+
+#[test]
+fn init_live_merges_existing_manifest() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    // Pre-existing scryrs.json with unrelated keys.
+    std::fs::write(
+        dir.path().join("scryrs.json"),
+        r#"{"project_name": "my-project", "version": "1.0"}"#,
+    )
+    .unwrap_or_else(|e| panic!("write: {e}"));
+
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(
+                [
+                    "init",
+                    "--agent",
+                    "claude-code",
+                    "--mode",
+                    "live",
+                    "--ingest-url",
+                    "http://localhost:8081",
+                    "--workspace-id",
+                    "ws1",
+                    "--agent-id",
+                    "a1",
+                    "--repository-id",
+                    "repo1",
+                ],
+                &mut out,
+                &mut err,
+            ),
+            0
+        );
+        assert!(err.is_empty());
+
+        let manifest = std::fs::read_to_string(dir.path().join("scryrs.json"))
+            .unwrap_or_else(|e| panic!("read: {e}"));
+        let parsed: serde_json::Value =
+            serde_json::from_str(&manifest).unwrap_or_else(|e| panic!("parse: {e}"));
+
+        // Unrelated keys preserved.
+        assert_eq!(parsed["project_name"], "my-project");
+        assert_eq!(parsed["version"], "1.0");
+        // Remote section added.
+        assert_eq!(parsed["remote"]["ingest_url"], "http://localhost:8081");
+        assert_eq!(parsed["remote"]["workspace_id"], "ws1");
+        assert_eq!(parsed["remote"]["agent_id"], "a1");
+        assert_eq!(parsed["remote"]["repository_id"], "repo1");
+    });
+}
+
+// --- 7.20: live mode refused in source checkout ---
+
+#[test]
+fn init_live_refused_in_source_checkout() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    // Create a fake scryrs source checkout.
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        "[workspace]\nmembers = [\"crates/scryrs-cli\"]\n",
+    )
+    .unwrap_or_else(|e| panic!("write Cargo.toml: {e}"));
+    std::fs::create_dir_all(dir.path().join("hooks/claude-code"))
+        .unwrap_or_else(|e| panic!("create_dir: {e}"));
+
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(
+                [
+                    "init",
+                    "--agent",
+                    "claude-code",
+                    "--mode",
+                    "live",
+                    "--ingest-url",
+                    "http://localhost:8081",
+                    "--workspace-id",
+                    "ws1",
+                    "--agent-id",
+                    "a1",
+                ],
+                &mut out,
+                &mut err,
+            ),
+            2
+        );
+        let err_str = String::from_utf8_lossy(&err);
+        assert!(
+            err_str.contains("--mode live is not allowed in the scryrs source repository"),
+            "must refuse live mode in source checkout, got: {err_str}"
+        );
+        assert!(
+            err_str.contains("Live mode configures a consumer project"),
+            "must explain live mode purpose, got: {err_str}"
+        );
+
+        // No scryrs.json written.
+        assert!(!dir.path().join("scryrs.json").exists());
+    });
+}
+
+#[test]
+fn init_pi_live_refused_in_source_checkout() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    // Create a fake scryrs source checkout.
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        "[workspace]\nmembers = [\"crates/scryrs-cli\"]\n",
+    )
+    .unwrap_or_else(|e| panic!("write Cargo.toml: {e}"));
+    std::fs::create_dir_all(dir.path().join("hooks/claude-code"))
+        .unwrap_or_else(|e| panic!("create_dir: {e}"));
+
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(
+                [
+                    "init",
+                    "--agent",
+                    "pi",
+                    "--mode",
+                    "live",
+                    "--ingest-url",
+                    "http://localhost:8081",
+                    "--workspace-id",
+                    "ws1",
+                    "--agent-id",
+                    "a1",
+                ],
+                &mut out,
+                &mut err,
+            ),
+            2
+        );
+        let err_str = String::from_utf8_lossy(&err);
+        assert!(
+            err_str.contains("--mode live is not allowed in the scryrs source repository"),
+            "must refuse live mode in source checkout for pi agent, got: {err_str}"
+        );
+
+        // No scryrs.json written.
+        assert!(!dir.path().join("scryrs.json").exists());
+        // No Pi hook written.
+        assert!(!dir.path().join(".pi").exists());
+    });
+}
+
+// --- 7.21: invalid mode exits 2 ---
+
+#[test]
+fn init_invalid_mode_exits_2() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(
+                ["init", "--agent", "pi", "--mode", "invalid"],
+                &mut out,
+                &mut err
+            ),
+            2
+        );
+        let err_str = String::from_utf8_lossy(&err);
+        assert!(err_str.contains("--mode must be local or live"));
+    });
+}
+
+// --- 7.22: live-mode init writes .scryrs/hooks/ but not .scryrs/scryrs.db in Pi ---
+
+#[test]
+fn init_pi_live_creates_dirs_not_db() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(
+                [
+                    "init",
+                    "--agent",
+                    "pi",
+                    "--mode",
+                    "live",
+                    "--ingest-url",
+                    "http://localhost:8081",
+                    "--workspace-id",
+                    "ws1",
+                    "--agent-id",
+                    "a1",
+                    "--repository-id",
+                    "repo1",
+                ],
+                &mut out,
+                &mut err,
+            ),
+            0
+        );
+
+        assert!(dir.path().join(".scryrs").exists());
+        assert!(dir.path().join(".scryrs/.gitignore").exists());
+        assert!(dir.path().join(".scryrs/hooks").exists());
+        assert!(!dir.path().join(".scryrs/scryrs.db").exists());
+        assert!(dir.path().join(".pi/extensions/pi-trace/index.ts").exists());
+    });
+}
 
 #[test]
 fn init_does_not_regress_help() {

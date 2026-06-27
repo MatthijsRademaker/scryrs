@@ -235,8 +235,21 @@ fn unknown_harness_exits_0_and_persists_nothing() {
 // --- 5.3 pi via --file -----------------------------------------------------
 
 fn run_pi_file(store_dir: &std::path::Path, raw: &str) -> i32 {
+    // Inject cwd into the event so remote-config ancestor discovery stays
+    // rooted at the test's temp dir rather than the project checkout.
+    let mut event: serde_json::Value =
+        serde_json::from_str(raw).unwrap_or_else(|e| panic!("parse raw: {e}"));
+    if event.get("cwd").is_none() {
+        event["cwd"] = serde_json::Value::String(
+            store_dir
+                .to_str()
+                .unwrap_or_else(|| panic!("store_dir not UTF-8"))
+                .to_string(),
+        );
+    }
+    let payload = serde_json::to_string(&event).unwrap_or_else(|e| panic!("serialize: {e}"));
     let tmp = store_dir.join("event.json");
-    std::fs::write(&tmp, raw).unwrap_or_else(|e| panic!("write tmp: {e}"));
+    std::fs::write(&tmp, &payload).unwrap_or_else(|e| panic!("write tmp: {e}"));
     let store_path = store_dir.join(".scryrs/scryrs.db");
     crate::store_override::set(
         store_path
@@ -336,4 +349,215 @@ fn pi_session_start_persists_lifecycle_event() {
     let (tool_name, _, event_type, _) = single_row(&store_path);
     assert_eq!(event_type, "SessionStart");
     assert!(tool_name.is_none(), "lifecycle event has no tool_name");
+}
+
+// --- helpers for cwd-aware tests -------------------------------------------
+
+/// A Pi raw event that includes `cwd` (the expected forwarding from the Pi shim).
+fn pi_event_with_cwd(
+    cwd: &std::path::Path,
+    session_id: &str,
+    tool: &str,
+    input: serde_json::Value,
+) -> String {
+    serde_json::json!({
+        "session_id": session_id,
+        "cwd": cwd.to_str().unwrap_or("."),
+        "toolName": tool,
+        "input": input,
+        "isError": false,
+    })
+    .to_string()
+}
+
+// --- 6.1: hook resolves remote config from event cwd, not process cwd ---
+
+#[test]
+fn hook_remote_config_discovers_manifest_from_event_cwd() {
+    let project_dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    std::fs::write(
+        project_dir.path().join("scryrs.json"),
+        r#"{"remote": {"ingest_url": "http://localhost:19999", "workspace_id": "ws-test", "agent_id": "a-test", "repository_id": "repo-test"}}"#,
+    )
+    .unwrap_or_else(|e| panic!("write manifest: {e}"));
+
+    let other_dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    crate::test_support::with_cwd(other_dir.path(), || {
+        let payload = pi_event_with_cwd(
+            project_dir.path(),
+            "sid-1",
+            "read",
+            serde_json::json!({"path": "src/main.rs"}),
+        );
+
+        let tmp_file = other_dir.path().join("event.json");
+        std::fs::write(&tmp_file, &payload).unwrap_or_else(|e| panic!("write tmp: {e}"));
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let code = run_with_io(
+            [
+                "hook",
+                "pi",
+                "--file",
+                tmp_file
+                    .to_str()
+                    .unwrap_or_else(|| panic!("tmp path not UTF-8")),
+            ],
+            &mut out,
+            &mut err,
+            &b""[..],
+        );
+        assert_eq!(code, 0, "hook must exit 0 even when remote fails");
+        assert!(out.is_empty());
+
+        // Remote mode should be active (scryrs.json found via event cwd).
+        // No local store created in either dir because remote mode is active.
+        assert!(!project_dir.path().join(".scryrs/scryrs.db").exists());
+        assert!(!other_dir.path().join(".scryrs/scryrs.db").exists());
+
+        // Warning log rooted at the event cwd.
+        let log = read_warning_log(project_dir.path(), "pi");
+        assert!(
+            log.contains("remote ingest failed"),
+            "warning log should record remote failure, got: {log:?}"
+        );
+    });
+}
+
+// --- 6.2: Pi cwd is forwarded in raw events ---
+
+#[test]
+fn pi_event_includes_cwd_field() {
+    let raw = serde_json::json!({
+        "session_id": "pi-1",
+        "cwd": "/some/project/path",
+        "toolName": "read",
+        "input": {"path": "src/a.rs"},
+        "isError": false,
+    })
+    .to_string();
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(&raw).unwrap_or_else(|e| panic!("parse: {e}"));
+    assert_eq!(
+        parsed["cwd"], "/some/project/path",
+        "Pi event must include cwd field"
+    );
+}
+
+// --- 6.3: fail-open remote server failures (no local fallback) ---
+
+#[test]
+fn hook_remote_failure_does_not_create_local_store() {
+    let project_dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    std::fs::write(
+        project_dir.path().join("scryrs.json"),
+        r#"{"remote": {"ingest_url": "http://192.0.2.1:1", "workspace_id": "ws", "agent_id": "a", "repository_id": "r"}}"#,
+    )
+    .unwrap_or_else(|e| panic!("write: {e}"));
+
+    let other_dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    crate::test_support::with_cwd(other_dir.path(), || {
+        let payload = pi_event_with_cwd(
+            project_dir.path(),
+            "sid-1",
+            "read",
+            serde_json::json!({"path": "src/main.rs"}),
+        );
+        let tmp = other_dir.path().join("event.json");
+        std::fs::write(&tmp, &payload).unwrap_or_else(|e| panic!("write: {e}"));
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let code = run_with_io(
+            [
+                "hook",
+                "pi",
+                "--file",
+                tmp.to_str().unwrap_or_else(|| panic!("tmp path not UTF-8")),
+            ],
+            &mut out,
+            &mut err,
+            &b""[..],
+        );
+        assert_eq!(code, 0);
+        assert!(out.is_empty());
+
+        // No local store — remote mode skips SQLite entirely.
+        assert!(!project_dir.path().join(".scryrs/scryrs.db").exists());
+        assert!(!other_dir.path().join(".scryrs/scryrs.db").exists());
+
+        let log = read_warning_log(project_dir.path(), "pi");
+        assert!(!log.is_empty(), "warning log must contain the failure");
+    });
+}
+
+#[test]
+fn hook_remote_failure_exits_0_fail_open() {
+    let project_dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    std::fs::write(
+        project_dir.path().join("scryrs.json"),
+        r#"{"remote": {"ingest_url": "http://192.0.2.1:1", "workspace_id": "ws", "agent_id": "a", "repository_id": "r", "timeout_ms": 100}}"#,
+    )
+    .unwrap_or_else(|e| panic!("write: {e}"));
+
+    crate::test_support::with_cwd(project_dir.path(), || {
+        let payload = pi_event_with_cwd(
+            project_dir.path(),
+            "sid-1",
+            "read",
+            serde_json::json!({"path": "src/main.rs"}),
+        );
+        let tmp = project_dir.path().join("event.json");
+        std::fs::write(&tmp, &payload).unwrap_or_else(|e| panic!("write: {e}"));
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let code = run_with_io(
+            [
+                "hook",
+                "pi",
+                "--file",
+                tmp.to_str().unwrap_or_else(|| panic!("tmp path not UTF-8")),
+            ],
+            &mut out,
+            &mut err,
+            &b""[..],
+        );
+        assert_eq!(code, 0);
+        assert!(out.is_empty());
+
+        let log = read_warning_log(project_dir.path(), "pi");
+        assert!(!log.is_empty(), "remote failure must be logged");
+    });
+}
+
+// --- 6.4: claude-code hook uses payload cwd for store ---
+
+#[test]
+fn claude_code_hook_resolves_store_from_payload_cwd_not_process_cwd() {
+    let project_dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    let other_dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+
+    crate::test_support::with_cwd(other_dir.path(), || {
+        let payload = cc_payload(
+            project_dir.path(),
+            "cc-1",
+            "Read",
+            serde_json::json!({"file_path": "src/main.rs"}),
+        );
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let code = run_with_io(
+            ["hook", "claude-code"],
+            &mut out,
+            &mut err,
+            payload.as_bytes(),
+        );
+        assert_eq!(code, 0);
+
+        assert!(project_dir.path().join(".scryrs/scryrs.db").exists());
+        assert!(!other_dir.path().join(".scryrs/scryrs.db").exists());
+    });
 }

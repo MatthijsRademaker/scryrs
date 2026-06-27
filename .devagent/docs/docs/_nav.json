@@ -15,8 +15,11 @@
   {
     "text": "Technical",
     "items": [
-      { "text": "CLI v0 Contract", "link": "/cli-v0-contract" },
-      { "text": "Trace Hook Contract", "link": "/trace-hook-contract" }
+      { "text": "CLI Reference", "link": "/cli-v0-contract" },
+      { "text": "Trace Hook Contract", "link": "/trace-hook-contract" },
+      { "text": "Hotspots", "link": "/hotspots" },
+      { "text": "Graph", "link": "/graph" },
+      { "text": "Live Hotspots", "link": "/live-hotspots" }
     ]
   }
 ]
