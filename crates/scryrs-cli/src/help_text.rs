@@ -28,6 +28,9 @@ COMMANDS\n\
   scryrs graph <PATH>\n\
       Build a repository knowledge graph from hotspot evidence and docs structure.\n\
       Emits a single-line KnowledgeGraphDocument JSON to stdout and .scryrs/graph.json.\n\
+  scryrs route <PATH>\n\
+      Generate the route manifest from a knowledge graph artifact.\n\
+      Emits a single-line RouteManifestDocument JSON to stdout and .scryrs/routes.json.\n\
   scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]\n\
       Start local dashboard server and open the browser dashboard.\n\
   scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]\n\
@@ -98,7 +101,8 @@ EXAMPLES\n\
   scryrs dashboard --port 9090 --no-open\n\
   scryrs server\n\
   scryrs server --port 9091\n\
-  scryrs graph .\n\n\
+  scryrs graph .
+  scryrs route .\n\n\
 OPTIONS\n\
   -h, --help       Print this help message and exit\n\
   -V, --version    Print version and exit\n\

@@ -167,7 +167,7 @@ Required deliverables:
 
 This phase is where scryrs stops being only a recorder and starts becoming routing infrastructure.
 
-**Partial delivery (2026-06-27):** The `scryrs graph <PATH>` command is shipped. It builds graph nodes from all five hotspot subject kinds and docs navigation hierarchy, producing structural `contains` edges and a deterministic `KnowledgeGraphDocument` to stdout and `.scryrs/graph.json`. Full cross-domain edge derivation and route-manifest generation remain future work within Phase 5.
+**Partial delivery (2026-06-27):** The `scryrs graph <PATH>` command is shipped. It builds graph nodes from all five hotspot subject kinds and docs navigation hierarchy, producing structural `contains` edges and a deterministic `KnowledgeGraphDocument` to stdout and `.scryrs/graph.json`. The `scryrs route <PATH>` command is shipped, generating a deterministic `RouteManifestDocument` artifact at `.scryrs/routes.json` from `.scryrs/graph.json` input, with evidence backlinks and optional doc-page grouping from `contains` edges. Full cross-domain edge derivation remains future work within Phase 5.
 
 ## Phase 6 - Proposal Engine
 
