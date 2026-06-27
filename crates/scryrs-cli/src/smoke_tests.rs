@@ -81,3 +81,43 @@ fn help_json_exits_0_stdout_nonempty() {
     assert!(err.is_empty());
     assert!(!out.is_empty());
 }
+
+// --- Docker artifact contract checks (Task 6.4) ---
+
+#[test]
+fn dockerfile_has_correct_entrypoint() {
+    let dockerfile = include_str!("../../../Dockerfile");
+    assert!(
+        dockerfile.contains("scryrs\", \"server\", \"--bind\", \"0.0.0.0\", \"--port\", \"8081\", \"--store\", \"/data/scryrs/server.db"),
+        "Dockerfile must run scryrs server with documented bind/port/store defaults"
+    );
+    assert!(
+        dockerfile.contains("EXPOSE 8081"),
+        "Dockerfile must expose port 8081"
+    );
+    assert!(
+        dockerfile.contains("VOLUME /data/scryrs"),
+        "Dockerfile must declare /data/scryrs as a volume for persistent storage"
+    );
+}
+
+#[test]
+fn compose_has_scryrs_server_service_and_network() {
+    let compose = include_str!("../../../docker-compose.yml");
+    assert!(
+        compose.contains("scryrs-server:"),
+        "compose file must define scryrs-server service"
+    );
+    assert!(
+        compose.contains("scryrs-net:"),
+        "compose file must define scryrs-net network"
+    );
+    assert!(
+        compose.contains("scryrs-data:"),
+        "compose file must define scryrs-data volume"
+    );
+    assert!(
+        compose.contains("8081:8081"),
+        "compose file must expose port 8081"
+    );
+}

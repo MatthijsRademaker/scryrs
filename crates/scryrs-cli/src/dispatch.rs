@@ -173,6 +173,46 @@ where
                         .required(true)
                         .action(ArgAction::Set)
                         .help("Agent harness name (claude-code or pi)"),
+                )
+                .arg(
+                    Arg::new("mode")
+                        .long("mode")
+                        .value_name("MODE")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Install mode: local (default) or live"),
+                )
+                .arg(
+                    Arg::new("ingest-url")
+                        .long("ingest-url")
+                        .value_name("URL")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Live-mode remote ingest URL (required with --mode live)"),
+                )
+                .arg(
+                    Arg::new("workspace-id")
+                        .long("workspace-id")
+                        .value_name("ID")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Live-mode workspace identity (required with --mode live)"),
+                )
+                .arg(
+                    Arg::new("agent-id")
+                        .long("agent-id")
+                        .value_name("ID")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Live-mode agent identity (required with --mode live)"),
+                )
+                .arg(
+                    Arg::new("repository-id")
+                        .long("repository-id")
+                        .value_name("ID")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Live-mode repository identity (derived from Git remote origin if omitted)"),
                 ),
         )
         .subcommand(
@@ -279,7 +319,37 @@ where
                             2
                         }
                     } else {
-                        init::execute_init(&mut out, &mut err, agent)
+                        let mode_str = m.get_one::<String>("mode").map(|s| s.as_str()).unwrap_or("local");
+                        if mode_str != "local" && mode_str != "live" {
+                            if writeln!(err, "scryrs init: --mode must be local or live").is_err()
+                                || writeln!(err, "Usage: scryrs init --agent <NAME> [--mode local|live]").is_err()
+                                || writeln!(err, "See `scryrs --help`").is_err()
+                            {
+                                1
+                            } else {
+                                2
+                            }
+                        } else {
+                            let mode = if mode_str == "live" {
+                                init::InitMode::Live
+                            } else {
+                                init::InitMode::Local
+                            };
+                            let ingest_url = m.get_one::<String>("ingest-url").map(|s| s.as_str()).unwrap_or("");
+                            let workspace_id = m.get_one::<String>("workspace-id").map(|s| s.as_str()).unwrap_or("");
+                            let agent_id = m.get_one::<String>("agent-id").map(|s| s.as_str()).unwrap_or("");
+                            let repository_id = m.get_one::<String>("repository-id").map(|s| s.as_str());
+                            init::execute_init(
+                                &mut out,
+                                &mut err,
+                                agent,
+                                mode,
+                                ingest_url,
+                                workspace_id,
+                                agent_id,
+                                repository_id,
+                            )
+                        }
                     }
                 }
                 Some(("dashboard", m)) => execute_dashboard(&mut err, m),

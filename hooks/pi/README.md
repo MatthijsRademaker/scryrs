@@ -36,11 +36,15 @@ blocked.
 ## What the shim does (and does not do)
 
 - **Does**: register `session_start`/`tool_result`, resolve `session_id`,
-  serialize the raw event (with `session_id` injected), call `scryrs hook pi
-  --file <tmp>`, clean up, fail open.
+  capture `process.cwd()` for each event, serialize the raw event (with
+  `session_id` and `cwd` injected), call `scryrs hook pi --file <tmp>`,
+  clean up, fail open.
 - **Does not**: map tool names to event types, maintain a tracked-tools
-  whitelist, gate Bash, or know the `TraceEvent` schema. All of that moved to the
-  Rust `pi` adapter, which is the single source of truth.
+  whitelist, gate Bash, make HTTP calls, or know the `TraceEvent` schema.
+  All of that moved to the Rust `pi` adapter, which is the single source of
+  truth. The `cwd` field enables the hook path to resolve `scryrs.json`
+  remote configuration from the target project root rather than the harness
+  process working directory.
 
 ## Tool → event mapping (performed by the Rust `pi` adapter)
 
@@ -98,4 +102,3 @@ crafted raw events to verify the mapping (including `isError`→`Failure` and th
 `lsp_navigation` branches), and (2) loads this `index.ts` via `tsx` with a mock
 Pi runtime to verify it delegates to `scryrs hook pi --file` and fails open.
 
-[scryrs-types]: ../../crates/scryrs-types/src/lib.rs

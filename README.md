@@ -121,14 +121,66 @@ Once `scryrs` is installed and reachable on `PATH`, install trace hooks for your
 agent harness:
 
 ```bash
+# Local mode (default) — SQLite trace store (.scryrs/scryrs.db)
 scryrs init --agent claude-code
 scryrs init --agent pi
+
+# Live mode — remote ingest via scryrs server
+scryrs init --agent claude-code --mode live \
+  --ingest-url http://scryrs-server:8081 \
+  --workspace-id my-workspace \
+  --agent-id agent-1
 ```
 
 **Note:** `scripts/install` only installs the CLI binary. It does not create or modify
 `.claude/`, `.pi/`, `.scryrs/`, `scryrs.json`, git hooks, or shell profile files.
 Hook installation is a separate step performed by `scryrs init --agent <NAME>`
 after the `scryrs` binary is on your `PATH`.
+
+### Run the live hotspot server (multi-agent Docker setup)
+
+The repository includes Docker packaging for running `scryrs server` as a shared
+network service for multiple agent containers.
+
+```bash
+# Build and start the containerized live server
+docker compose up -d
+```
+
+This starts `scryrs-server` bound to `0.0.0.0:8081` with persistent storage at
+`/data/scryrs/server.db`. The service is reachable by name from any container on
+the `scryrs-net` network.
+
+Once the server is running, configure each agent workspace for live remote ingest:
+
+```bash
+# In each agent workspace (not the scryrs source checkout):
+scryrs init --agent claude-code --mode live \
+  --ingest-url http://scryrs-server:8081 \
+  --workspace-id my-workspace \
+  --agent-id agent-1
+```
+
+Live mode creates or merges a `scryrs.json` `remote` section in the project
+root and installs the same harness hook transport as local mode. It does not
+scaffold a local `.scryrs/scryrs.db` — all events flow to the shared server.
+
+The `--repository-id` flag is optional; when omitted, live-mode init derives it
+from the Git remote origin URL of the target project.
+
+**Agent containers on the same network:** attach your agent containers to
+`scryrs-net` so they can resolve `http://scryrs-server:8081`:
+
+```bash
+docker run --network scryrs-net ...
+# or add `networks: [scryrs-net]` to your agent's compose service.
+```
+
+For a complete multi-agent setup: run `docker compose up -d` once for the
+server, then run `scryrs init --mode live` in each agent workspace pointing at
+the same server endpoint. The live server provides `POST /v1/trace-events/batch`
+ingest, `GET /v1/repositories/{id}/hotspots` queries, and `GET
+/v1/repositories/{id}/signals` SSE streaming.
 
 ### Build from source (manual)
 

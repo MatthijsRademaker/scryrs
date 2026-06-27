@@ -901,7 +901,7 @@ mod remote_tests {
     fn no_ingest_url_keeps_local_mode() {
         // Without a scryrs.json in the temp dir and no env vars set,
         // resolve_remote_config should return Ok(None) — local mode.
-        let resolved = crate::remote_config::resolve_remote_config();
+        let resolved = crate::remote_config::resolve_remote_config(None);
         // In the build/test environment, there should be no ingest URL configured.
         match resolved {
             Ok(None) => { /* local mode — correct */ }
@@ -927,7 +927,7 @@ mod remote_tests {
 
         // Change CWD to temp dir so ancestor discovery finds our scryrs.json.
         crate::test_support::with_cwd(dir.path(), || {
-            let resolved = crate::remote_config::resolve_remote_config();
+            let resolved = crate::remote_config::resolve_remote_config(None);
             // Should fail because workspace_id and agent_id are missing.
             assert!(
                 resolved.is_err(),

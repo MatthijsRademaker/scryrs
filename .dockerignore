@@ -1,0 +1,5 @@
+target/
+.git/
+.scryrs/
+node_modules/
+**/node_modules/

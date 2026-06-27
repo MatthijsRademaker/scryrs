@@ -41,6 +41,7 @@ interface ExtensionAPI {
 declare const process: {
 	env: Record<string, string | undefined>;
 	title?: string;
+	cwd(): string;
 };
 
 // — reusable temp directory, created once on extension load —
@@ -75,7 +76,11 @@ async function forwardRawEvent(
 	pi: ExtensionAPI,
 	rawEvent: Record<string, unknown>,
 ): Promise<void> {
-	const payload = JSON.stringify({ ...rawEvent, session_id: SESSION_ID });
+	const payload = JSON.stringify({
+		...rawEvent,
+		session_id: SESSION_ID,
+		cwd: process.cwd(),
+	});
 	const tmpFile = join(TMP_DIR, `event-${TMP_SEQ++}.json`);
 
 	try {
@@ -139,7 +144,9 @@ export default function (pi: ExtensionAPI) {
 	// tool_result — forward the raw event; the Rust adapter decides everything.
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	pi.on("tool_result", async (event: any) => {
-		debug(`tool_result tool=${event?.toolName} is_error=${Boolean(event?.isError)}`);
+		debug(
+			`tool_result tool=${event?.toolName} is_error=${Boolean(event?.isError)}`,
+		);
 
 		await forwardRawEvent(pi, {
 			toolName: event?.toolName,

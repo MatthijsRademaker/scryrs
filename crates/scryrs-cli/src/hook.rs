@@ -135,7 +135,9 @@ pub(crate) fn execute_hook<R: Read>(
     };
 
     // --- persist through shared canonical store or remote submit ---
-    let remote = remote_config::resolve_remote_config().ok().flatten();
+    let remote = remote_config::resolve_remote_config(Some(&base_dir))
+        .ok()
+        .flatten();
 
     if let Some(resolved) = remote {
         // Remote mode: submit one event as a batch of 1. Fail-open on errors.
