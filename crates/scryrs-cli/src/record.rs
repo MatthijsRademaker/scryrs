@@ -110,7 +110,7 @@ pub(crate) fn execute_record<R: Read>(
     }
 
     // --- Resolve transport mode before input/store I/O ---
-    let remote = match remote_config::resolve_remote_config() {
+    let remote = match remote_config::resolve_remote_config(None) {
         Ok(r) => r,
         Err(e) => {
             // Missing required remote identity → fatal exit 2.

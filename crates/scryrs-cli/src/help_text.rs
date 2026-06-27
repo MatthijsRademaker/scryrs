@@ -17,9 +17,14 @@ COMMANDS\n\
   scryrs hook <HARNESS> [--stdin | --file <PATH>]\n\
       Translate a harness's native tool event and record it (fail-open).\n\
       Supported harnesses: claude-code (stdin), pi (--file).\n\
-  scryrs init --agent <NAME>\n\
+  scryrs init --agent <NAME> [--mode local|live] [--ingest-url <URL>]\n\
+        [--workspace-id <ID>] [--agent-id <ID>] [--repository-id <ID>]\n\
       Install the scryrs trace hook for a supported agent harness.\n\
       Supported harnesses: claude-code, pi\n\
+      --mode local (default): local SQLite trace store (.scryrs/scryrs.db).\n\
+      --mode live: remote ingest via scryrs server (writes project scryrs.json).\n\
+        Live mode requires --ingest-url, --workspace-id, and --agent-id.\n\
+        --repository-id is derived from Git remote origin when omitted.\n\
   scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]\n\
       Start local dashboard server and open the browser dashboard.\n\
   scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]\n\
@@ -85,6 +90,7 @@ EXAMPLES\n\
   scryrs hook pi --file event.json\n\
   scryrs init --agent claude-code\n\
   scryrs init --agent pi\n\
+  scryrs init --agent claude-code --mode live --ingest-url http://scryrs-server:8081 --workspace-id my-workspace --agent-id agent-1\n\
   scryrs dashboard\n\
   scryrs dashboard --port 9090 --no-open\n\
   scryrs server\n\
@@ -96,7 +102,7 @@ OPTIONS\n\
 EXIT CODES\n\
   0    Success (hotspots: JSON written; record local: all events accepted; record remote: no rejections or failures; init: hook installed; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)\n\
   1    Hotspots: storage error. Record: rejected events or I/O error (local or server rejections). Init: I/O error. Dashboard: port in use or artifact read error. Server: port in use or store error.\n\
-  2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, or self-install refusal; dashboard: invalid flags or bind failure; server: invalid flags or bind failure",
+  2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, self-install refusal, invalid mode, or missing/invalid live-mode configuration; dashboard: invalid flags or bind failure; server: invalid flags or bind failure",
         SCHEMA_VERSION, SCHEMA_VERSION, HOTSPOT_SCHEMA_VERSION
     )
 }

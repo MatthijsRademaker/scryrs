@@ -5,35 +5,21 @@ TBD - created by archiving change task-6fabface-1a09-4ce2-956c-ee1ab783d60a. Upd
 ## Requirements
 ### Requirement: Init subcommand is discoverable via CLI dispatch, help, and help-json
 
-The `init` subcommand SHALL be accessible through the pre-clap command whitelist, documented in `write_help()`, and exposed in the `--help-json` machine-readable surface at `SURFACE_VERSION 0.3.0`.
+The `init` subcommand SHALL remain accessible through CLI dispatch, help text, and help-json, and those discovery surfaces SHALL describe both local and live setup. The machine-readable `init` entry SHALL include `--agent`, `--mode`, and the live-mode remote configuration arguments.
 
-#### Scenario: init reaches clap dispatch
-
-- **GIVEN** the pre-clap unknown-command check in `lib.rs`
-- **WHEN** `scryrs init --agent claude-code` is invoked
-- **THEN** the first argument `"init"` is recognized as a known command
-- **AND** arguments reach clap's `try_get_matches_from` for subcommand dispatch
-- **AND** the exit code is 0 (on successful install)
-
-#### Scenario: init appears in --help output
+#### Scenario: Help output documents the mode choice
 
 - **WHEN** `scryrs --help` is invoked
-- **THEN** the output includes the `init --agent <name>` command with description and supported harnesses
-- **AND** the output mentions `claude-code` and `pi` as supported harness names
+- **THEN** the output includes the `init` command
+- **AND** it documents `--mode local|live`
+- **AND** it describes the live-mode remote configuration inputs
 
-#### Scenario: init appears in --help-json surface
+#### Scenario: Help-json exposes live init arguments
 
 - **WHEN** `scryrs --help-json` is invoked
-- **THEN** the JSON output includes `"surfaceVersion": "0.3.0"`
-- **AND** the `commands` array contains an entry with `"name": "init"`
-- **AND** the entry includes `arguments` (with `--agent` as required string) and `output` contract metadata
-
-#### Scenario: init without --agent exits 2 via clap usage error
-
-- **WHEN** `scryrs init` is invoked without `--agent`
-- **THEN** clap reports a `MissingRequiredArgument` error
-- **AND** the exit code is 2
-- **AND** stderr follows the contract three-line format with problem description, usage, and `See \`scryrs --help\``
+- **THEN** the `commands` array contains an `init` entry
+- **AND** that entry includes `--agent` and `--mode`
+- **AND** it includes the live-mode remote configuration arguments in the machine-readable surface
 
 ### Requirement: Hook source artifacts are embedded at compile time
 
@@ -168,107 +154,90 @@ If the target file or directory already exists at the installation path, the ins
 - **THEN** the installer creates `index.ts` inside the existing directory
 - **AND** the exit code is 0
 
-### Requirement: Claude Code settings.json collision is refused with JSON insertion instructions
+### Requirement: Claude Code installs via create-or-merge of .claude/settings.json
 
-If `.claude/settings.json` already exists in the target directory (regardless of whether it contains a hooks section), the Claude Code installer SHALL exit 2 with an error message that includes the exact JSON block the user must insert into the settings file and the setting's purpose. The installer SHALL NOT attempt structured merge or partial rewrite of the existing file.
+The Claude Code installer SHALL create-or-merge `.claude/settings.json` with a native `PreToolUse` command hook invoking `scryrs hook claude-code`. It SHALL preserve unrelated top-level keys, SHALL be idempotent across re-runs (the hook SHALL NOT be duplicated), and SHALL refuse to overwrite a non-object `settings.json`. The installer SHALL NOT write a `.mjs` file.
 
-#### Scenario: settings.json exists with hooks block
+#### Scenario: settings.json is created when absent
 
-- **GIVEN** `.claude/settings.json` already exists and contains a `hooks` key
+- **GIVEN** `.claude/settings.json` does not exist
+- **WHEN** `scryrs init --agent claude-code` is invoked
+- **THEN** `.claude/settings.json` is created
+- **AND** it contains a `hooks.PreToolUse` array with a single entry invoking `scryrs hook claude-code`
+- **AND** the exit code is 0
+
+#### Scenario: settings.json merge preserves unrelated keys
+
+- **GIVEN** `.claude/settings.json` already exists with top-level keys unrelated to hooks
+- **WHEN** `scryrs init --agent claude-code` is invoked
+- **THEN** the installer inserts the `PreToolUse` hook entry
+- **AND** the unrelated top-level keys are preserved unchanged
+- **AND** the exit code is 0
+
+#### Scenario: settings.json re-run is idempotent
+
+- **GIVEN** a prior `scryrs init --agent claude-code` has written the PreToolUse hook
+- **WHEN** `scryrs init --agent claude-code` is invoked again
+- **THEN** the hook command appears exactly once in the PreToolUse array
+- **AND** the exit code is 0
+
+#### Scenario: non-object settings.json is refused
+
+- **GIVEN** `.claude/settings.json` exists and is a JSON array or scalar (not an object)
 - **WHEN** `scryrs init --agent claude-code` is invoked
 - **THEN** the exit code is 2
-- **AND** stderr states that settings.json already exists
-- **AND** stderr includes the exact JSON block to insert (the hook configuration object)
-- **AND** the existing `.claude/settings.json` file is not modified
-
-#### Scenario: settings.json exists without hooks block
-
-- **GIVEN** `.claude/settings.json` exists but does not contain a `hooks` key
-- **WHEN** `scryrs init --agent claude-code` is invoked
-- **THEN** the exit code is 2
-- **AND** stderr states that settings.json already exists
-- **AND** stderr includes the exact JSON block to insert
 - **AND** the existing file is not modified
-
-#### Scenario: settings.json does not exist
-
-- **GIVEN** `.claude/hooks/scryrs-hook.mjs` is written successfully
-- **WHEN** `.claude/settings.json` does not exist
-- **THEN** the installer does not attempt to create it
-- **AND** the next-step text on stdout instructs the user to create `.claude/settings.json` with the required hook configuration
 
 ### Requirement: Self-install into scryrs source checkout is refused
 
-The installer SHALL detect when the resolved invocation context is the scryrs source checkout by checking for the presence of both a `Cargo.toml` referencing `scryrs-cli` in `[workspace.members]` AND a `hooks/claude-code/` directory in the CWD ancestry. When both markers are found, the installer SHALL apply harness-specific behavior: `claude-code` SHALL still exit 2 with a deterministic error explaining the reference-only boundary for Claude consumer config, while `pi` SHALL be permitted and SHALL install into the scryrs checkout root.
+The installer SHALL continue to detect the scryrs source checkout by ancestry markers. `pi` local-mode installation inside the source checkout remains permitted for dogfooding. Live mode SHALL be refused inside the scryrs source checkout because live init configures consumer-project remote state.
 
-#### Scenario: Claude Code self-install detected and refused
+#### Scenario: Local-mode Pi dogfooding remains allowed
 
-- **GIVEN** CWD is the scryrs source checkout (contains `Cargo.toml` with `scryrs-cli` in workspace members AND `hooks/claude-code/` directory)
-- **WHEN** `scryrs init --agent claude-code` is invoked
+- **GIVEN** the current working directory is the scryrs source checkout
+- **WHEN** `scryrs init --agent pi --mode local` is invoked
+- **THEN** installation proceeds against `.pi/extensions/pi-trace/index.ts` at the checkout root
+
+#### Scenario: Live mode is refused in the source checkout
+
+- **GIVEN** the current working directory is the scryrs source checkout
+- **WHEN** `scryrs init --agent pi --mode live` is invoked
 - **THEN** the exit code is 2
-- **AND** stderr explains that Claude consumer config must not be written into the scryrs source repo
-- **AND** no files are created or modified
-
-#### Scenario: Pi self-install at source root is allowed
-
-- **GIVEN** CWD is the scryrs source checkout root
-- **WHEN** `scryrs init --agent pi` is invoked
-- **THEN** the command does not fail with self-install refusal
-- **AND** installation proceeds against `.pi/extensions/pi-trace/index.ts` at repository root
-
-#### Scenario: Pi self-install check walks parent directories and still installs at checkout root
-
-- **GIVEN** CWD is a subdirectory of the scryrs source checkout and the parent directory contains both markers
-- **WHEN** `scryrs init --agent pi` is invoked
-- **THEN** the installer walks the parent directory chain
-- **AND** the scryrs checkout root is detected
-- **AND** installation proceeds against `.pi/extensions/pi-trace/index.ts` at that checkout root
-
-#### Scenario: Unrelated project passes self-install check
-
-- **GIVEN** CWD is a user project that does not contain both scryrs markers
-- **WHEN** `scryrs init --agent claude-code` is invoked
-- **THEN** the self-install check passes
-- **AND** the installer proceeds with normal installation
+- **AND** stderr explains that live mode must target a consumer project rather than the scryrs source repository
+- **AND** no `scryrs.json` changes are written in the source checkout
 
 ### Requirement: Successful install prints deterministic next-step text
 
-On successful installation, the installer SHALL print harness-specific next-step instructions to stdout. The text SHALL be deterministic (static strings from the harness registry) and suitable for scripted callers. The output SHALL include any reload, PATH, or follow-up config guidance specific to the harness.
+On successful installation, the installer SHALL print deterministic, mode-specific next-step instructions to stdout. Local mode SHALL keep the current local guidance. Live mode SHALL explain that the project is configured for remote ingest, identify the configured live-server endpoint, and describe the server/Docker follow-up needed to start or connect the shared service.
 
-#### Scenario: Claude Code next steps
+#### Scenario: Local mode keeps current next steps
 
-- **WHEN** `scryrs init --agent claude-code` completes successfully
-- **THEN** stdout includes instructions for creating `.claude/settings.json` with the hook configuration
-- **AND** stdout notes that scryrs must be on PATH
-- **AND** stdout mentions reload or restart of the Claude Code session
+- **WHEN** `scryrs init --agent claude-code --mode local` completes successfully
+- **THEN** stdout contains the existing local next-step guidance
+- **AND** it does not mention Docker or a remote ingest URL
 
-#### Scenario: Pi next steps
+#### Scenario: Live mode prints remote-server next steps
 
-- **WHEN** `scryrs init --agent pi` completes successfully
-- **THEN** stdout includes instructions for reloading Pi (e.g., `/reload`)
-- **AND** stdout notes that scryrs must be on PATH
-- **AND** stdout may mention verifying input field assumptions for `ast_grep_search` and `lsp_navigation`
-
-#### Scenario: Next-step text is deterministic
-
-- **WHEN** `scryrs init --agent claude-code` is invoked twice in separate temp directories
-- **THEN** the stdout output is byte-identical for both invocations
+- **WHEN** `scryrs init --agent claude-code --mode live` completes successfully
+- **THEN** stdout states that live remote ingest was configured
+- **AND** stdout includes the remote server endpoint for the project
+- **AND** stdout includes deterministic next steps for starting or connecting to the shared server, including the documented Docker workflow
 
 ### Requirement: Installer does not create or depend on scryrs.json
 
-The installer SHALL NOT create, read, or depend on the `scryrs.json` provisional manifest file. The next-step text may mention `scryrs.json` as an optional future configuration file but SHALL NOT instruct the user to create it.
+The installer SHALL remain manifest-agnostic in local mode. In live mode only, it MAY create or merge the target project's `scryrs.json` `remote` section as part of remote setup. It SHALL NOT read or depend on `scryrs.json` for ordinary local installation behavior.
 
-#### Scenario: No scryrs.json is created
+#### Scenario: Local mode still does not create a manifest
 
-- **WHEN** `scryrs init --agent <name>` completes successfully
-- **THEN** no `scryrs.json` file is created at the project root or anywhere else
+- **WHEN** `scryrs init --agent <name> --mode local` completes successfully
+- **THEN** no `scryrs.json` file is created or modified
 
-#### Scenario: Installer does not read scryrs.json
+#### Scenario: Live mode may create the remote manifest section
 
-- **GIVEN** a `scryrs.json` file exists at the project root
-- **WHEN** `scryrs init --agent claude-code` is invoked
-- **THEN** the installer does not read or parse the file
-- **AND** installation behavior is identical regardless of the file's presence
+- **WHEN** `scryrs init --agent <name> --mode live` completes successfully in a project without `scryrs.json`
+- **THEN** the installer creates `scryrs.json` at the project root
+- **AND** the file contains the configured `remote` section needed for live ingest
+- **AND** no unrelated manifest structure is required for success
 
 ### Requirement: Source-repo Pi install remains non-canonical runtime state
 
@@ -368,4 +337,45 @@ This change SHALL NOT modify any Rust crate outside `scryrs-cli`. It SHALL NOT m
 - **AND** `openspec/specs/pi-reference-hook/spec.md` is unchanged
 - **AND** `openspec/specs/cli-clap-migration/spec.md` is unchanged
 - **AND** `openspec/specs/cli-machine-surface/spec.md` is unchanged
+
+### Requirement: Init supports explicit local and live setup modes
+
+The `init` subcommand SHALL accept `--mode local|live` with `local` as the default. Local mode SHALL preserve the existing local-install flow. Live mode SHALL use deterministic CLI inputs for `ingest_url`, `workspace_id`, `agent_id`, and optional `repository_id`; when `repository_id` is omitted, the installer SHALL derive it from Git remote origin using the normalized repository identity contract required by live ingest. Missing or invalid live-mode configuration SHALL exit 2 before the installer writes hook files, `.scryrs/` artifacts, or `scryrs.json`.
+
+#### Scenario: Default init remains local
+
+- **WHEN** `scryrs init --agent pi` or `scryrs init --agent claude-code` is invoked without `--mode`
+- **THEN** the installer behaves as the existing local-mode path
+- **AND** no remote configuration is required
+- **AND** no network-specific next-step text is emitted
+
+#### Scenario: Live mode validates remote identity before writing
+
+- **WHEN** `scryrs init --agent pi --mode live` is invoked with complete live-mode inputs
+- **THEN** the installer validates the remote identity set before writing any files
+- **AND** the command succeeds only after the full live configuration is valid
+
+#### Scenario: Invalid live mode fails without partial writes
+
+- **WHEN** `scryrs init --agent claude-code --mode live` is invoked with a missing or empty required live-mode field
+- **THEN** the exit code is 2
+- **AND** stderr contains deterministic validation guidance
+- **AND** no hook files, `.scryrs/` artifacts, or `scryrs.json` changes are written
+
+### Requirement: Live-mode init writes project remote config without local-store scaffolding
+
+In live mode, the installer SHALL install the same harness hook transport, create `.scryrs/`, `.scryrs/.gitignore`, and `.scryrs/hooks/` under the target project, and create-or-merge only the `remote` section of the target project's `scryrs.json`. It SHALL preserve unrelated manifest keys. It SHALL NOT create `.scryrs/scryrs.db`, SHALL NOT dual-write, and SHALL NOT add direct HTTP logic to hook artifacts.
+
+#### Scenario: Live mode merges into an existing manifest
+
+- **GIVEN** a target project already has a `scryrs.json` file with unrelated top-level keys
+- **WHEN** `scryrs init --agent claude-code --mode live` succeeds
+- **THEN** the installer updates only the `remote` section
+- **AND** unrelated manifest keys remain unchanged
+
+#### Scenario: Live mode skips local trace-store creation
+
+- **WHEN** `scryrs init --agent pi --mode live` succeeds
+- **THEN** `.scryrs/`, `.scryrs/.gitignore`, and `.scryrs/hooks/` exist under the target project
+- **AND** `.scryrs/scryrs.db` does not exist
 

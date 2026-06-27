@@ -1,0 +1,44 @@
+# scryrs — multi-agent live hotspot server stack
+#
+# Starts the containerized central trace ingest service with persistent storage
+# and a stable service name reachable from other agent containers on the same
+# Docker network.
+#
+# Quickstart:
+#   docker compose up -d
+#
+# Agent workspaces connect via live-mode init:
+#   scryrs init --agent claude-code --mode live \
+#     --ingest-url http://scryrs-server:8081 \
+#     --workspace-id my-workspace \
+#     --agent-id agent-1
+
+version: "3.8"
+
+services:
+  scryrs-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: scryrs-server:latest
+    container_name: scryrs-server
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    volumes:
+      - scryrs-data:/data/scryrs
+    networks:
+      - scryrs-net
+
+volumes:
+  scryrs-data:
+    # Persistent SQLite storage survives container recreation.
+    # scryrs server stores event data at /data/scryrs/server.db.
+
+networks:
+  scryrs-net:
+    # Attachable network so peer agent containers can resolve scryrs-server by
+    # service name. Agent containers join with:
+    #   docker run --network scryrs-net ...
+    #   -- or —
+    #   docker compose adding `networks: [scryrs-net]`
