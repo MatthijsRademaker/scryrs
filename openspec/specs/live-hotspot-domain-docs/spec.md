@@ -1,8 +1,11 @@
 # live-hotspot-domain-docs Specification
 
 ## Purpose
-TBD - created by archiving change task-d03139dc-a675-4358-b807-961037809bef. Update Purpose after archive.
+
+Domain documentation for live hotspots in .devagent/docs/docs/live-hotspots.md — governs page content, discoverability, cross-links, field interpretation, casing corrections, and verification against server implementation.
+
 ## Requirements
+
 ### Requirement: A dedicated domain-oriented live hotspot page exists
 
 The system SHALL include a new documentation page at `.devagent/docs/docs/live-hotspots.md` that explains the live hotspot concept in domain terms before referencing any schema, architecture, or implementation detail.
@@ -191,4 +194,3 @@ This change SHALL NOT modify any Rust source code, Cargo configuration, OpenSpec
 - **GIVEN** the existing test suite for scryrs-server and scryrs-core
 - **WHEN** tests are run after this documentation change
 - **THEN** all tests pass with identical results as before the change
-
