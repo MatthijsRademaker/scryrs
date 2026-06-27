@@ -31,6 +31,10 @@ COMMANDS\n\
   scryrs route <PATH>\n\
       Generate the route manifest from a knowledge graph artifact.\n\
       Emits a single-line RouteManifestDocument JSON to stdout and .scryrs/routes.json.\n\
+  scryrs propose <PATH>\n\
+      Generate reviewable knowledge proposals from hotspot and graph evidence.\n\
+      Writes validated ProposalDocument files under .scryrs/proposals/.\n\
+      Timestamps derive from the hotspot artifact's generatedAt for determinism.\n\
   scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]\n\
       Start local dashboard server and open the browser dashboard.\n\
   scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]\n\

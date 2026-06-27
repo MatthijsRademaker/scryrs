@@ -13,6 +13,7 @@ mod help_json;
 mod help_text;
 mod hook;
 mod hotspots;
+mod propose;
 mod record;
 #[cfg(feature = "core")]
 mod remote_config;

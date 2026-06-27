@@ -9,6 +9,7 @@ use crate::help_text::write_help;
 use crate::hook::execute_hook;
 use crate::hotspots::write_hotspots_json;
 use crate::init;
+use crate::propose::write_proposals;
 use crate::record::execute_record;
 use crate::route::write_route_json;
 use crate::server::{execute_server, write_server_help};
@@ -72,6 +73,7 @@ where
             && first != "server"
             && first != "graph"
             && first != "route"
+            && first != "propose"
             && first != "--help"
             && first != "-h"
             && first != "--version"
@@ -96,7 +98,8 @@ where
             || args[0] == "dashboard"
             || args[0] == "server"
             || args[0] == "graph"
-            || args[0] == "route")
+            || args[0] == "route"
+            || args[0] == "propose")
     {
         Some(args[0].as_str())
     } else {
@@ -304,6 +307,13 @@ where
                 .disable_help_flag(true)
                 .disable_version_flag(true)
                 .arg(Arg::new("PATH").required(true).value_name("PATH")),
+        )
+        .subcommand(
+            Command::new("propose")
+                .about("Generate reviewable knowledge proposals from hotspot and graph evidence")
+                .disable_help_flag(true)
+                .disable_version_flag(true)
+                .arg(Arg::new("PATH").required(true).value_name("PATH")),
         );
 
     match cmd.try_get_matches_from(&args) {
@@ -388,6 +398,14 @@ where
                         .unwrap_or(".");
                     write_route_json(&mut out, &mut err, path)
                 }
+                #[cfg(feature = "curator")]
+                Some(("propose", m)) => {
+                    let path = m
+                        .get_one::<String>("PATH")
+                        .map(|s| s.as_str())
+                        .unwrap_or(".");
+                    write_proposals(&mut out, &mut err, path)
+                }
                 // Bare invocation (no subcommand matched).
                 _ => write_help(&mut out).map_or(1, |_| 0),
             }
@@ -463,6 +481,16 @@ where
                         2
                     }
                 }
+                Some("propose") => {
+                    if writeln!(err, "scryrs propose: missing required PATH argument").is_err()
+                        || writeln!(err, "Usage: scryrs propose <PATH>").is_err()
+                        || writeln!(err, "See `scryrs --help`").is_err()
+                    {
+                        1
+                    } else {
+                        2
+                    }
+                }
                 _ => {
                     if writeln!(err, "scryrs hotspots: missing required PATH argument").is_err()
                         || writeln!(err, "Usage: scryrs hotspots <PATH>").is_err()
@@ -531,6 +559,16 @@ where
                     Some("route") => {
                         if writeln!(err, "scryrs route: unexpected argument").is_err()
                             || writeln!(err, "Usage: scryrs route <PATH>").is_err()
+                            || writeln!(err, "See `scryrs --help`").is_err()
+                        {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                    Some("propose") => {
+                        if writeln!(err, "scryrs propose: unexpected argument").is_err()
+                            || writeln!(err, "Usage: scryrs propose <PATH>").is_err()
                             || writeln!(err, "See `scryrs --help`").is_err()
                         {
                             1

@@ -155,6 +155,22 @@ pub(crate) fn cli_surface_doc() -> String {
                 }
             },
             {
+                "name": "propose",
+                "description": "Generate reviewable knowledge proposals from hotspot and graph evidence",
+                "arguments": [
+                    {
+                        "name": "PATH",
+                        "type": "string",
+                        "required": true,
+                        "description": "Path to the repository root directory"
+                    }
+                ],
+                "output": {
+                    "mimeType": "application/json",
+                    "description": "Validated ProposalDocument JSON files written to .scryrs/proposals/. Count written to stdout. Errors on stderr."
+                }
+            },
+            {
                 "name": "dashboard",
                 "description": "Start local dashboard server and open the browser dashboard",
                 "flags": [

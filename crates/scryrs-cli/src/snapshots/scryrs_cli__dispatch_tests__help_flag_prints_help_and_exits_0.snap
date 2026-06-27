@@ -30,6 +30,10 @@ Emits a single-line KnowledgeGraphDocument JSON to stdout and .scryrs/graph.json
 scryrs route <PATH>
 Generate the route manifest from a knowledge graph artifact.
 Emits a single-line RouteManifestDocument JSON to stdout and .scryrs/routes.json.
+scryrs propose <PATH>
+Generate reviewable knowledge proposals from hotspot and graph evidence.
+Writes validated ProposalDocument files under .scryrs/proposals/.
+Timestamps derive from the hotspot artifact's generatedAt for determinism.
 scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]
 Start local dashboard server and open the browser dashboard.
 scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]
