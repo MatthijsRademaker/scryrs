@@ -237,3 +237,4 @@ Publishes graph output into Rspress, Markdown, llms.txt, nested manifests, or cu
 
 - [Architecture](./architecture.md) — system diagrams and architecture notes as implementation matures.
 - [Product Roadmap](./roadmap.md) — delivery sequence from proxy capture to routing and proposal features.
+- [Hotspots](./hotspots.md) — domain concept, scoring, and interpretation guide for scryrs hotspot reports.

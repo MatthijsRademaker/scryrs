@@ -478,4 +478,10 @@ cargo insta review
 
 ```bash
 cargo install cargo-insta
+
+## Related Pages
+
+- [Hotspots](./hotspots.md) — domain concept and interpretation guide (this page covers the CLI output contract and exit codes)
+- [Trace Hook Contract](./trace-hook-contract.md) — how harness hooks capture TraceEvent records for hotspot analysis
+- [Architecture](./architecture.mdx) — crate topology including scryrs-core scoring and the HotspotsReport data flow
 ```
