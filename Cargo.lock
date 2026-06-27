@@ -908,6 +908,7 @@ name = "scryrs-curator"
 version = "0.1.0"
 dependencies = [
  "scryrs-types",
+ "serde_json",
 ]
 
 [[package]]

@@ -311,7 +311,7 @@ fn hotspots_short_hj_exits_2() {
 
 #[test]
 fn previously_stubbed_commands_exit_2() {
-    for cmd in &["trace", "propose", "adapters", "report", "suggest-docs"] {
+    for cmd in &["trace", "adapters", "report", "suggest-docs"] {
         let mut out = Vec::new();
         let mut err = Vec::new();
 
@@ -1232,4 +1232,42 @@ fn route_artifact_written_to_routes_json() {
         serde_json::from_str(&content).expect("routes.json must be valid JSON");
     assert_eq!(doc["schemaVersion"].as_str(), Some("1.0.0"));
     assert!(doc.get("routes").is_some());
+}
+
+// --- Propose command in help output ---
+
+#[test]
+fn propose_appears_in_help_output() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(run_with_writers(["--help"], &mut out, &mut err), 0);
+    assert!(err.is_empty());
+    let help = String::from_utf8_lossy(&out);
+    assert!(
+        help.contains("scryrs propose"),
+        "--help must list propose command, got:\n{help}"
+    );
+    assert!(
+        help.contains("ProposalDocument"),
+        "--help must mention ProposalDocument, got:\n{help}"
+    );
+}
+
+#[test]
+fn propose_appears_in_help_json_output() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(run_with_writers(["--help-json"], &mut out, &mut err), 0);
+    assert!(err.is_empty());
+    let json_str = String::from_utf8_lossy(&out);
+    assert!(
+        json_str.contains("\"name\":\"propose\""),
+        "--help-json must contain propose command, got:\n{json_str}"
+    );
+    assert!(
+        json_str.contains("ProposalDocument"),
+        "--help-json propose entry must mention ProposalDocument, got:\n{json_str}"
+    );
 }
