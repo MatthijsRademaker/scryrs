@@ -8,6 +8,7 @@ mod server;
 #[cfg(feature = "core")]
 mod chrono;
 mod dispatch;
+mod graph;
 mod help_json;
 mod help_text;
 mod hook;

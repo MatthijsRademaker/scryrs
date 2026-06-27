@@ -185,6 +185,22 @@ pub(crate) fn cli_surface_doc() -> String {
                     "mimeType": "application/json",
                     "description": "BatchIngestResponse returned by POST /v1/trace-events/batch. LiveHotspotsResponse returned by GET .../hotspots. text/event-stream returned by GET .../signals."
                 }
+            },
+            {
+                "name": "graph",
+                "description": "Build a repository knowledge graph from hotspot evidence and docs structure",
+                "arguments": [
+                    {
+                        "name": "PATH",
+                        "type": "string",
+                        "required": true,
+                        "description": "Path to the repository root directory"
+                    }
+                ],
+                "output": {
+                    "mimeType": "application/json",
+                    "description": "Single-line KnowledgeGraphDocument JSON written to stdout. Also persisted to .scryrs/graph.json."
+                }
             }
         ],
         "globalFlags": [

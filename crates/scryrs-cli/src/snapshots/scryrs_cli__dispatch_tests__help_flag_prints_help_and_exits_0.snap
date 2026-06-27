@@ -24,6 +24,9 @@ Supported harnesses: claude-code, pi
 --mode live: remote ingest via scryrs server (writes project scryrs.json).
 Live mode requires --ingest-url, --workspace-id, and --agent-id.
 --repository-id is derived from Git remote origin when omitted.
+scryrs graph <PATH>
+Build a repository knowledge graph from hotspot evidence and docs structure.
+Emits a single-line KnowledgeGraphDocument JSON to stdout and .scryrs/graph.json.
 scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]
 Start local dashboard server and open the browser dashboard.
 scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]
@@ -96,6 +99,7 @@ scryrs dashboard
 scryrs dashboard --port 9090 --no-open
 scryrs server
 scryrs server --port 9091
+scryrs graph .
 
 OPTIONS
 -h, --help       Print this help message and exit

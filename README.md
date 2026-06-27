@@ -55,7 +55,7 @@ xtask
 
 ## Feature split
 
-The CLI ships six commands:
+The CLI ships seven commands:
 
 ```bash
 # Hotspot analysis from recorded trace events
@@ -74,6 +74,9 @@ cargo run -p scryrs-cli -- dashboard
 
 # Central trace ingest server
 cargo run -p scryrs-cli -- server
+
+# Graph build from hotspot evidence and docs structure
+cargo run -p scryrs-cli -- graph .
 ```
 
 Default features include the standalone suite, Markdown adapter, runtime, and deterministic guardrail support. `full` adds the optional LLM boundary and Rspress adapter.
