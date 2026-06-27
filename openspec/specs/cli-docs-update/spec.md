@@ -1,5 +1,8 @@
-## ADDED Requirements
+# cli-docs-update Specification
 
+## Purpose
+TBD - created by archiving change task-38ad5a05-c745-4bb5-835a-aa8153014618. Update Purpose after archive.
+## Requirements
 ### Requirement: Domain-Driven Opening
 
 The CLI documentation page SHALL open with a domain-driven overview that explains what scryrs CLI helps users accomplish, which problems it solves, and the two main workflow paths.
@@ -146,13 +149,11 @@ The CLI documentation page SHALL include accurate cross-links to `hotspots.md` a
 
 ---
 
-## MODIFIED Requirements
-
 ### Requirement: Command Count Updated
 
-The command count claim in the page opening SHALL be updated from five to six.
+The command count claim in the page opening SHALL be six.
 
-#### Scenario: Page opening no longer claims five commands
+#### Scenario: Page opening correctly states six commands
 
 **Given** the CLI documentation page
 **When** a reader reads the opening paragraph
@@ -163,22 +164,22 @@ The command count claim in the page opening SHALL be updated from five to six.
 
 ### Requirement: Dashboard Endpoint Table Updated
 
-The dashboard REST API table SHALL be updated from three endpoints to five.
+The dashboard REST API table SHALL include all five endpoints.
 
-#### Scenario: Old endpoint list is no longer present
+#### Scenario: Full endpoint list is present
 
 **Given** the CLI documentation page
 **When** a reader consults the dashboard section
 **Then** the REST API table includes `/api/meta` and `/api/sessions/:sessionId`
-**And** the table no longer documents only `/api/hotspots`, `/api/sessions`, and `/api/events`
+**And** the table documents `/api/hotspots`, `/api/sessions`, `/api/events`, `/api/meta`, and `/api/sessions/:sessionId`
 
 ---
 
 ### Requirement: Server Endpoint Table Preserved
 
-The server REST API table SHALL continue to document the three endpoints matching `crates/scryrs-cli/src/server.rs` `write_server_help()`.
+The server REST API table SHALL document the three endpoints matching `crates/scryrs-cli/src/server.rs` `write_server_help()`.
 
-#### Scenario: Server endpoints are unchanged
+#### Scenario: Server endpoints are present
 
 **Given** the CLI documentation page
 **When** a reader consults the server section
@@ -187,11 +188,9 @@ The server REST API table SHALL continue to document the three endpoints matchin
 
 ---
 
-## REMOVED Requirements
+### Requirement: Hook Not in Out-of-Scope List
 
-### Requirement: Hook Removed from Out-of-Scope List
-
-The `hook` command SHALL be removed from the out-of-scope section.
+The CLI documentation page SHALL not list `hook` in the out-of-scope section.
 
 #### Scenario: Hook is not listed as unknown
 
@@ -202,13 +201,14 @@ The `hook` command SHALL be removed from the out-of-scope section.
 
 ---
 
-### Requirement: Explicit Future Command Names Removed
+### Requirement: No Explicit Future Command Names
 
-The explicit enumeration of future command names (`components`, `trace`, `propose`, `graph`, `route`, `adapters`, `report`, `suggest-docs`) SHALL be removed.
+The out-of-scope section SHALL use a general statement instead of enumerating future command names.
 
 #### Scenario: Future commands are not enumerated by name
 
 **Given** the CLI documentation page
 **When** a reader checks the out-of-scope section
-**Then** the section does not list `components`, `trace`, `propose`, `graph`, `route`, `adapters`, `report`, or `suggest-docs` by name
+**Then** the section does not list specific future command names by name
 **And** the section instead states that any command other than the six implemented commands exits 2 with a usage error
+
