@@ -203,12 +203,12 @@ Starts a long-lived HTTP server for central trace event ingest and live hotspot 
   "entries": [
     {
       "rank": 1,
-      "subjectKind": "File",
+      "subjectKind": "file",
       "subject": "src/a.rs",
       "score": 42,
       "counts": {
         "eventType": { "FileOpened": 5, "EditMade": 3 },
-        "outcome": { "Success": 8 }
+        "outcome": { "success": 8 }
       },
       "sessionCount": 3,
       "firstSeen": "2026-06-24T10:00:00Z",
@@ -232,7 +232,7 @@ Starts a long-lived HTTP server for central trace event ingest and live hotspot 
 ```json
 {
   "repositoryId": "repo-a",
-  "subjectKind": "File",
+  "subjectKind": "file",
   "subject": "src/a.rs",
   "score": 42,
   "delta": 1,
@@ -416,7 +416,7 @@ All error messages and human-facing diagnostics are written to stderr.
 
 **Input:** No required positional arguments. Optional flags: `--port <PORT>` (default `8081`), `-p <PORT>`, `--bind <ADDR>` (default `127.0.0.1`), `-b <ADDR>`, `--store <PATH>` (default `.scryrs/server.db`).
 
-**Output:** HTTP server with a single POST endpoint. Startup message written to stderr (e.g., `scryrs server listening on http://127.0.0.1:8081, store .scryrs/server.db`).
+**Output:** HTTP server with three REST endpoints. Startup message written to stderr (e.g., `scryrs server listening on http://127.0.0.1:8081, store .scryrs/server.db`).
 
 **Exit codes:**
 
@@ -482,6 +482,7 @@ cargo install cargo-insta
 ## Related Pages
 
 - [Hotspots](./hotspots.md) — domain concept and interpretation guide (this page covers the CLI output contract and exit codes)
+- [Live Hotspots](./live-hotspots.md) — domain narrative, mode comparison, and end-to-end live workflow
 - [Trace Hook Contract](./trace-hook-contract.md) — how harness hooks capture TraceEvent records for hotspot analysis
 - [Architecture](./architecture.mdx) — crate topology including scryrs-core scoring and the HotspotsReport data flow
 ```

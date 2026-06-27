@@ -410,6 +410,7 @@ No reference hooks for other harnesses are planned at this time. Harness authors
 - [Architecture](./architecture.mdx) — crate topology and runtime flow.
 - [Hotspots](./hotspots.md) — domain concept and interpretation guide (this page covers the hook contract and event schema)
 - [Graph](./graph.md) — domain-oriented explanation of the knowledge graph and how evidence becomes routing context
+- [Live Hotspots](./live-hotspots.md) — domain narrative and end-to-end workflow for the live hotspot server
 
 ## Appendix: Remote Mode (Foundation 02+)
 
