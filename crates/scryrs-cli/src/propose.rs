@@ -60,7 +60,7 @@ pub(crate) fn write_proposals(out: &mut impl Write, err: &mut impl Write, path: 
     let proposals = scryrs_curator::generate_proposals(
         &graph_doc,
         &hotspots_report.entries,
-        &hotspots_report.generatedAt,
+        &hotspots_report.generated_at,
     );
 
     // Validate every proposal.
@@ -112,9 +112,9 @@ pub(crate) fn write_proposals(out: &mut impl Write, err: &mut impl Write, path: 
 /// and the `entries` array.
 #[cfg(feature = "curator")]
 #[derive(Debug, serde::Deserialize)]
-#[allow(non_snake_case)]
 struct HotspotsReportPartial {
-    generatedAt: String,
+    #[serde(rename = "generatedAt")]
+    generated_at: String,
     entries: Vec<scryrs_types::HotspotEntry>,
 }
 
@@ -594,9 +594,5 @@ mod tests {
         assert!(found, "semantic_graph_grouping proposal must exist");
     }
 
-    #[test]
-    fn propose_command_in_help_output() {
-        // This is tested via the integration test in dispatch_tests.rs (task 4.9).
-        // Placeholder to satisfy test module coverage expectations.
-    }
+
 }

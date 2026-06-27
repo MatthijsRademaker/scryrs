@@ -4,7 +4,7 @@ use serde_json::json;
 
 /// Version of the `--help-json` surface document format, independent of
 /// `SCHEMA_VERSION` which governs command output envelopes.
-const SURFACE_VERSION: &str = "0.7.0";
+const SURFACE_VERSION: &str = "0.8.0";
 
 pub(crate) fn cli_surface_doc() -> String {
     let doc = json!({

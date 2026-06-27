@@ -398,7 +398,6 @@ where
                         .unwrap_or(".");
                     write_route_json(&mut out, &mut err, path)
                 }
-                #[cfg(feature = "curator")]
                 Some(("propose", m)) => {
                     let path = m
                         .get_one::<String>("PATH")
