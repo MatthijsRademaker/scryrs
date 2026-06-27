@@ -16,6 +16,11 @@ pub const HOTSPOT_SCHEMA_VERSION: &str = "1.0.0";
 /// `HOTSPOT_SCHEMA_VERSION` (local report output).
 pub const LIVE_HOTSPOT_SCHEMA_VERSION: &str = "1.0.0";
 
+/// Version for the knowledge graph wire contract, independent of
+/// `SCHEMA_VERSION`, `HOTSPOT_SCHEMA_VERSION`, and
+/// `LIVE_HOTSPOT_SCHEMA_VERSION`.
+pub const GRAPH_SCHEMA_VERSION: &str = "1.0.0";
+
 /// Suite component metadata used by feature-gated crates and CLI output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FeatureDescriptor {
@@ -389,11 +394,129 @@ pub struct LiveHotspotsResponse {
     pub entries: Vec<HotspotEntry>,
 }
 
-/// Knowledge graph node placeholder.
-#[derive(Debug, Clone, PartialEq, Eq)]
+// --- Knowledge graph wire-contract types ---
+
+/// Closed set of evidence provenance kinds carried by `EvidenceLink`.
+/// Serialized as snake_case strings on the wire.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceSourceKind {
+    /// Link to a hotspot subject identity (no trace row granularity).
+    HotspotSubject,
+    /// Link to one or more local `trace_events.id` rows.
+    LocalTraceRow,
+    /// Link to one or more live `server_trace_events.id` rows.
+    ServerTraceRow,
+    /// Link to a documentation reference.
+    DocReference,
+    /// Link to a recorded evidence descriptor.
+    RecordedEvidence,
+}
+
+/// Flat evidence link attaching provenance to a graph node or edge.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvidenceLink {
+    /// Provenance source category.
+    pub source_kind: EvidenceSourceKind,
+    /// Subject that this evidence applies to (e.g. hotspot subject).
+    pub subject: String,
+    /// Ordered row IDs from the source data store, empty when not applicable.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub row_ids: Vec<u64>,
+    /// Documentation reference for `DocReference` links.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc_ref: Option<String>,
+    /// Recorded evidence descriptor for `RecordedEvidence` links.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Optional score snapshot; not part of stable provenance identity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<u32>,
+    /// Additive namespaced metadata extension map.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<std::collections::HashMap<String, serde_json::Value>>,
+}
+
+impl Eq for EvidenceLink {}
+
+/// Top-level metadata carried on a knowledge graph document.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphMetadata {
+    /// Repository identifier, present for server-owned graphs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository_id: Option<String>,
+    /// Additive namespaced metadata extension map.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<std::collections::HashMap<String, serde_json::Value>>,
+}
+
+/// Route-ready graph node carrying identity, filtering, and evidence fields.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GraphNode {
+    /// Stable unique node identifier.
     pub id: String,
-    pub title: String,
+    /// Human-readable label for display and filtering.
+    pub label: String,
+    /// Optional longer description or summary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// String-backed node kind for additive adapter evolution.
+    pub kind: String,
+    /// Searchable and filterable tags, deterministically sorted.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub tags: Vec<String>,
+    /// Alternative names for this node, deterministically sorted.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub aliases: Vec<String>,
+    /// Evidence provenance links for this node.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub evidence_links: Vec<EvidenceLink>,
+    /// Additive namespaced metadata extension map.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<std::collections::HashMap<String, serde_json::Value>>,
+}
+
+/// Directed graph edge connecting two nodes with evidence provenance.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphEdge {
+    /// Stable unique edge identifier.
+    pub id: String,
+    /// Source node identified by its `GraphNode.id`.
+    pub source_node_id: String,
+    /// Target node identified by its `GraphNode.id`.
+    pub target_node_id: String,
+    /// String-backed relationship kind for additive adapter evolution.
+    pub relationship: String,
+    /// Optional human-readable label.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Searchable and filterable tags, deterministically sorted.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub tags: Vec<String>,
+    /// Evidence provenance links for this edge.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub evidence_links: Vec<EvidenceLink>,
+    /// Additive namespaced metadata extension map.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<std::collections::HashMap<String, serde_json::Value>>,
+}
+
+/// Versioned knowledge graph document — the top-level wire contract.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnowledgeGraphDocument {
+    /// Schema version, always equal to `GRAPH_SCHEMA_VERSION`.
+    pub schema_version: String,
+    /// Top-level graph metadata including optional repository context.
+    pub metadata: GraphMetadata,
+    /// Deterministically ordered graph nodes.
+    pub nodes: Vec<GraphNode>,
+    /// Deterministically ordered directed graph edges.
+    pub edges: Vec<GraphEdge>,
 }
 
 /// Reviewable knowledge proposal placeholder.
@@ -1718,5 +1841,407 @@ mod tests {
         };
         assert_eq!(signal.score, 12);
         assert_eq!(signal.delta, 3);
+    }
+
+    // --- Graph contract DTO round-trip tests (Task 3.1) ---
+
+    #[test]
+    fn graph_schema_version_is_independent() {
+        assert_eq!(GRAPH_SCHEMA_VERSION, "1.0.0");
+        assert_ne!(GRAPH_SCHEMA_VERSION, SCHEMA_VERSION);
+        // Same string value as hotspot versions but semantically independent.
+        assert_eq!(GRAPH_SCHEMA_VERSION, HOTSPOT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn evidence_source_kind_serializes_as_snake_case() {
+        let json = serialize_json(&EvidenceSourceKind::HotspotSubject);
+        assert!(json.contains("\"hotspot_subject\""), "got: {json}");
+        let json = serialize_json(&EvidenceSourceKind::LocalTraceRow);
+        assert!(json.contains("\"local_trace_row\""), "got: {json}");
+        let json = serialize_json(&EvidenceSourceKind::ServerTraceRow);
+        assert!(json.contains("\"server_trace_row\""), "got: {json}");
+        let json = serialize_json(&EvidenceSourceKind::DocReference);
+        assert!(json.contains("\"doc_reference\""), "got: {json}");
+        let json = serialize_json(&EvidenceSourceKind::RecordedEvidence);
+        assert!(json.contains("\"recorded_evidence\""), "got: {json}");
+    }
+
+    #[test]
+    fn evidence_source_kind_round_trips() {
+        for kind in &[
+            EvidenceSourceKind::HotspotSubject,
+            EvidenceSourceKind::LocalTraceRow,
+            EvidenceSourceKind::ServerTraceRow,
+            EvidenceSourceKind::DocReference,
+            EvidenceSourceKind::RecordedEvidence,
+        ] {
+            let json = serialize_json(kind);
+            let reconstructed: EvidenceSourceKind = deserialize_json(&json);
+            assert_eq!(reconstructed, *kind);
+        }
+    }
+
+    #[test]
+    fn evidence_link_minimal_round_trips() {
+        let link = EvidenceLink {
+            source_kind: EvidenceSourceKind::HotspotSubject,
+            subject: "src/main.rs".into(),
+            row_ids: vec![],
+            doc_ref: None,
+            description: None,
+            score: None,
+            metadata: None,
+        };
+        let json = serialize_json(&link);
+        let reconstructed: EvidenceLink = deserialize_json(&json);
+        assert_eq!(reconstructed.subject, "src/main.rs");
+        assert_eq!(
+            reconstructed.source_kind,
+            EvidenceSourceKind::HotspotSubject
+        );
+        assert!(reconstructed.row_ids.is_empty());
+        // Optional fields should be absent from JSON when None/empty.
+        assert!(!json.contains("docRef"));
+        assert!(!json.contains("description"));
+        assert!(!json.contains("score"));
+        assert!(!json.contains("rowIds"));
+    }
+
+    #[test]
+    fn evidence_link_with_all_fields_round_trips() {
+        let link = EvidenceLink {
+            source_kind: EvidenceSourceKind::LocalTraceRow,
+            subject: "search:routing".into(),
+            row_ids: vec![5, 12, 23],
+            doc_ref: Some("docs/routing.md".into()),
+            description: Some("traced from 3 event rows".into()),
+            score: Some(15),
+            metadata: None,
+        };
+        let json = serialize_json(&link);
+        let reconstructed: EvidenceLink = deserialize_json(&json);
+        assert_eq!(reconstructed.subject, "search:routing");
+        assert_eq!(reconstructed.source_kind, EvidenceSourceKind::LocalTraceRow);
+        assert_eq!(reconstructed.row_ids, vec![5, 12, 23]);
+        assert_eq!(reconstructed.doc_ref.as_deref(), Some("docs/routing.md"));
+        assert_eq!(
+            reconstructed.description.as_deref(),
+            Some("traced from 3 event rows")
+        );
+        assert_eq!(reconstructed.score, Some(15));
+    }
+
+    #[test]
+    fn evidence_link_doc_reference_fields_are_independent() {
+        let link = EvidenceLink {
+            source_kind: EvidenceSourceKind::DocReference,
+            subject: "routing".into(),
+            row_ids: vec![],
+            doc_ref: Some("docs/routing.md".into()),
+            description: None,
+            score: None,
+            metadata: None,
+        };
+        let json = serialize_json(&link);
+        assert!(json.contains("\"sourceKind\":\"doc_reference\""));
+        assert!(json.contains("\"docRef\":\"docs/routing.md\""));
+        let reconstructed: EvidenceLink = deserialize_json(&json);
+        assert_eq!(reconstructed.source_kind, EvidenceSourceKind::DocReference);
+        assert_eq!(reconstructed.doc_ref.as_deref(), Some("docs/routing.md"));
+        assert!(reconstructed.row_ids.is_empty());
+    }
+
+    #[test]
+    fn evidence_link_recorded_evidence_fields_are_independent() {
+        let link = EvidenceLink {
+            source_kind: EvidenceSourceKind::RecordedEvidence,
+            subject: "hotspot:file:src/lib.rs".into(),
+            row_ids: vec![],
+            doc_ref: None,
+            description: Some("manual review: frequent edits".into()),
+            score: None,
+            metadata: None,
+        };
+        let json = serialize_json(&link);
+        assert!(json.contains("\"sourceKind\":\"recorded_evidence\""));
+        assert!(json.contains("\"description\":\"manual review: frequent edits\""));
+        let reconstructed: EvidenceLink = deserialize_json(&json);
+        assert_eq!(
+            reconstructed.source_kind,
+            EvidenceSourceKind::RecordedEvidence
+        );
+        assert_eq!(
+            reconstructed.description.as_deref(),
+            Some("manual review: frequent edits")
+        );
+        assert!(reconstructed.row_ids.is_empty());
+    }
+
+    #[test]
+    fn graph_node_minimal_round_trips() {
+        let node = GraphNode {
+            id: "n1".into(),
+            label: "Node One".into(),
+            description: None,
+            kind: "concept".into(),
+            tags: vec![],
+            aliases: vec![],
+            evidence_links: vec![],
+            metadata: None,
+        };
+        let json = serialize_json(&node);
+        let reconstructed: GraphNode = deserialize_json(&json);
+        assert_eq!(reconstructed, node);
+        assert!(json.contains("\"id\":\"n1\""));
+        assert!(json.contains("\"kind\":\"concept\""));
+        assert!(!json.contains("description"));
+        assert!(!json.contains("tags"));
+    }
+
+    #[test]
+    fn graph_node_full_round_trips() {
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert(
+            "example_com_priority".into(),
+            serde_json::Value::Number(1.into()),
+        );
+
+        let node = GraphNode {
+            id: "n1".into(),
+            label: "Node One".into(),
+            description: Some("A detailed description".into()),
+            kind: "file".into(),
+            tags: vec!["rust".into(), "core".into()],
+            aliases: vec!["n1alias".into()],
+            evidence_links: vec![EvidenceLink {
+                source_kind: EvidenceSourceKind::HotspotSubject,
+                subject: "src/main.rs".into(),
+                row_ids: vec![10, 20],
+                doc_ref: None,
+                description: None,
+                score: None,
+                metadata: None,
+            }],
+            metadata: Some(metadata),
+        };
+        let json = serialize_json(&node);
+        let reconstructed: GraphNode = deserialize_json(&json);
+        assert_eq!(reconstructed, node);
+    }
+
+    #[test]
+    fn graph_edge_minimal_round_trips() {
+        let edge = GraphEdge {
+            id: "e1".into(),
+            source_node_id: "n1".into(),
+            target_node_id: "n2".into(),
+            relationship: "depends_on".into(),
+            label: None,
+            tags: vec![],
+            evidence_links: vec![],
+            metadata: None,
+        };
+        let json = serialize_json(&edge);
+        let reconstructed: GraphEdge = deserialize_json(&json);
+        assert_eq!(reconstructed, edge);
+        assert!(json.contains("\"id\":\"e1\""));
+        assert!(json.contains("\"sourceNodeId\":\"n1\""));
+        assert!(json.contains("\"targetNodeId\":\"n2\""));
+        assert!(json.contains("\"relationship\":\"depends_on\""));
+    }
+
+    #[test]
+    fn graph_edge_full_round_trips() {
+        let edge = GraphEdge {
+            id: "e1".into(),
+            source_node_id: "n1".into(),
+            target_node_id: "n2".into(),
+            relationship: "references".into(),
+            label: Some("docs reference".into()),
+            tags: vec!["cross-crate".into()],
+            evidence_links: vec![EvidenceLink {
+                source_kind: EvidenceSourceKind::DocReference,
+                subject: "routing".into(),
+                row_ids: vec![],
+                doc_ref: Some("docs/routing.md".into()),
+                description: None,
+                score: None,
+                metadata: None,
+            }],
+            metadata: None,
+        };
+        let json = serialize_json(&edge);
+        let reconstructed: GraphEdge = deserialize_json(&json);
+        assert_eq!(reconstructed, edge);
+    }
+
+    #[test]
+    fn graph_metadata_round_trips() {
+        let meta = GraphMetadata {
+            repository_id: Some("github.com/example/repo".into()),
+            metadata: None,
+        };
+        let json = serialize_json(&meta);
+        let reconstructed: GraphMetadata = deserialize_json(&json);
+        assert_eq!(reconstructed, meta);
+
+        let meta_no_repo = GraphMetadata {
+            repository_id: None,
+            metadata: None,
+        };
+        let json = serialize_json(&meta_no_repo);
+        assert!(!json.contains("repositoryId"));
+        let reconstructed: GraphMetadata = deserialize_json(&json);
+        assert!(reconstructed.repository_id.is_none());
+    }
+
+    #[test]
+    fn knowledge_graph_document_round_trips() {
+        let doc = KnowledgeGraphDocument {
+            schema_version: GRAPH_SCHEMA_VERSION.into(),
+            metadata: GraphMetadata {
+                repository_id: Some("github.com/example/repo".into()),
+                metadata: None,
+            },
+            nodes: vec![GraphNode {
+                id: "n1".into(),
+                label: "Node One".into(),
+                description: None,
+                kind: "file".into(),
+                tags: vec![],
+                aliases: vec![],
+                evidence_links: vec![],
+                metadata: None,
+            }],
+            edges: vec![],
+        };
+        let json = serialize_json(&doc);
+        let reconstructed: KnowledgeGraphDocument = deserialize_json(&json);
+        assert_eq!(reconstructed, doc);
+        assert!(json.contains("\"schemaVersion\":\"1.0.0\""));
+        assert!(json.contains("\"repositoryId\":\"github.com/example/repo\""));
+    }
+
+    #[test]
+    fn knowledge_graph_document_top_level_fields_are_present() {
+        let doc = KnowledgeGraphDocument {
+            schema_version: GRAPH_SCHEMA_VERSION.into(),
+            metadata: GraphMetadata {
+                repository_id: None,
+                metadata: None,
+            },
+            nodes: vec![],
+            edges: vec![],
+        };
+        let json = serialize_json(&doc);
+        assert!(
+            json.contains("\"schemaVersion\""),
+            "must contain schemaVersion"
+        );
+        assert!(json.contains("\"metadata\""), "must contain metadata");
+        assert!(json.contains("\"nodes\""), "must contain nodes");
+        assert!(json.contains("\"edges\""), "must contain edges");
+    }
+
+    // --- Evidence-link compatibility from hotspot contracts (Task 3.4) ---
+
+    #[test]
+    fn evidence_link_from_local_hotspot_entry_evidence() {
+        // Local HotspotEntry.evidence.rowIds maps to EvidenceLink with sourceKind=local_trace_row.
+        let hotspot_evidence = HotspotEvidence {
+            rowIds: vec![3, 7, 12, 45, 67],
+        };
+        let link = EvidenceLink {
+            source_kind: EvidenceSourceKind::LocalTraceRow,
+            subject: "file:src/main.rs".into(),
+            row_ids: hotspot_evidence.rowIds.clone(),
+            doc_ref: None,
+            description: None,
+            score: None,
+            metadata: None,
+        };
+        assert_eq!(link.source_kind, EvidenceSourceKind::LocalTraceRow);
+        assert_eq!(link.row_ids, vec![3, 7, 12, 45, 67]);
+        // Verify the row IDs were taken from the hotspot evidence unmodified.
+        assert_eq!(link.row_ids, hotspot_evidence.rowIds);
+    }
+
+    #[test]
+    fn evidence_link_from_hotspot_signal_evidence_row_ids() {
+        // Live HotspotSignal.evidenceRowIds maps to EvidenceLink with sourceKind=server_trace_row.
+        let signal = HotspotSignal {
+            repositoryId: "repo-a".into(),
+            subjectKind: "file".into(),
+            subject: "src/main.rs".into(),
+            score: 15,
+            delta: 3,
+            window: "cumulative".into(),
+            threshold: 10,
+            evidenceRowIds: vec![1, 5, 9],
+            createdAt: "2026-06-25T12:00:00Z".into(),
+        };
+        let link = EvidenceLink {
+            source_kind: EvidenceSourceKind::ServerTraceRow,
+            subject: signal.subject.clone(),
+            row_ids: signal.evidenceRowIds.clone(),
+            doc_ref: None,
+            description: None,
+            score: Some(signal.score),
+            metadata: None,
+        };
+        assert_eq!(link.source_kind, EvidenceSourceKind::ServerTraceRow);
+        assert_eq!(link.subject, "src/main.rs");
+        assert_eq!(link.row_ids, vec![1, 5, 9]);
+        assert_eq!(link.score, Some(15));
+        // Verify the evidence row IDs were taken from the signal unmodified.
+        assert_eq!(link.row_ids, signal.evidenceRowIds);
+    }
+
+    #[test]
+    fn evidence_link_compatibility_does_not_change_hotspot_contracts() {
+        // Construct a HotspotEntry and HotspotSignal normally and verify
+        // they serialize unchanged — evidence links are additive, not mutating.
+        let entry = HotspotEntry {
+            rank: 1,
+            subjectKind: "file".to_string(),
+            subject: "src/lib.rs".to_string(),
+            score: 5,
+            counts: HotspotCounts {
+                eventType: {
+                    let mut m = std::collections::HashMap::new();
+                    m.insert("FileOpened".to_string(), 1u32);
+                    m
+                },
+                outcome: {
+                    let mut m = std::collections::HashMap::new();
+                    m.insert("success".to_string(), 1u32);
+                    m
+                },
+            },
+            sessionCount: 1,
+            firstSeen: "2026-06-21T09:00:00Z".to_string(),
+            lastSeen: "2026-06-21T09:00:00Z".to_string(),
+            evidence: HotspotEvidence { rowIds: vec![42] },
+        };
+        let entry_json = serialize_json(&entry);
+        assert!(entry_json.contains("\"rank\":1"));
+        assert!(entry_json.contains("\"evidence\""));
+        assert!(entry_json.contains("\"rowIds\":[42]"));
+
+        let signal = HotspotSignal {
+            repositoryId: "repo-a".into(),
+            subjectKind: "command".into(),
+            subject: "cargo build".into(),
+            score: 3,
+            delta: 2,
+            window: "cumulative".into(),
+            threshold: 5,
+            evidenceRowIds: vec![77],
+            createdAt: "2026-06-25T12:00:00Z".into(),
+        };
+        let signal_json = serialize_json(&signal);
+        assert!(signal_json.contains("\"evidenceRowIds\":[77]"));
+        assert!(signal_json.contains("\"subjectKind\":\"command\""));
     }
 }
