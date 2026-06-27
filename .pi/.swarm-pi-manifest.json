@@ -377,6 +377,18 @@
     "prompts/opsx-archive-auto.md": {
       "sourceHash": "0308c61b51c331169db4b477c3ba75b9d1d743930a743f32359bc5c2fed423b3",
       "installedHash": "0308c61b51c331169db4b477c3ba75b9d1d743930a743f32359bc5c2fed423b3"
+    },
+    "prompts/opsx-archive-nonterminal.md": {
+      "sourceHash": "9d0344be057fb579c2a556195f06f28f8d15c347c57a121144992dcb940a6fb3",
+      "installedHash": "9d0344be057fb579c2a556195f06f28f8d15c347c57a121144992dcb940a6fb3"
+    },
+    "prompts/opsx-code-review.md": {
+      "sourceHash": "0f52b8a3fcadb2a375fd8eb256d768ed3a52fd25cee651dfdb93917f5170535f",
+      "installedHash": "0f52b8a3fcadb2a375fd8eb256d768ed3a52fd25cee651dfdb93917f5170535f"
+    },
+    "prompts/opsx-fix-review-findings.md": {
+      "sourceHash": "81519d6a6709183357373a1d478c9711471cd7bf34a7439f1af113163e7714a1",
+      "installedHash": "81519d6a6709183357373a1d478c9711471cd7bf34a7439f1af113163e7714a1"
     }
   }
 }
