@@ -18,6 +18,7 @@ mod record;
 mod remote_config;
 #[cfg(feature = "core")]
 mod remote_submit;
+mod route;
 #[cfg(feature = "core")]
 pub(crate) mod store_override;
 

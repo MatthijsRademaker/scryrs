@@ -201,6 +201,22 @@ pub(crate) fn cli_surface_doc() -> String {
                     "mimeType": "application/json",
                     "description": "Single-line KnowledgeGraphDocument JSON written to stdout. Also persisted to .scryrs/graph.json."
                 }
+            },
+            {
+                "name": "route",
+                "description": "Generate the route manifest from a knowledge graph artifact",
+                "arguments": [
+                    {
+                        "name": "PATH",
+                        "type": "string",
+                        "required": true,
+                        "description": "Path to the repository root directory"
+                    }
+                ],
+                "output": {
+                    "mimeType": "application/json",
+                    "description": "Single-line RouteManifestDocument JSON written to stdout. Also persisted to .scryrs/routes.json."
+                }
             }
         ],
         "globalFlags": [

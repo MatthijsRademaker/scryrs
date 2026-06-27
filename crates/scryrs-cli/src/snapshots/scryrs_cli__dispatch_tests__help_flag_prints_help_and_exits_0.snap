@@ -27,6 +27,9 @@ Live mode requires --ingest-url, --workspace-id, and --agent-id.
 scryrs graph <PATH>
 Build a repository knowledge graph from hotspot evidence and docs structure.
 Emits a single-line KnowledgeGraphDocument JSON to stdout and .scryrs/graph.json.
+scryrs route <PATH>
+Generate the route manifest from a knowledge graph artifact.
+Emits a single-line RouteManifestDocument JSON to stdout and .scryrs/routes.json.
 scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]
 Start local dashboard server and open the browser dashboard.
 scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]
@@ -100,6 +103,7 @@ scryrs dashboard --port 9090 --no-open
 scryrs server
 scryrs server --port 9091
 scryrs graph .
+  scryrs route .
 
 OPTIONS
 -h, --help       Print this help message and exit

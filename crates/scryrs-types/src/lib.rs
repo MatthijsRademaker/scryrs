@@ -21,6 +21,11 @@ pub const LIVE_HOTSPOT_SCHEMA_VERSION: &str = "1.0.0";
 /// `LIVE_HOTSPOT_SCHEMA_VERSION`.
 pub const GRAPH_SCHEMA_VERSION: &str = "1.0.0";
 
+/// Version for the route manifest wire contract, independent of
+/// `SCHEMA_VERSION`, `HOTSPOT_SCHEMA_VERSION`,
+/// `LIVE_HOTSPOT_SCHEMA_VERSION`, and `GRAPH_SCHEMA_VERSION`.
+pub const ROUTE_SCHEMA_VERSION: &str = "1.0.0";
+
 /// Suite component metadata used by feature-gated crates and CLI output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FeatureDescriptor {
@@ -526,11 +531,55 @@ pub struct KnowledgeProposal {
     pub rationale: String,
 }
 
-/// Runtime routing hint placeholder.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RouteHint {
+/// Optional grouping for a route entry, derived from an explicit
+/// `contains` edge from a parent group node.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteGrouping {
+    /// The parent node's `id`.
+    pub group_id: String,
+    /// The parent node's `label`.
+    pub group_label: String,
+}
+
+/// A single route entry with identity, target, and evidence backlinks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteEntry {
+    /// Stable unique node identifier (matches source graph node `id`).
+    pub id: String,
+    /// Source graph node kind (e.g. `file`, `search`, `doc_page`).
+    pub subject_kind: String,
+    /// Raw subject value from the source graph node.
+    pub subject: String,
+    /// Human-readable label for display and filtering.
+    pub label: String,
+    /// Normalized load target (equals source graph node `id`).
     pub target: String,
-    pub reason: String,
+    /// String-backed kind for additive adapter evolution.
+    pub kind: String,
+    /// Evidence provenance links for this route.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub evidence_links: Vec<EvidenceLink>,
+    /// Optional grouping derived from an explicit `contains` edge
+    /// from a parent group node.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grouping: Option<RouteGrouping>,
+    /// Additive namespaced metadata extension map.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<std::collections::HashMap<String, serde_json::Value>>,
+}
+
+/// Versioned route manifest document — the top-level wire contract.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteManifestDocument {
+    /// Schema version, always equal to `ROUTE_SCHEMA_VERSION`.
+    pub schema_version: String,
+    /// Top-level metadata carrying optional repository context.
+    pub metadata: GraphMetadata,
+    /// Deterministically ordered route entries.
+    pub routes: Vec<RouteEntry>,
 }
 
 #[cfg(test)]
@@ -2243,5 +2292,182 @@ mod tests {
         let signal_json = serialize_json(&signal);
         assert!(signal_json.contains("\"evidenceRowIds\":[77]"));
         assert!(signal_json.contains("\"subjectKind\":\"command\""));
+    }
+
+    // --- Route manifest schema tests ---
+
+    #[test]
+    fn route_manifest_document_round_trip() {
+        let doc = RouteManifestDocument {
+            schema_version: ROUTE_SCHEMA_VERSION.into(),
+            metadata: GraphMetadata {
+                repository_id: None,
+                metadata: None,
+            },
+            routes: vec![RouteEntry {
+                id: "file:src/main.rs".into(),
+                subject_kind: "file".into(),
+                subject: "src/main.rs".into(),
+                label: "src/main.rs".into(),
+                target: "file:src/main.rs".into(),
+                kind: "file".into(),
+                evidence_links: vec![EvidenceLink {
+                    source_kind: EvidenceSourceKind::LocalTraceRow,
+                    subject: "src/main.rs".into(),
+                    row_ids: vec![1, 2],
+                    doc_ref: None,
+                    description: None,
+                    score: Some(10),
+                    metadata: None,
+                }],
+                grouping: None,
+                metadata: None,
+            }],
+        };
+
+        let json = serialize_json(&doc);
+        assert!(json.contains("\"schemaVersion\":\"1.0.0\""));
+        assert!(json.contains("\"id\":\"file:src/main.rs\""));
+        assert!(json.contains("\"subjectKind\":\"file\""));
+        assert!(json.contains("\"evidenceLinks\""));
+        assert!(!json.contains("\"grouping\""));
+
+        let reconstructed: RouteManifestDocument = deserialize_json(&json);
+        assert_eq!(reconstructed, doc);
+    }
+
+    #[test]
+    fn route_entry_with_grouping_round_trip() {
+        let entry = RouteEntry {
+            id: "doc_page:graph".into(),
+            subject_kind: "doc_page".into(),
+            subject: "graph".into(),
+            label: "graph".into(),
+            target: "doc_page:graph".into(),
+            kind: "doc_page".into(),
+            evidence_links: vec![EvidenceLink {
+                source_kind: EvidenceSourceKind::DocReference,
+                subject: "graph".into(),
+                row_ids: vec![],
+                doc_ref: Some("graph".into()),
+                description: None,
+                score: None,
+                metadata: None,
+            }],
+            grouping: Some(RouteGrouping {
+                group_id: "technical".into(),
+                group_label: "Technical".into(),
+            }),
+            metadata: None,
+        };
+
+        let json = serialize_json(&entry);
+        assert!(json.contains("\"grouping\""));
+        assert!(json.contains("\"groupId\":\"technical\""));
+        assert!(json.contains("\"groupLabel\":\"Technical\""));
+        assert!(json.contains("\"sourceKind\":\"doc_reference\""));
+
+        let reconstructed: RouteEntry = deserialize_json(&json);
+        assert_eq!(reconstructed, entry);
+    }
+
+    #[test]
+    fn route_entry_without_grouping_omits_field() {
+        let entry = RouteEntry {
+            id: "search:routing".into(),
+            subject_kind: "search".into(),
+            subject: "routing".into(),
+            label: "routing".into(),
+            target: "search:routing".into(),
+            kind: "search".into(),
+            evidence_links: vec![],
+            grouping: None,
+            metadata: None,
+        };
+
+        let json = serialize_json(&entry);
+        assert!(!json.contains("grouping"));
+
+        let reconstructed: RouteEntry = deserialize_json(&json);
+        assert_eq!(reconstructed, entry);
+    }
+
+    #[test]
+    fn route_entry_empty_evidence_links_omitted() {
+        let entry = RouteEntry {
+            id: "symbol:MyStruct".into(),
+            subject_kind: "symbol".into(),
+            subject: "MyStruct".into(),
+            label: "MyStruct".into(),
+            target: "symbol:MyStruct".into(),
+            kind: "symbol".into(),
+            evidence_links: vec![],
+            grouping: None,
+            metadata: None,
+        };
+
+        let json = serialize_json(&entry);
+        assert!(!json.contains("evidenceLinks"));
+        let reconstructed: RouteEntry = deserialize_json(&json);
+        assert_eq!(reconstructed, entry);
+    }
+
+    #[test]
+    fn route_schema_version_is_independent() {
+        assert_eq!(ROUTE_SCHEMA_VERSION, "1.0.0");
+        // Must exist independently of all other schema versions.
+        assert_ne!(ROUTE_SCHEMA_VERSION, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn route_manifest_document_multi_entry_round_trip() {
+        let doc = RouteManifestDocument {
+            schema_version: ROUTE_SCHEMA_VERSION.into(),
+            metadata: GraphMetadata {
+                repository_id: Some("repo-a".into()),
+                metadata: None,
+            },
+            routes: vec![
+                RouteEntry {
+                    id: "file:aaa.rs".into(),
+                    subject_kind: "file".into(),
+                    subject: "aaa.rs".into(),
+                    label: "aaa.rs".into(),
+                    target: "file:aaa.rs".into(),
+                    kind: "file".into(),
+                    evidence_links: vec![],
+                    grouping: None,
+                    metadata: None,
+                },
+                RouteEntry {
+                    id: "search:routing".into(),
+                    subject_kind: "search".into(),
+                    subject: "routing".into(),
+                    label: "routing".into(),
+                    target: "search:routing".into(),
+                    kind: "search".into(),
+                    evidence_links: vec![EvidenceLink {
+                        source_kind: EvidenceSourceKind::HotspotSubject,
+                        subject: "routing".into(),
+                        row_ids: vec![5],
+                        doc_ref: None,
+                        description: None,
+                        score: Some(42),
+                        metadata: None,
+                    }],
+                    grouping: None,
+                    metadata: None,
+                },
+            ],
+        };
+
+        let json = serialize_json(&doc);
+        let reconstructed: RouteManifestDocument = deserialize_json(&json);
+        assert_eq!(reconstructed, doc);
+        assert_eq!(reconstructed.routes.len(), 2);
+        assert_eq!(
+            reconstructed.metadata.repository_id.as_deref(),
+            Some("repo-a")
+        );
     }
 }

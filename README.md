@@ -77,6 +77,9 @@ cargo run -p scryrs-cli -- server
 
 # Graph build from hotspot evidence and docs structure
 cargo run -p scryrs-cli -- graph .
+
+# Route manifest generation
+cargo run -p scryrs-cli -- route .
 ```
 
 Default features include the standalone suite, Markdown adapter, runtime, and deterministic guardrail support. `full` adds the optional LLM boundary and Rspress adapter.
@@ -329,7 +332,7 @@ See `scryrs --help`
 
 ### Current limitations
 
-- **Six commands:** `hotspots`, `record`, `hook`, `init`, `dashboard`, and `server` are the supported commands. Everything else (`trace`, `propose`, `graph`, `route`, `adapters`, `report`, `suggest-docs`) produces an "unknown command" error.
+- **Seven commands:** `hotspots`, `record`, `hook`, `init`, `dashboard`, `server`, `graph`, and `route` are the supported commands. Everything else (`trace`, `propose`, `adapters`, `report`, `suggest-docs`) produces an "unknown command" error.
 - **Hotspot analysis:** `hotspots` reads from `.scryrs/scryrs.db` and produces ranked `HotspotEntry` results. Empty or missing stores produce distinct exit codes.
 - **Record is ingestion-only:** `scryrs record` validates and persists trace events. It does not trigger hotspot analysis, graph building, or other downstream processing.
 - **What's not listed:** No speculative future commands or features appear here. The quickstart documents exactly what exists today.
