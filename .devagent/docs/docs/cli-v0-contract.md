@@ -242,6 +242,62 @@ Projects `.scryrs/graph.json` into deterministic `RouteManifestDocument` artifac
 - `grouping` is present only when explicit `contains` edge from parent group node exists.
 - Output is deterministic: routes sort by node `id` ascending and carry no wall-clock generation fields.
 
+#### Route Hint Contract
+
+The route manifest is accompanied by a deterministic `RouteHintDocument` projection (schema version `HINT_SCHEMA_VERSION = 1.0.0`, independent from `ROUTE_SCHEMA_VERSION`). Each `RouteEntry` produces exactly one `RouteHintItem`:
+
+| Field | Type | Source | Description |
+|-------|------|--------|-------------|
+| `schemaVersion` | string | `HINT_SCHEMA_VERSION` | Always `"1.0.0"` |
+| `hints` | array | `RouteEntry[]` input | One `RouteHintItem` per route entry, deterministic order |
+| `hints[].routeId` | string | `RouteEntry.id` | Source route entry id |
+| `hints[].target` | string | `RouteEntry.target` | Normalized load target |
+| `hints[].label` | string | `RouteEntry.label` | Human-readable label |
+| `hints[].rank` | number (u32) | Ordinal index (1-based) | Deterministic placeholder — NOT a frozen long-term ranking formula |
+| `hints[].relevance` | number or absent | Always `None` | Deferred for future enhancement |
+| `hints[].reason` | string | Template: `"Route '{label}' ({id}): {N} evidence link(s), subject kind {subjectKind}"` | Evidence count and identity explanation |
+| `hints[].evidence` | array | `RouteEntry.evidenceLinks` (verbatim copy) | Provenance links for traceability |
+
+**Example JSON:**
+
+```json
+{
+  "schemaVersion": "1.0.0",
+  "hints": [
+    {
+      "routeId": "file:src/main.rs",
+      "target": "file:src/main.rs",
+      "label": "src/main.rs",
+      "rank": 1,
+      "reason": "Route 'src/main.rs' (file:src/main.rs): 2 evidence link(s), subject kind file",
+      "evidence": [
+        {
+          "sourceKind": "local_trace_row",
+          "subject": "src/main.rs",
+          "rowIds": [1, 2]
+        }
+      ]
+    },
+    {
+      "routeId": "search:routing",
+      "target": "search:routing",
+      "label": "routing",
+      "rank": 2,
+      "reason": "Route 'routing' (search:routing): 3 evidence link(s), subject kind search",
+      "evidence": [
+        {
+          "sourceKind": "local_trace_row",
+          "subject": "routing",
+          "rowIds": [3, 5, 7]
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Ranking policy:** `rank` is a deterministic ordinal placeholder derived from manifest entry sort order (by `id` ascending). `relevance` is deferred (`None`) and explicitly does NOT represent a frozen long-term ranking formula. The `scryrs route explain` command is deferred for future enhancement.
+
 ### `scryrs propose <PATH>`
 
 Generates validated review-only `ProposalDocument` inbox artifacts from hotspot and graph evidence.
