@@ -60,11 +60,14 @@ Proposal files are not truth. Accepted evidence is truth candidate. Production s
 Required boundary:
 
 ```text
-.scryrs/proposals/*.json       review inbox only
-.scryrs/accepted/*.json        reviewed evidence / approved knowledge
+.scryrs/proposals/*.json       review inbox only — immutable proposal documents
+.scryrs/accepted/*.json        reviewed evidence — accepted decisions with reviewed content
+.scryrs/rejected/*.json        explicit rejection records — rejected decisions
 .scryrs/graph.json             deterministic output from trace + docs + accepted evidence
 .scryrs/routes.json            deterministic projection from graph
 ```
+
+Review decision artifacts are versioned `ProposalReviewDecision` documents (`REVIEW_DECISION_SCHEMA_VERSION = "1.0.0"`) that record explicit accepted or rejected outcomes with mandatory provenance. Graph build, route generation, docs publishing, and memory mutation do not consume review decision artifacts in this phase — accepted-evidence ingestion is deferred to a follow-up change.
 
 ### LLM interpretation path
 

@@ -116,6 +116,30 @@ What it **must not** mutate:
 
 This boundary is enforced in tests in `crates/scryrs-cli/src/propose.rs`.
 
+## Three-Zone Review Artifact Layout
+
+Proposal inbox files and review decision artifacts live in separate paths so proposal documents remain review-only records and review outcomes become durable evidence.
+
+```text
+.scryrs/
+  proposals/           review inbox only — immutable proposal documents
+    <proposal-id>.json
+  accepted/            durable reviewed evidence — accepted decisions
+    <proposal-id>.json
+  rejected/            explicit rejection records — rejected decisions
+    <proposal-id>.json
+```
+
+| Zone | Path | Purpose | Mutated by proposal generation? |
+| --- | --- | --- | --- |
+| Proposal inbox | `.scryrs/proposals/{proposalId}.json` | Review-only candidate knowledge | Yes — `scryrs propose` writes here |
+| Accepted evidence | `.scryrs/accepted/{proposalId}.json` | Durable accepted review outcome with reviewed content | No — requires explicit review workflow (future) |
+| Rejected decisions | `.scryrs/rejected/{proposalId}.json` | Explicit rejection record | No — requires explicit review workflow (future) |
+
+Accepted and rejected review decisions are recorded as separate `ProposalReviewDecision` artifacts rather than by mutating the original proposal inbox files. The original `.scryrs/proposals/{proposalId}.json` remains a review-only record regardless of acceptance or rejection.
+
+`ProposalReviewDecision` is a versioned contract (`REVIEW_DECISION_SCHEMA_VERSION = "1.0.0"`) that reuses the existing `EvidenceLink`, `ProposalTargetType`, `ProposedContent`, and `SemanticGraphGrouping` types. Accepted decisions carry `targetType` plus `acceptedContent`; rejected decisions carry no accepted-content payload.
+
 ## Optional Model-Assisted Curation
 
 `crates/scryrs-curator-llm` is shipped as bounded, library-only assist layer. It does not add CLI flags or default-feature behavior.

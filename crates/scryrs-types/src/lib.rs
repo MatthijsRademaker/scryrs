@@ -34,6 +34,12 @@ pub const ROUTE_SCHEMA_VERSION: &str = "1.0.0";
 /// `ROUTE_SCHEMA_VERSION`.
 pub const PROPOSAL_SCHEMA_VERSION: &str = "1.0.0";
 
+/// Version for the review decision contract, independent of
+/// `SCHEMA_VERSION`, `HOTSPOT_SCHEMA_VERSION`,
+/// `LIVE_HOTSPOT_SCHEMA_VERSION`, `GRAPH_SCHEMA_VERSION`,
+/// `ROUTE_SCHEMA_VERSION`, and `PROPOSAL_SCHEMA_VERSION`.
+pub const REVIEW_DECISION_SCHEMA_VERSION: &str = "1.0.0";
+
 /// Suite component metadata used by feature-gated crates and CLI output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FeatureDescriptor {
@@ -717,6 +723,158 @@ impl ProposalDocument {
     #[must_use]
     pub fn inbox_filename(&self) -> String {
         format!("{}.json", self.id)
+    }
+}
+
+// --- Proposal review decision contract types ---
+
+/// Closed set of review outcomes for proposal review decisions.
+/// Serialized as snake_case strings on the wire.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewOutcome {
+    Accepted,
+    Rejected,
+}
+
+/// Versioned review decision document — an explicit accepted or rejected
+/// proposal outcome.
+///
+/// Review decision artifacts live under `.scryrs/accepted/{proposalId}.json`
+/// and `.scryrs/rejected/{proposalId}.json`. Accepted decisions carry
+/// `targetType` plus `acceptedContent`; rejected decisions carry no
+/// accepted-content payload.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProposalReviewDecision {
+    /// Schema version, always equal to `REVIEW_DECISION_SCHEMA_VERSION`.
+    pub schema_version: String,
+    /// The proposal document `id` that this decision reviews.
+    pub proposal_id: String,
+    /// Identity of the reviewer (agent or human).
+    pub reviewer: String,
+    /// RFC 3339 decision timestamp.
+    pub decided_at: String,
+    /// Non-empty explanation of the review decision.
+    pub rationale: String,
+    /// Evidence provenance links — must be non-empty.
+    pub source_evidence: Vec<EvidenceLink>,
+    /// Accepted or rejected outcome.
+    pub outcome: ReviewOutcome,
+    /// One of the six defined proposal target kinds.
+    /// Required for accepted outcomes; absent for rejected.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_type: Option<ProposalTargetType>,
+    /// Target-type-specific reviewed content.
+    /// Required for accepted outcomes; absent for rejected.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accepted_content: Option<ProposedContent>,
+}
+
+impl ProposalReviewDecision {
+    /// Validate semantic invariants for a review decision that has passed
+    /// structural deserialization. Returns `Ok(())` when `schema_version`
+    /// equals `REVIEW_DECISION_SCHEMA_VERSION`, all required common fields
+    /// are non-empty, and outcome-specific content invariants hold.
+    #[must_use = "callers must check semantic invariants; discarded Result hides invalid review decisions"]
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema_version != REVIEW_DECISION_SCHEMA_VERSION {
+            return Err(format!(
+                "review decision schema_version mismatch: got '{}', expected '{}'",
+                self.schema_version, REVIEW_DECISION_SCHEMA_VERSION,
+            ));
+        }
+        if self.proposal_id.trim().is_empty() {
+            return Err("review decision proposalId must be non-empty".into());
+        }
+        if self.reviewer.trim().is_empty() {
+            return Err("review decision reviewer must be non-empty".into());
+        }
+        if self.decided_at.trim().is_empty() {
+            return Err("review decision decidedAt must be non-empty".into());
+        }
+        if self.rationale.trim().is_empty() {
+            return Err("review decision rationale must be non-empty".into());
+        }
+        if self.source_evidence.is_empty() {
+            return Err("review decision sourceEvidence must be non-empty".into());
+        }
+
+        match &self.outcome {
+            ReviewOutcome::Accepted => {
+                let target_type = match &self.target_type {
+                    Some(tt) => tt,
+                    None => {
+                        return Err("accepted review decision must include targetType".into());
+                    }
+                };
+                let accepted_content = match &self.accepted_content {
+                    Some(c) => c,
+                    None => {
+                        return Err("accepted review decision must include acceptedContent".into());
+                    }
+                };
+
+                // Cross-field invariant: accepted_content variant must match target_type.
+                match (target_type, accepted_content) {
+                    (
+                        ProposalTargetType::DocsNote
+                        | ProposalTargetType::Adr
+                        | ProposalTargetType::Skill
+                        | ProposalTargetType::DebuggingPlaybook,
+                        ProposedContent::Markdown(_),
+                    ) => {}
+                    (ProposalTargetType::MemoryPatch, ProposedContent::MemoryPatch(_)) => {}
+                    (
+                        ProposalTargetType::SemanticGraphGrouping,
+                        ProposedContent::SemanticGraphGrouping(_),
+                    ) => {}
+                    (t, c) => {
+                        return Err(format!(
+                            "accepted review decision target_type mismatch: {:?} does not accept {:?} acceptedContent",
+                            t, c,
+                        ));
+                    }
+                }
+
+                match accepted_content {
+                    ProposedContent::Markdown(text) => {
+                        if text.trim().is_empty() {
+                            return Err(
+                                "accepted review decision markdown acceptedContent must be non-empty"
+                                    .into(),
+                            );
+                        }
+                    }
+                    ProposedContent::MemoryPatch(value) => {
+                        if value.is_null() {
+                            return Err(
+                                "accepted review decision memory_patch acceptedContent must be non-null"
+                                    .into(),
+                            );
+                        }
+                    }
+                    ProposedContent::SemanticGraphGrouping(grouping) => {
+                        if grouping.source_node_ids.is_empty() {
+                            return Err(
+                                "accepted review decision semanticGraphGrouping must have non-empty sourceNodeIds"
+                                    .into(),
+                            );
+                        }
+                    }
+                }
+            }
+            ReviewOutcome::Rejected => {
+                if self.target_type.is_some() {
+                    return Err("rejected review decision must not include targetType".into());
+                }
+                if self.accepted_content.is_some() {
+                    return Err("rejected review decision must not include acceptedContent".into());
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -3060,5 +3218,398 @@ mod tests {
         assert!(!json.contains("\"reviewer\""));
         assert!(!json.contains("\"accepted"));
         assert!(!json.contains("\"rejected"));
+    }
+
+    // --- Proposal review decision tests ---
+
+    fn make_evidence_links() -> Vec<EvidenceLink> {
+        vec![EvidenceLink {
+            source_kind: EvidenceSourceKind::HotspotSubject,
+            subject: "test-subject".into(),
+            row_ids: vec![1],
+            doc_ref: None,
+            description: None,
+            score: Some(5),
+            metadata: None,
+        }]
+    }
+
+    fn make_accepted_decision(
+        target_type: ProposalTargetType,
+        content: ProposedContent,
+    ) -> ProposalReviewDecision {
+        ProposalReviewDecision {
+            schema_version: REVIEW_DECISION_SCHEMA_VERSION.into(),
+            proposal_id: "abc123".into(),
+            reviewer: "test-reviewer".into(),
+            decided_at: "2026-06-28T12:00:00Z".into(),
+            rationale: "Accepted for testing".into(),
+            source_evidence: make_evidence_links(),
+            outcome: ReviewOutcome::Accepted,
+            target_type: Some(target_type),
+            accepted_content: Some(content),
+        }
+    }
+
+    fn make_rejected_decision() -> ProposalReviewDecision {
+        ProposalReviewDecision {
+            schema_version: REVIEW_DECISION_SCHEMA_VERSION.into(),
+            proposal_id: "abc123".into(),
+            reviewer: "test-reviewer".into(),
+            decided_at: "2026-06-28T12:00:00Z".into(),
+            rationale: "Rejected for testing".into(),
+            source_evidence: make_evidence_links(),
+            outcome: ReviewOutcome::Rejected,
+            target_type: None,
+            accepted_content: None,
+        }
+    }
+
+    // --- 3.1 Serde round-trip tests ---
+
+    #[test]
+    fn review_decision_schema_version_is_independent() {
+        assert_eq!(REVIEW_DECISION_SCHEMA_VERSION, "1.0.0");
+        assert_ne!(REVIEW_DECISION_SCHEMA_VERSION, SCHEMA_VERSION);
+        // Same string value as other contract versions but semantically independent.
+        assert_eq!(REVIEW_DECISION_SCHEMA_VERSION, PROPOSAL_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn review_outcome_serializes_as_snake_case() {
+        let json = serialize_json(&ReviewOutcome::Accepted);
+        assert!(json.contains("\"accepted\""), "got: {json}");
+        let json = serialize_json(&ReviewOutcome::Rejected);
+        assert!(json.contains("\"rejected\""), "got: {json}");
+    }
+
+    #[test]
+    fn review_outcome_round_trips() {
+        for outcome in &[ReviewOutcome::Accepted, ReviewOutcome::Rejected] {
+            let json = serialize_json(outcome);
+            let reconstructed: ReviewOutcome = deserialize_json(&json);
+            assert_eq!(reconstructed, *outcome);
+        }
+    }
+
+    #[test]
+    fn accepted_review_decision_round_trips() {
+        let content = ProposedContent::Markdown("# Approved content".into());
+        let decision = make_accepted_decision(ProposalTargetType::DocsNote, content);
+
+        let json = serialize_json(&decision);
+        assert!(json.contains("\"schemaVersion\":\"1.0.0\""));
+        assert!(json.contains("\"proposalId\":\"abc123\""));
+        assert!(json.contains("\"reviewer\":\"test-reviewer\""));
+        assert!(json.contains("\"outcome\":\"accepted\""));
+        assert!(json.contains("\"targetType\":\"docs_note\""));
+        assert!(json.contains("\"acceptedContent\":\"# Approved content\""));
+        assert!(json.contains("\"sourceEvidence\""));
+        assert!(json.contains("\"sourceKind\":\"hotspot_subject\""));
+
+        let reconstructed: ProposalReviewDecision = deserialize_json(&json);
+        assert_eq!(reconstructed, decision);
+    }
+
+    #[test]
+    fn rejected_review_decision_round_trips() {
+        let decision = make_rejected_decision();
+
+        let json = serialize_json(&decision);
+        assert!(json.contains("\"schemaVersion\":\"1.0.0\""));
+        assert!(json.contains("\"proposalId\":\"abc123\""));
+        assert!(json.contains("\"outcome\":\"rejected\""));
+        assert!(json.contains("\"rationale\":\"Rejected for testing\""));
+        // Rejected must NOT carry targetType or acceptedContent.
+        assert!(!json.contains("targetType"));
+        assert!(!json.contains("acceptedContent"));
+
+        let reconstructed: ProposalReviewDecision = deserialize_json(&json);
+        assert_eq!(reconstructed, decision);
+    }
+
+    #[test]
+    fn accepted_review_decision_with_semantic_grouping_round_trips() {
+        let grouping = SemanticGraphGrouping {
+            source_node_ids: vec![
+                "file:auth".into(),
+                "search:auth".into(),
+                "symbol:auth".into(),
+            ],
+            target_group_node_id: "domain_term:auth".into(),
+            target_group_label: "auth".into(),
+        };
+        let content = ProposedContent::SemanticGraphGrouping(grouping);
+        let decision = make_accepted_decision(ProposalTargetType::SemanticGraphGrouping, content);
+
+        let json = serialize_json(&decision);
+        assert!(json.contains("\"targetType\":\"semantic_graph_grouping\""));
+        assert!(json.contains("\"sourceNodeIds\":[\"file:auth\",\"search:auth\",\"symbol:auth\"]"));
+        assert!(json.contains("\"targetGroupNodeId\":\"domain_term:auth\""));
+
+        let reconstructed: ProposalReviewDecision = deserialize_json(&json);
+        assert_eq!(reconstructed, decision);
+    }
+
+    #[test]
+    fn accepted_review_decision_with_memory_patch_round_trips() {
+        let patch: serde_json::Value = serde_json::json!({"key": "value"});
+        let content = ProposedContent::MemoryPatch(patch);
+        let decision = make_accepted_decision(ProposalTargetType::MemoryPatch, content);
+
+        let json = serialize_json(&decision);
+        assert!(json.contains("\"targetType\":\"memory_patch\""));
+
+        let reconstructed: ProposalReviewDecision = deserialize_json(&json);
+        assert_eq!(reconstructed, decision);
+    }
+
+    // --- 3.2 Validation tests ---
+
+    #[test]
+    fn validate_accepts_valid_accepted_decision() {
+        let content = ProposedContent::Markdown("# Approved".into());
+        let decision = make_accepted_decision(ProposalTargetType::DocsNote, content);
+        assert!(decision.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_valid_rejected_decision() {
+        let decision = make_rejected_decision();
+        assert!(decision.validate().is_ok());
+    }
+
+    #[test]
+    fn review_decision_validate_rejects_wrong_schema_version() {
+        let content = ProposedContent::Markdown("# Approved".into());
+        let mut decision = make_accepted_decision(ProposalTargetType::DocsNote, content);
+        decision.schema_version = "0.9.9".into();
+        let Err(err) = decision.validate() else {
+            panic!("wrong schema version should be rejected");
+        };
+        assert!(err.contains("schema_version mismatch"));
+        assert!(err.contains("0.9.9"));
+        assert!(err.contains(REVIEW_DECISION_SCHEMA_VERSION));
+    }
+
+    #[test]
+    fn validate_rejects_empty_proposal_id() {
+        let content = ProposedContent::Markdown("# Approved".into());
+        let mut decision = make_accepted_decision(ProposalTargetType::DocsNote, content);
+        decision.proposal_id = String::new();
+        let Err(err) = decision.validate() else {
+            panic!("empty proposalId should be rejected");
+        };
+        assert!(err.contains("proposalId"));
+    }
+
+    #[test]
+    fn validate_rejects_empty_reviewer() {
+        let content = ProposedContent::Markdown("# Approved".into());
+        let mut decision = make_accepted_decision(ProposalTargetType::DocsNote, content);
+        decision.reviewer = String::new();
+        let Err(err) = decision.validate() else {
+            panic!("empty reviewer should be rejected");
+        };
+        assert!(err.contains("reviewer"));
+    }
+
+    #[test]
+    fn validate_rejects_empty_decided_at() {
+        let content = ProposedContent::Markdown("# Approved".into());
+        let mut decision = make_accepted_decision(ProposalTargetType::DocsNote, content);
+        decision.decided_at = String::new();
+        let Err(err) = decision.validate() else {
+            panic!("empty decidedAt should be rejected");
+        };
+        assert!(err.contains("decidedAt"));
+    }
+
+    #[test]
+    fn review_decision_validate_rejects_empty_rationale() {
+        let content = ProposedContent::Markdown("# Approved".into());
+        let mut decision = make_accepted_decision(ProposalTargetType::DocsNote, content);
+        decision.rationale = String::new();
+        let Err(err) = decision.validate() else {
+            panic!("empty rationale should be rejected");
+        };
+        assert!(err.contains("rationale"));
+    }
+
+    #[test]
+    fn review_decision_validate_rejects_whitespace_only_rationale() {
+        let content = ProposedContent::Markdown("# Approved".into());
+        let mut decision = make_accepted_decision(ProposalTargetType::DocsNote, content);
+        decision.rationale = "   ".into();
+        let result = decision.validate();
+        assert!(
+            result.is_err(),
+            "whitespace-only rationale should be rejected"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_empty_source_evidence() {
+        let content = ProposedContent::Markdown("# Approved".into());
+        let mut decision = make_accepted_decision(ProposalTargetType::DocsNote, content);
+        decision.source_evidence = vec![];
+        let Err(err) = decision.validate() else {
+            panic!("empty sourceEvidence should be rejected");
+        };
+        assert!(err.contains("sourceEvidence"));
+    }
+
+    #[test]
+    fn validate_rejects_accepted_without_target_type() {
+        let content = ProposedContent::Markdown("# Approved".into());
+        let mut decision = make_accepted_decision(ProposalTargetType::DocsNote, content);
+        decision.target_type = None;
+        let Err(err) = decision.validate() else {
+            panic!("accepted without targetType should be rejected");
+        };
+        assert!(err.contains("targetType"));
+    }
+
+    #[test]
+    fn validate_rejects_accepted_without_accepted_content() {
+        let mut decision = make_accepted_decision(
+            ProposalTargetType::DocsNote,
+            ProposedContent::Markdown("# Approved".into()),
+        );
+        decision.accepted_content = None;
+        let Err(err) = decision.validate() else {
+            panic!("accepted without acceptedContent should be rejected");
+        };
+        assert!(err.contains("acceptedContent"));
+    }
+
+    #[test]
+    fn validate_rejects_rejected_with_target_type() {
+        let mut decision = make_rejected_decision();
+        decision.target_type = Some(ProposalTargetType::DocsNote);
+        let Err(err) = decision.validate() else {
+            panic!("rejected with targetType should be rejected");
+        };
+        assert!(err.contains("targetType"));
+    }
+
+    #[test]
+    fn validate_rejects_rejected_with_accepted_content() {
+        let mut decision = make_rejected_decision();
+        decision.accepted_content = Some(ProposedContent::Markdown("# Nope".into()));
+        let Err(err) = decision.validate() else {
+            panic!("rejected with acceptedContent should be rejected");
+        };
+        assert!(err.contains("acceptedContent"));
+    }
+
+    #[test]
+    fn validate_rejects_accepted_mismatched_target_type_and_content() {
+        // DocsNote target with MemoryPatch content.
+        let patch: serde_json::Value = serde_json::json!({"op": "upsert"});
+        let content = ProposedContent::MemoryPatch(patch);
+        let decision = make_accepted_decision(ProposalTargetType::DocsNote, content);
+        let Err(err) = decision.validate() else {
+            panic!("mismatched target/content should be rejected");
+        };
+        assert!(err.contains("target_type mismatch"));
+    }
+
+    #[test]
+    fn validate_rejects_accepted_empty_markdown_content() {
+        let content = ProposedContent::Markdown(String::new());
+        let decision = make_accepted_decision(ProposalTargetType::Adr, content);
+        let Err(err) = decision.validate() else {
+            panic!("empty markdown acceptedContent should be rejected");
+        };
+        assert!(err.contains("markdown"));
+    }
+
+    #[test]
+    fn validate_rejects_accepted_null_memory_patch_content() {
+        let content = ProposedContent::MemoryPatch(serde_json::Value::Null);
+        let decision = make_accepted_decision(ProposalTargetType::MemoryPatch, content);
+        let Err(err) = decision.validate() else {
+            panic!("null memory_patch acceptedContent should be rejected");
+        };
+        assert!(err.contains("memory_patch"));
+    }
+
+    #[test]
+    fn validate_rejects_accepted_semantic_grouping_empty_source_nodes() {
+        let grouping = SemanticGraphGrouping {
+            source_node_ids: vec![],
+            target_group_node_id: "domain_term:auth".into(),
+            target_group_label: "auth".into(),
+        };
+        let content = ProposedContent::SemanticGraphGrouping(grouping);
+        let decision = make_accepted_decision(ProposalTargetType::SemanticGraphGrouping, content);
+        let Err(err) = decision.validate() else {
+            panic!("empty sourceNodeIds should be rejected");
+        };
+        assert!(err.contains("sourceNodeIds"));
+    }
+
+    // --- 3.3 Exact sourceNodeIds preservation and ProposalDocument lifecycle-free ---
+
+    #[test]
+    fn accepted_semantic_grouping_preserves_exact_source_node_ids() {
+        let source_ids = vec![
+            "file:auth".to_string(),
+            "search:auth".to_string(),
+            "symbol:auth".to_string(),
+        ];
+        let grouping = SemanticGraphGrouping {
+            source_node_ids: source_ids.clone(),
+            target_group_node_id: "domain_term:auth".into(),
+            target_group_label: "auth".into(),
+        };
+        let content = ProposedContent::SemanticGraphGrouping(grouping);
+        let decision = make_accepted_decision(ProposalTargetType::SemanticGraphGrouping, content);
+
+        let json = serialize_json(&decision);
+        let reconstructed: ProposalReviewDecision = deserialize_json(&json);
+
+        match reconstructed.accepted_content {
+            Some(ProposedContent::SemanticGraphGrouping(ref g)) => {
+                assert_eq!(g.source_node_ids, source_ids);
+                assert_eq!(
+                    g.source_node_ids,
+                    vec!["file:auth", "search:auth", "symbol:auth"]
+                );
+                // Verify exact strings — not remapped or inferred.
+                assert_eq!(g.source_node_ids[0], "file:auth");
+                assert_eq!(g.source_node_ids[1], "search:auth");
+                assert_eq!(g.source_node_ids[2], "symbol:auth");
+            }
+            other => panic!("expected SemanticGraphGrouping, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn proposal_document_unchanged_by_review_decision_types() {
+        // Prove ProposalDocument struct has no new fields.
+        let content = ProposedContent::Markdown("# Existing".into());
+        let doc = make_valid_proposal(ProposalTargetType::DocsNote, content);
+        let json = serialize_json(&doc);
+
+        // All existing proposal fields present.
+        assert!(json.contains("\"schemaVersion\":\"1.0.0\""));
+        assert!(json.contains("\"targetType\":\"docs_note\""));
+        assert!(json.contains("\"proposedContent\":\"# Existing\""));
+
+        // No review decision fields leaked into proposal.
+        assert!(!json.contains("acceptedContent"));
+        assert!(!json.contains("sourceEvidence"));
+        assert!(!json.contains("decidedAt"));
+    }
+
+    #[test]
+    fn review_decision_evidence_uses_evidence_link_vocabulary() {
+        let decision = make_rejected_decision();
+        let json = serialize_json(&decision);
+        assert!(json.contains("\"sourceKind\":\"hotspot_subject\""));
+        assert!(json.contains("\"subject\":\"test-subject\""));
+        assert!(json.contains("\"rowIds\":[1]"));
     }
 }
