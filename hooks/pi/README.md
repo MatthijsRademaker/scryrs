@@ -101,4 +101,3 @@ This builds the real `scryrs` binary and (1) drives `scryrs hook pi --file` with
 crafted raw events to verify the mapping (including `isError`→`Failure` and the
 `lsp_navigation` branches), and (2) loads this `index.ts` via `tsx` with a mock
 Pi runtime to verify it delegates to `scryrs hook pi --file` and fails open.
-

@@ -162,12 +162,22 @@ Only start this after dashboard, hotspot outputs, and live hotspot server contra
 Required deliverables:
 
 - Build graph nodes and relationships from docs structure plus hotspot evidence.
+- Preserve low-level subject identity: deterministic graph nodes are keyed by `(subjectKind, subject)`, so `file:auth`, `search:auth`, and `symbol:auth` remain separate unless an explicit rule or reviewed evidence creates a higher-level domain node.
 - Emit stable graph and route artifacts such as `/.scryrs/graph.json` and `/.scryrs/routes.json`.
 - Preserve explainability: every routing hint should cite hotspot or document evidence.
 
 This phase is where scryrs stops being only a recorder and starts becoming routing infrastructure.
 
-**Partial delivery (2026-06-27):** The `scryrs graph <PATH>` command is shipped. It builds graph nodes from all five hotspot subject kinds and docs navigation hierarchy, producing structural `contains` edges and a deterministic `KnowledgeGraphDocument` to stdout and `.scryrs/graph.json`. Full cross-domain edge derivation and route-manifest generation remain future work within Phase 5.
+**Partial delivery (2026-06-27):** The `scryrs graph <PATH>` command is shipped. It builds graph nodes from all five hotspot subject kinds and docs navigation hierarchy, producing structural `contains` edges and a deterministic `KnowledgeGraphDocument` to stdout and `.scryrs/graph.json`. It does not semantically collapse same-label subjects across kinds, and it does not infer cross-domain edges such as `search:auth → domain_term:auth` or `symbol:Authenticator → file:auth.rs`. Full cross-domain edge derivation and route-manifest generation remain future work within Phase 5.
+
+### Semantic Grouping Boundary
+
+Hotspot grouping is exact and deterministic: `(subjectKind, subject)` is the identity key. That protects trace truth from accidental semantic merging. A later graph layer may add higher-level domain nodes such as `domain_term:auth` and edges from low-level hotspot subjects, but those edges must come from one of two sources:
+
+1. deterministic derivation rules with tests and stable provenance, or
+2. reviewable model-assisted proposals that cite existing hotspot, graph, or document evidence.
+
+LLMs may help suggest semantic groupings later, but they must not become the authority that mutates graph truth during ingest, scoring, or base graph materialization. Model output belongs in proposal/review flow first; accepted output can then become recorded evidence consumed by later graph builds.
 
 ## Phase 6 - Proposal Engine
 
@@ -223,6 +233,7 @@ Valid later uses:
 
 - rank competing proposal drafts,
 - summarize hotspot clusters,
+- suggest semantic groupings as reviewable graph/proposal candidates over already-determined evidence,
 - draft prose around already-determined evidence,
 - explain route decisions in better human language.
 
@@ -230,6 +241,7 @@ Invalid uses:
 
 - deciding what events mean during ingest,
 - replacing deterministic hotspot scoring,
+- silently merging low-level hotspot subjects into domain concepts,
 - making guardrail or policy decisions,
 - silently mutating approved knowledge.
 

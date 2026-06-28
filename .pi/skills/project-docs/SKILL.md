@@ -24,7 +24,8 @@ This keeps your context window sharp. A targeted 200-line page beats a 2000-line
 There are two execution contexts. Pick exactly one base URL first, then use only URL fetches from that base:
 
 - **Swarm/agent runtime:** `http://project-docs`
-- **Local developer runtime:** `http://localhost:18081/project-docs`
+- **Local developer runtime:** `http://localhost:<port>/project-docs`
+port is available at .devagent/.env, if not set its 18080
 
 **Hard rule:** never read host filesystem docs artifacts (for example `.devagent/docs/doc_build/*`) even if they exist locally. Always fetch docs via HTTP from the selected base URL.
 
@@ -43,7 +44,8 @@ There are two execution contexts. Pick exactly one base URL first, then use only
 **Step 0 — Select runtime context and base URL:**
 
 - If running inside swarm/autonomous agents, set `BASE_URL=http://project-docs`
-- If running on a local developer machine, set `BASE_URL=http://localhost:18081/project-docs`
+- **Local developer runtime:** `http://localhost:<port>/project-docs`
+port is available at .devagent/.env, if not set its 18080
 
 **Step 1 — Discover top-level slices:**
 Read `<BASE_URL>/llms.txt`. This shows 3 top-level slices (Vision & Strategy, Architecture, Development) with drill links to slice files.

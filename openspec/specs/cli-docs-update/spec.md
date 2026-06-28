@@ -211,4 +211,3 @@ The out-of-scope section SHALL use a general statement instead of enumerating fu
 **When** a reader checks the out-of-scope section
 **Then** the section does not list specific future command names by name
 **And** the section instead states that any command other than the six implemented commands exits 2 with a usage error
-

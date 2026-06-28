@@ -101,4 +101,3 @@ The dashboard frontend SHALL keep route registration, navigation, layout, API cl
 - **WHEN** dashboard layout files are inspected
 - **THEN** sidebar/navigation and page frame concerns live in shared layout components
 - **AND** feature views render inside that shell through Vue Router
-

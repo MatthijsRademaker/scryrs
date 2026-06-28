@@ -1,6 +1,20 @@
+use std::io::Read;
+
 use scryrs_types::SCHEMA_VERSION;
 
 use crate::run_with_io;
+
+fn run_record_with_io<I, S, R>(args: I, out: &mut Vec<u8>, err: &mut Vec<u8>, stdin: R) -> i32
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+    R: Read,
+{
+    let _cwd_guard = crate::test_support::CWD_GUARD
+        .lock()
+        .unwrap_or_else(|e| panic!("CWD guard poisoned: {e}"));
+    run_with_io(args, out, err, stdin)
+}
 
 /// Set a thread-local store path override so tests don't pollute the
 /// real CWD's .scryrs/scryrs.db. Returns the tempdir guard.
@@ -37,7 +51,7 @@ fn record_stdin_all_valid_exits_0() {
     let mut err = Vec::new();
 
     assert_eq!(
-        run_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes(),),
+        run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes(),),
         0
     );
 
@@ -60,7 +74,7 @@ fn record_stdin_some_invalid_exits_1() {
     let mut err = Vec::new();
 
     assert_eq!(
-        run_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes(),),
+        run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes(),),
         1
     );
 
@@ -85,7 +99,7 @@ fn record_stdin_blank_lines_are_skipped() {
     let mut err = Vec::new();
 
     assert_eq!(
-        run_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes(),),
+        run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes(),),
         0
     );
 
@@ -116,7 +130,7 @@ fn record_file_all_valid_exits_0() {
     let stdin = &[] as &[u8];
 
     assert_eq!(
-        run_with_io(
+        run_record_with_io(
             ["record", "--file", &file_path.display().to_string()],
             &mut out,
             &mut err,
@@ -149,7 +163,7 @@ fn record_file_some_invalid_exits_1() {
     let stdin = &[] as &[u8];
 
     assert_eq!(
-        run_with_io(
+        run_record_with_io(
             ["record", "--file", &file_path.display().to_string()],
             &mut out,
             &mut err,
@@ -175,7 +189,7 @@ fn record_both_modes_exits_2() {
     let stdin = &[] as &[u8];
 
     assert_eq!(
-        run_with_io(
+        run_record_with_io(
             ["record", "--stdin", "--file", "some.jsonl"],
             &mut out,
             &mut err,
@@ -195,7 +209,10 @@ fn record_neither_mode_exits_2() {
     let mut err = Vec::new();
     let stdin = &[] as &[u8];
 
-    assert_eq!(run_with_io(["record"], &mut out, &mut err, stdin,), 2);
+    assert_eq!(
+        run_record_with_io(["record"], &mut out, &mut err, stdin,),
+        2
+    );
 
     let stderr = String::from_utf8_lossy(&err);
     assert!(stderr.contains("must specify one of --stdin or --file"));
@@ -211,7 +228,7 @@ fn record_unreadable_file_exits_2() {
     let stdin = &[] as &[u8];
 
     assert_eq!(
-        run_with_io(
+        run_record_with_io(
             ["record", "--file", "/nonexistent/path/events.jsonl"],
             &mut out,
             &mut err,
@@ -234,7 +251,7 @@ fn record_output_is_valid_json() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    run_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes());
+    run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes());
 
     let out_str = String::from_utf8_lossy(&out);
     let summary: serde_json::Value = match serde_json::from_str(out_str.trim()) {
@@ -253,7 +270,7 @@ fn record_rejection_diagnostics_are_valid_json() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    run_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes());
+    run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes());
 
     let stderr = String::from_utf8_lossy(&err);
     let diag: serde_json::Value = match serde_json::from_str(stderr.trim()) {
@@ -272,7 +289,7 @@ fn record_multiple_rejections_all_on_stderr() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    run_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes());
+    run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes());
 
     let stdout = String::from_utf8_lossy(&out);
     assert!(stdout.contains("\"accepted\":0"));
@@ -299,7 +316,7 @@ fn record_help_flag_exits_2() {
     let stdin = &[] as &[u8];
 
     assert_eq!(
-        run_with_io(["record", "--help"], &mut out, &mut err, stdin),
+        run_record_with_io(["record", "--help"], &mut out, &mut err, stdin),
         2,
         "record --help must exit 2 (help flag disabled on subcommand)"
     );
@@ -326,7 +343,7 @@ fn record_version_flag_exits_2() {
     let stdin = &[] as &[u8];
 
     assert_eq!(
-        run_with_io(["record", "--version"], &mut out, &mut err, stdin),
+        run_record_with_io(["record", "--version"], &mut out, &mut err, stdin),
         2,
         "record --version must exit 2 (version flag disabled on subcommand)"
     );
@@ -345,7 +362,7 @@ fn record_unknown_flag_exits_2() {
     let stdin = &[] as &[u8];
 
     assert_eq!(
-        run_with_io(["record", "--unknown-flag"], &mut out, &mut err, stdin),
+        run_record_with_io(["record", "--unknown-flag"], &mut out, &mut err, stdin),
         2
     );
     assert!(out.is_empty());
@@ -367,7 +384,7 @@ fn record_extra_args_exits_2() {
     let stdin = &[] as &[u8];
 
     assert_eq!(
-        run_with_io(["record", "--stdin", "extra"], &mut out, &mut err, stdin,),
+        run_record_with_io(["record", "--stdin", "extra"], &mut out, &mut err, stdin,),
         2
     );
     let err_str = String::from_utf8_lossy(&err);
@@ -388,7 +405,7 @@ fn record_persists_to_scryrs_db() {
     let mut err = Vec::new();
 
     assert_eq!(
-        run_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes()),
+        run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes()),
         0
     );
 
@@ -415,7 +432,8 @@ fn record_does_not_create_events_jsonl() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    let _exit_code = run_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes());
+    let _exit_code =
+        run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes());
 
     // The SQLite store should be created at the override path.
     assert!(
@@ -461,7 +479,7 @@ fn record_stdin_persists_rows_to_sqlite() {
     let mut err = Vec::new();
 
     assert_eq!(
-        run_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes()),
+        run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes()),
         0
     );
     assert!(
@@ -516,7 +534,7 @@ fn record_file_persists_rows_to_sqlite() {
     let stdin = &[] as &[u8];
 
     assert_eq!(
-        run_with_io(
+        run_record_with_io(
             ["record", "--file", &file_path.display().to_string()],
             &mut out,
             &mut err,
@@ -570,7 +588,7 @@ fn mixed_valid_invalid_rejected_lines_no_rows() {
     let mut err = Vec::new();
 
     assert_eq!(
-        run_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes()),
+        run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes()),
         1
     );
 
@@ -619,7 +637,7 @@ fn record_fatal_store_failure_exits_2() {
     let mut err = Vec::new();
 
     assert_eq!(
-        run_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes()),
+        run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes()),
         2,
         "fatal store failure must exit 2"
     );
@@ -647,10 +665,10 @@ fn record_fatal_store_failure_exits_2() {
 mod remote_tests {
     use scryrs_types::{BatchIngestResponse, EventAck, EventAckStatus, SCHEMA_VERSION};
 
+    use super::run_record_with_io;
     use crate::record::execute_record_with_config;
     use crate::remote_config::{RemoteConfig, ResolvedRemote, TransportMode};
     use crate::remote_submit::{RemoteSubmitter, SubmitError};
-    use crate::run_with_io;
 
     /// A mock submitter that returns a pre-defined result, enabling
     /// deterministic remote-mode tests without real network calls.
@@ -1242,7 +1260,7 @@ mod remote_tests {
 
         // Unknown harness still exits 0 (fail-open).
         assert_eq!(
-            run_with_io(
+            run_record_with_io(
                 ["hook", "unknown-harness"],
                 &mut out,
                 &mut err,
