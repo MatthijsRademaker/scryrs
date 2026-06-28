@@ -60,10 +60,11 @@ enum MatchTier {
     Exact = 3,
 }
 
-/// Build a sorted, comma-separated list of matched field names.
+/// Build a sorted, deduplicated, comma-separated list of matched field names.
 fn join_matched_fields(fields: &[&str]) -> String {
     let mut sorted: Vec<&str> = fields.to_vec();
     sorted.sort_unstable();
+    sorted.dedup();
     sorted.join(", ")
 }
 
@@ -559,6 +560,46 @@ mod tests {
         )]);
         let doc = explain_hints(&manifest, "auth");
         assert_eq!(doc.hints.len(), 1);
+    }
+
+    #[test]
+    fn explain_hints_evidence_subject_deduplicated_in_reason() {
+        // Multiple evidence links whose subjects all match must not produce
+        // duplicate "evidence.subject" in the reason suffix.
+        let manifest = make_manifest(vec![make_route_entry(
+            "file:auth",
+            "auth",
+            "file:auth",
+            "file",
+            vec![
+                make_evidence_link(EvidenceSourceKind::LocalTraceRow, "auth_handler", vec![1]),
+                make_evidence_link(
+                    EvidenceSourceKind::LocalTraceRow,
+                    "auth_handler_v2",
+                    vec![2],
+                ),
+                make_evidence_link(
+                    EvidenceSourceKind::LocalTraceRow,
+                    "auth_handler_legacy",
+                    vec![3],
+                ),
+            ],
+        )]);
+        let doc = explain_hints(&manifest, "handler");
+        assert_eq!(doc.hints.len(), 1);
+        // "handler" matches all three evidence subjects but evidence.subject
+        // must appear exactly once in the reason.
+        let reason = &doc.hints[0].reason;
+        assert!(
+            reason.contains("query match on evidence.subject"),
+            "reason should contain evidence.subject, got: {reason}"
+        );
+        // Count occurrences of "evidence.subject" — must be exactly 1.
+        let count = reason.matches("evidence.subject").count();
+        assert_eq!(
+            count, 1,
+            "evidence.subject must appear exactly once in reason, appeared {count} times: {reason}"
+        );
     }
 
     #[test]

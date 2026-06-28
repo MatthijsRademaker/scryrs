@@ -132,7 +132,12 @@ pub(crate) fn execute_route_explain(
 
     // Verify explain didn't change the artifact on disk.
     // Read routes.json again to confirm it's byte-identical.
-    let _ = check_artifact_unchanged(&routes_path, &routes_json, err);
+    if let Err(e) = check_artifact_unchanged(&routes_path, &routes_json, err) {
+        let _ = writeln!(
+            err,
+            "scryrs route explain: warning: cannot verify route artifact unchanged: {e}"
+        );
+    }
 
     // Call explain_hints and serialize.
     let hint_doc = explain_hints(&manifest, query);
