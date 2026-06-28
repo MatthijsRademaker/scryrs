@@ -5,7 +5,7 @@ model: deepseek/deepseek-v4-flash
 thinking: high
 tools:
     refinement: [report_refinement_outcome]
-skills: swarm-board, project-docs
+skills: swarm-board, read-project-docs
 systemPromptMode: append
 swarm:
     enabled: true

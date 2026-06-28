@@ -73,6 +73,7 @@ Then either stop the conflicting container or change `MANAGER_PORT` / `MANAGER_G
 └── README.md               # This file
 
 .pi/                        # Authoritative agent configuration (source of truth)
+├── README.md               # Scaffold structure and customization guide
 ├── agents/                 # Agent definitions (swarm-*.md)
 ├── prompts/                # Command prompt templates
 ├── rules/                  # Agent rules (verification workflow)
@@ -92,7 +93,7 @@ AGENTS.md                   # Project-wide agent instructions
 - `.devagent/.env` - Local runtime config, including PROJECT_ID and manual image overrides
 - `.pi/agents/` - Primary swarm agents (authoritative)
 - `.pi/prompts/` - Command prompt templates (feedback/plan/review/execute)
-- `.pi/skills/` - Skills loaded by agents (including `swarm-board`)
+- `.pi/skills/` - Skills loaded by agents (including `read-project-docs`, `swarm-board`)
 - `scripts/` - Docker-backed verification scripts (build, test, lint)
 - `AGENTS.md` - Project-wide instructions for all agents
 
@@ -132,6 +133,7 @@ http://localhost:18080/dashboard/
 ```
 
 The dashboard provides:
+
 - **Auth Setup** — Connect GitHub and configure your API key
 - **Task Board** — Kanban board with full task lifecycle tracking
 - **Agent Fleet** — Start, stop, and configure agent runtime configs (worker, reviewer, architect, lead-dev)
@@ -167,6 +169,7 @@ The manager exposes a REST API at `http://localhost:18080/api/v1/`:
 ### Authentication issues
 
 Start the manager if it is not already running, then open the dashboard and use the Auth Setup panel:
+
 ```bash
 swarm manager start
 

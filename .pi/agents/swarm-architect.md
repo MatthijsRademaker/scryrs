@@ -6,7 +6,7 @@ thinking: high
 tools:
     refinement: [report_refinement_outcome]
     review: [report_review_outcome]
-skills: ccc, likec4-dsl, project-docs, docs-writer, swarm-board
+skills: likec4-dsl, read-project-docs, docs-writer, swarm-board
 systemPromptMode: append
 swarm:
     enabled: true
