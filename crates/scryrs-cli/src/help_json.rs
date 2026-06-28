@@ -4,7 +4,7 @@ use serde_json::json;
 
 /// Version of the `--help-json` surface document format, independent of
 /// `SCHEMA_VERSION` which governs command output envelopes.
-const SURFACE_VERSION: &str = "0.9.0";
+const SURFACE_VERSION: &str = "0.10.0";
 
 pub(crate) fn cli_surface_doc() -> String {
     let doc = json!({
@@ -292,7 +292,7 @@ pub(crate) fn cli_surface_doc() -> String {
             },
             {
                 "name": "route",
-                "description": "Generate the route manifest from a knowledge graph artifact",
+                "description": "Generate the route manifest from a knowledge graph artifact, or query the manifest for matching entries",
                 "arguments": [
                     {
                         "name": "PATH",
@@ -301,13 +301,53 @@ pub(crate) fn cli_surface_doc() -> String {
                         "description": "Path to the repository root directory"
                     }
                 ],
+                "subcommands": [
+                    {
+                        "name": "explain",
+                        "description": "Query the route manifest for matching entries using case-insensitive substring matching",
+                        "arguments": [
+                            {
+                                "name": "PATH",
+                                "type": "string",
+                                "required": true,
+                                "description": "Path to the repository root directory"
+                            },
+                            {
+                                "name": "query",
+                                "flag": "--query",
+                                "type": "string",
+                                "required": true,
+                                "description": "Query text for case-insensitive substring matching against label, subject, id, target, kind, and evidence_links[].subject"
+                            }
+                        ],
+                        "matching": {
+                            "algorithm": "case-insensitive substring match",
+                            "fields": ["label", "subject", "id", "target", "kind", "evidence_links[].subject"],
+                            "tiers": [
+                                {"tier": 3, "description": "Exact string match"},
+                                {"tier": 2, "description": "Prefix match"},
+                                {"tier": 1, "description": "Substring match"}
+                            ],
+                            "tieBreak": "Manifest entry order (by id ascending) within each tier"
+                        },
+                        "output": {
+                            "mimeType": "application/json",
+                            "description": "Single-line RouteHintDocument JSON with schemaVersion and hints array. The reason field appends '; query match on <fields>' suffix. Zero matches produces a valid document with empty hints array."
+                        },
+                        "exitCodes": {
+                            "0": "Success (including zero-match results)",
+                            "1": "Serialization or stdout write failure",
+                            "2": "Usage error, missing .scryrs/routes.json, malformed JSON, or schema version mismatch"
+                        }
+                    }
+                ],
                 "output": {
                     "mimeType": "application/json",
                     "description": "Single-line RouteManifestDocument JSON written to stdout. Also persisted to .scryrs/routes.json."
                 },
                 "routeHintOutput": {
                     "mimeType": "application/json",
-                    "description": "Deterministic RouteHintDocument projection derived from the route manifest. Each route entry produces one RouteHintItem with identity, target, label, 1-based ordinal rank, evidence citations, and a template-derived reason. Rank is a deterministic ordinal derived from manifest entry sort order; relevance is deferred (None) for future enhancement. The `scryrs route explain` command is deferred.",
+                    "description": "Deterministic RouteHintDocument projection derived from the route manifest. Each route entry produces one RouteHintItem with identity, target, label, 1-based ordinal rank, evidence citations, and a template-derived reason. Rank is a deterministic ordinal derived from manifest entry sort order; relevance is deferred (None). Use `scryrs route explain <PATH> --query <TEXT>` to filter and rank hints by query match.",
                     "fields": [
                         {"name": "schemaVersion", "type": "string", "description": "Route hint schema version (always HINT_SCHEMA_VERSION = 1.0.0)", "optional": false},
                         {"name": "hints", "type": "array", "description": "Deterministically ordered array of RouteHintItem objects", "optional": false}

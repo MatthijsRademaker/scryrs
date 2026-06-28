@@ -226,7 +226,7 @@ Builds deterministic `KnowledgeGraphDocument` artifact from hotspot evidence and
 
 ### `scryrs route <PATH>`
 
-Projects `.scryrs/graph.json` into deterministic `RouteManifestDocument` artifact for downstream runtime retrieval.
+Projects `.scryrs/graph.json` into deterministic `RouteManifestDocument` artifact for downstream runtime retrieval. Also accepts `scryrs route explain <PATH> --query <TEXT>` subcommand (see below).
 
 | Field | Value |
 |-------|-------|
@@ -254,7 +254,7 @@ The route manifest is accompanied by a deterministic `RouteHintDocument` project
 | `hints[].target` | string | `RouteEntry.target` | Normalized load target |
 | `hints[].label` | string | `RouteEntry.label` | Human-readable label |
 | `hints[].rank` | number (u32) | Ordinal index (1-based) | Deterministic placeholder — NOT a frozen long-term ranking formula |
-| `hints[].relevance` | number or absent | Always `None` | Deferred for future enhancement |
+| `hints[].relevance` | number or absent | Always `None` | Deferred — use `scryrs route explain` for query-based filtering |
 | `hints[].reason` | string | Template: `"Route '{label}' ({id}): {N} evidence link(s), subject kind {subjectKind}"` | Evidence count and identity explanation |
 | `hints[].evidence` | array | `RouteEntry.evidenceLinks` (verbatim copy) | Provenance links for traceability |
 
@@ -296,7 +296,60 @@ The route manifest is accompanied by a deterministic `RouteHintDocument` project
 }
 ```
 
-**Ranking policy:** `rank` is a deterministic ordinal placeholder derived from manifest entry sort order (by `id` ascending). `relevance` is deferred (`None`) and explicitly does NOT represent a frozen long-term ranking formula. The `scryrs route explain` command is deferred for future enhancement.
+**Ranking policy:** `rank` is a deterministic ordinal placeholder derived from manifest entry sort order (by `id` ascending). `relevance` is deferred (`None`) and explicitly does NOT represent a frozen long-term ranking formula. Use `scryrs route explain <PATH> --query <TEXT>` for query-based filtering and ranking (see below).
+
+### `scryrs route explain <PATH> --query <TEXT>`
+
+Queries the route manifest artifact (`.scryrs/routes.json`) for entries matching a search term. Performs case-insensitive substring matching with tiered ordering — no model, no randomness, no graph inspection.
+
+| Field | Value |
+|-------|-------|
+| Input | Required local directory `<PATH>` containing `.scryrs/routes.json`. Required `--query <TEXT>` argument. |
+| Output | Single-line `RouteHintDocument` JSON on stdout. Each hint's `reason` appends `"; query match on <fields>"` suffix. Zero matches produces valid document with empty `hints` array. |
+| Exit 0 | Query matched and results emitted (including zero-match results) |
+| Exit 1 | Serialization or stdout write failure |
+| Exit 2 | Missing PATH, missing `--query`, route artifact missing, malformed route artifact, or route schema version mismatch |
+
+**Match fields** (case-insensitive substring match against each):
+
+| Field | Example match for query "auth" |
+|-------|-------------------------------|
+| `label` | `"Authentication"` → match (substring) |
+| `subject` | `"auth_handler"` → match (substring) |
+| `id` | `"file:auth"` → match (substring) |
+| `target` | `"file:auth"` → match (substring) |
+| `kind` | `"doc_page"` → no match |
+| `evidence_links[].subject` | `"auth_handler"` → match (substring) |
+
+**Match tiers (descending priority):**
+
+| Tier | Description |
+|------|-------------|
+| 3 (exact) | Field equals query string exactly (case-insensitive) |
+| 2 (prefix) | Field starts with query string (case-insensitive) |
+| 1 (substring) | Field contains query string (case-insensitive) |
+
+**Tie-break:** Within each tier, entries follow manifest entry order (by `id` ascending).
+
+**Example invocation:**
+
+```bash
+scryrs route explain . --query "authentication"
+```
+
+**Example output (successful match):**
+
+```json
+{"schemaVersion":"1.0.0","hints":[{"routeId":"file:auth","target":"file:auth","label":"auth","rank":1,"reason":"Route 'auth' (file:auth): 1 evidence link(s), subject kind file; query match on id, label, subject, target","evidence":[{"sourceKind":"local_trace_row","subject":"auth","rowIds":[1]}]}]}
+```
+
+**Example output (zero matches):**
+
+```json
+{"schemaVersion":"1.0.0","hints":[]}
+```
+
+**Artifact dependency:** Reads only `.scryrs/routes.json`. Does not inspect `.scryrs/graph.json`, proposals, or any other artifact directory. The explain command is a read-only operation — it never creates, modifies, or deletes filesystem artifacts.
 
 ### `scryrs propose <PATH>`
 
@@ -558,9 +611,9 @@ Agents should check `surfaceVersion` before parsing to detect format changes. Th
 
 | Code | Meaning |
 |------|---------|
-| 0 | Hotspots, graph, and route artifacts written successfully; proposals written successfully; record local accepted all events; record remote accepted all events (duplicates non-fatal); init installed hook; dashboard/server shut down cleanly; hook always fail-open; help/version/surface display. |
+| 0 | Hotspots, graph, route, and route-explain artifacts written successfully (route explain includes zero-match results); proposals written successfully; record local accepted all events; record remote accepted all events (duplicates non-fatal); init installed hook; dashboard/server shut down cleanly; hook always fail-open; help/version/surface display. |
 | 1 | Hotspots/graph/route stdout or artifact write failure; record rejected one or more events or hit output I/O error; propose validation, directory creation, serialization, or file write failure; init I/O error; dashboard/server startup or runtime I/O failure. |
-| 2 | Usage error. Also: hotspots missing/corrupt store; graph missing/malformed hotspots input; route missing/malformed/schema-mismatched graph input; propose missing/malformed hotspot or graph input; record local fatal I/O error; record remote identity/transport failure; init unsupported harness or collision; dashboard invalid flags or bind address; server invalid port/bind/store or feature not compiled. |
+| 2 | Usage error. Also: hotspots missing/corrupt store; graph missing/malformed hotspots input; route missing/malformed/schema-mismatched graph input; route explain missing PATH, missing --query, or missing/malformed/schema-mismatched routes.json; propose missing/malformed hotspot or graph input; record local fatal I/O error; record remote identity/transport failure; init unsupported harness or collision; dashboard invalid flags or bind address; server invalid port/bind/store or feature not compiled. |
 
 All error messages and human-facing diagnostics are written to stderr.
 
@@ -605,6 +658,22 @@ All error messages and human-facing diagnostics are written to stderr.
 - Exit 0: Route manifest available.
 - Exit 1: Serialization, stdout write, or artifact write failure.
 - Exit 2: Missing PATH, unresolved path, missing graph artifact, malformed graph artifact, or graph schema mismatch.
+
+### Route explain command
+
+**When to call:** An agent should call `scryrs route explain <PATH> --query <TEXT>` when a route manifest artifact exists and the agent needs deterministic, query-filtered route recommendations without re-inspecting graph or hotspot evidence.
+
+**Input:** Explicit local directory path containing `.scryrs/routes.json` and a required `--query <TEXT>` argument.
+
+**Output:** Parseable JSON `RouteHintDocument` on stdout. Each matching hint's `reason` appends `"; query match on <fields>"`. Zero matches produces a valid document with empty `hints` array.
+
+**Exit codes:**
+
+- Exit 0: Query matched and results emitted (including zero-match results).
+- Exit 1: Serialization or stdout write failure.
+- Exit 2: Missing PATH, missing `--query`, missing `.scryrs/routes.json`, malformed route artifact, or route schema version mismatch.
+
+**Match algorithm:** Case-insensitive substring match against `label`, `subject`, `id`, `target`, `kind`, and `evidence_links[].subject`. Matches are tiered: exact (tier 3) > prefix (tier 2) > substring (tier 1). Within each tier, manifest entry sort order (by `id` ascending) is the final tie-break. Only entries that match at least one field appear in the output.
 
 ### Propose command
 

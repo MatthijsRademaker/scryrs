@@ -1318,8 +1318,8 @@ fn help_json_contains_grouped_proposals_surface_and_bumped_version() {
     assert!(err.is_empty());
     let json_str = String::from_utf8_lossy(&out);
     assert!(
-        json_str.contains("\"surfaceVersion\":\"0.9.0\""),
-        "--help-json must bump surfaceVersion to 0.9.0, got:\n{json_str}"
+        json_str.contains("\"surfaceVersion\":\"0.10.0\""),
+        "--help-json must bump surfaceVersion to 0.10.0, got:\n{json_str}"
     );
     assert!(
         json_str.contains("\"name\":\"proposals\""),
@@ -1332,4 +1332,471 @@ fn help_json_contains_grouped_proposals_surface_and_bumped_version() {
     assert!(json_str.contains("\"name\":\"list\""));
     assert!(json_str.contains("\"name\":\"accept\""));
     assert!(json_str.contains("\"name\":\"reject\""));
+}
+
+// --- Route explain command tests ---
+
+#[test]
+fn route_explain_help_flag_prints_help_and_exits_0() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(["route", "explain", "--help"], &mut out, &mut err),
+        0
+    );
+    assert!(err.is_empty());
+    let help = String::from_utf8_lossy(&out);
+    assert!(help.contains("scryrs route explain"));
+    assert!(help.contains("--query <TEXT>"));
+    assert!(help.contains("EXIT CODES"));
+}
+
+#[test]
+fn route_explain_short_help_flag_prints_help_and_exits_0() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(["route", "explain", "-h"], &mut out, &mut err),
+        0
+    );
+    assert!(err.is_empty());
+    let help = String::from_utf8_lossy(&out);
+    assert!(help.contains("scryrs route explain"));
+}
+
+#[test]
+fn route_explain_missing_query_exits_2() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(["route", "explain", "/tmp"], &mut out, &mut err),
+        2
+    );
+    assert!(out.is_empty());
+    let err_str = String::from_utf8_lossy(&err);
+    assert!(
+        err_str.contains("missing required --query argument"),
+        "got stderr: {err_str}"
+    );
+    assert!(err_str.contains("Usage: scryrs route explain"));
+    assert!(err_str.contains("See `scryrs --help`"));
+}
+
+#[test]
+fn route_explain_missing_path_exits_2() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(["route", "explain"], &mut out, &mut err),
+        2
+    );
+    assert!(out.is_empty());
+    let err_str = String::from_utf8_lossy(&err);
+    assert!(
+        err_str.contains("missing required PATH argument"),
+        "got stderr: {err_str}"
+    );
+    assert!(err_str.contains("Usage: scryrs route explain"));
+    assert!(err_str.contains("See `scryrs --help`"));
+}
+
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[test]
+fn route_explain_missing_routes_json_exits_2() {
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(
+            [
+                "route",
+                "explain",
+                tmp.path().to_str().unwrap(),
+                "--query",
+                "auth"
+            ],
+            &mut out,
+            &mut err,
+        ),
+        2
+    );
+    assert!(out.is_empty());
+    let err_str = String::from_utf8_lossy(&err);
+    assert!(
+        err_str.contains("route artifact not found"),
+        "got stderr: {err_str}"
+    );
+}
+
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[test]
+fn route_explain_malformed_routes_json_exits_2() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let scryrs_dir = tmp.path().join(".scryrs");
+    fs::create_dir(&scryrs_dir).expect("create .scryrs");
+    fs::write(scryrs_dir.join("routes.json"), "not json").expect("write routes.json");
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(
+            [
+                "route",
+                "explain",
+                tmp.path().to_str().unwrap(),
+                "--query",
+                "auth"
+            ],
+            &mut out,
+            &mut err,
+        ),
+        2
+    );
+    assert!(out.is_empty());
+    let err_str = String::from_utf8_lossy(&err);
+    assert!(
+        err_str.contains("malformed route artifact"),
+        "got stderr: {err_str}"
+    );
+}
+
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[test]
+fn route_explain_schema_version_mismatch_exits_2() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let scryrs_dir = tmp.path().join(".scryrs");
+    fs::create_dir(&scryrs_dir).expect("create .scryrs");
+
+    let routes = serde_json::json!({
+        "schemaVersion": "99.0.0",
+        "metadata": {},
+        "routes": []
+    });
+    fs::write(
+        scryrs_dir.join("routes.json"),
+        serde_json::to_string(&routes).expect("serialize"),
+    )
+    .expect("write routes.json");
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(
+            [
+                "route",
+                "explain",
+                tmp.path().to_str().unwrap(),
+                "--query",
+                "auth"
+            ],
+            &mut out,
+            &mut err,
+        ),
+        2
+    );
+    assert!(out.is_empty());
+    let err_str = String::from_utf8_lossy(&err);
+    assert!(
+        err_str.contains("schema version mismatch"),
+        "got stderr: {err_str}"
+    );
+}
+
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[test]
+fn route_explain_successful_match_produces_hints() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let scryrs_dir = tmp.path().join(".scryrs");
+    fs::create_dir(&scryrs_dir).expect("create .scryrs");
+
+    let routes = serde_json::json!({
+        "schemaVersion": "1.0.0",
+        "metadata": {},
+        "routes": [
+            {
+                "id": "file:authentication",
+                "subjectKind": "file",
+                "subject": "authentication",
+                "label": "Authentication",
+                "target": "file:authentication",
+                "kind": "file",
+                "evidenceLinks": [
+                    {
+                        "sourceKind": "local_trace_row",
+                        "subject": "authentication",
+                        "rowIds": [1, 2],
+                        "score": 10
+                    }
+                ]
+            },
+            {
+                "id": "file:unrelated",
+                "subjectKind": "file",
+                "subject": "unrelated",
+                "label": "unrelated",
+                "target": "file:unrelated",
+                "kind": "file",
+                "evidenceLinks": []
+            }
+        ]
+    });
+    fs::write(
+        scryrs_dir.join("routes.json"),
+        serde_json::to_string(&routes).expect("serialize"),
+    )
+    .expect("write routes.json");
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(
+            [
+                "route",
+                "explain",
+                tmp.path().to_str().unwrap(),
+                "--query",
+                "auth"
+            ],
+            &mut out,
+            &mut err,
+        ),
+        0
+    );
+
+    let stdout = String::from_utf8_lossy(&out);
+    let doc: serde_json::Value = serde_json::from_str(stdout.trim()).expect("must be valid JSON");
+
+    assert_eq!(doc["schemaVersion"].as_str(), Some("1.0.0"));
+    let hints = doc["hints"].as_array().expect("hints must be array");
+    assert_eq!(hints.len(), 1, "only authentication should match");
+    assert_eq!(hints[0]["routeId"].as_str(), Some("file:authentication"));
+
+    let reason = hints[0]["reason"].as_str().expect("reason must be string");
+    assert!(reason.contains("query match on"));
+    assert!(!reason.contains("unrelated"));
+}
+
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[test]
+fn route_explain_deterministic_repeatability() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let scryrs_dir = tmp.path().join(".scryrs");
+    fs::create_dir(&scryrs_dir).expect("create .scryrs");
+
+    let routes = serde_json::json!({
+        "schemaVersion": "1.0.0",
+        "metadata": {},
+        "routes": [
+            {
+                "id": "file:authentication",
+                "subjectKind": "file",
+                "subject": "authentication",
+                "label": "Authentication",
+                "target": "file:authentication",
+                "kind": "file",
+                "evidenceLinks": []
+            },
+            {
+                "id": "file:auth",
+                "subjectKind": "file",
+                "subject": "auth",
+                "label": "auth",
+                "target": "file:auth",
+                "kind": "file",
+                "evidenceLinks": []
+            }
+        ]
+    });
+    fs::write(
+        scryrs_dir.join("routes.json"),
+        serde_json::to_string(&routes).expect("serialize"),
+    )
+    .expect("write routes.json");
+
+    let path = tmp.path().to_str().unwrap();
+
+    let mut out1 = Vec::new();
+    let mut err1 = Vec::new();
+    assert_eq!(
+        run_with_writers(
+            ["route", "explain", path, "--query", "auth"],
+            &mut out1,
+            &mut err1
+        ),
+        0
+    );
+
+    let mut out2 = Vec::new();
+    let mut err2 = Vec::new();
+    assert_eq!(
+        run_with_writers(
+            ["route", "explain", path, "--query", "auth"],
+            &mut out2,
+            &mut err2
+        ),
+        0
+    );
+
+    assert_eq!(
+        out1, out2,
+        "repeated runs must produce byte-identical stdout"
+    );
+}
+
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[test]
+fn route_explain_zero_match_emits_empty_hints_exits_0() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let scryrs_dir = tmp.path().join(".scryrs");
+    fs::create_dir(&scryrs_dir).expect("create .scryrs");
+
+    let routes = serde_json::json!({
+        "schemaVersion": "1.0.0",
+        "metadata": {},
+        "routes": [
+            {
+                "id": "file:auth",
+                "subjectKind": "file",
+                "subject": "auth",
+                "label": "auth",
+                "target": "file:auth",
+                "kind": "file",
+                "evidenceLinks": []
+            }
+        ]
+    });
+    fs::write(
+        scryrs_dir.join("routes.json"),
+        serde_json::to_string(&routes).expect("serialize"),
+    )
+    .expect("write routes.json");
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(
+            [
+                "route",
+                "explain",
+                tmp.path().to_str().unwrap(),
+                "--query",
+                "zzz_nonexistent"
+            ],
+            &mut out,
+            &mut err,
+        ),
+        0
+    );
+
+    let stdout = String::from_utf8_lossy(&out);
+    let doc: serde_json::Value = serde_json::from_str(stdout.trim()).expect("must be valid JSON");
+    assert_eq!(doc["schemaVersion"].as_str(), Some("1.0.0"));
+    let hints = doc["hints"].as_array().expect("hints must be array");
+    assert!(
+        hints.is_empty(),
+        "zero matches must produce empty hints array"
+    );
+    assert!(
+        String::from_utf8_lossy(&err).is_empty(),
+        "stderr must be empty for zero-match results"
+    );
+}
+
+#[test]
+#[allow(clippy::unwrap_used)]
+fn route_explain_help_json_includes_explain_entry() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(run_with_writers(["--help-json"], &mut out, &mut err), 0);
+    assert!(err.is_empty());
+    let json_str = String::from_utf8_lossy(&out);
+    assert!(
+        json_str.contains("\"name\":\"explain\""),
+        "--help-json must contain explain subcommand, got:\n{json_str}"
+    );
+    assert!(
+        json_str.contains("\"flag\":\"--query\""),
+        "--help-json explain entry must document --query flag, got:\n{json_str}"
+    );
+    // Must not contain "deferred" in explain subcommand description.
+    let explain_start = json_str.find("\"name\":\"explain\"").unwrap();
+    let explain_end = json_str[explain_start..]
+        .find("\"name\":\"route\"")
+        .map(|o| explain_start + o)
+        .unwrap_or(json_str.len());
+    let explain_section = &json_str[explain_start..explain_end];
+    assert!(
+        !explain_section.contains("deferred"),
+        "explain section must not contain 'deferred', got:\n{explain_section}"
+    );
+}
+
+#[test]
+fn route_explain_help_text_includes_explain_command() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(run_with_writers(["--help"], &mut out, &mut err), 0);
+    assert!(err.is_empty());
+    let help = String::from_utf8_lossy(&out);
+    assert!(
+        help.contains("scryrs route explain"),
+        "--help must list route explain command, got:\n{help}"
+    );
+    assert!(
+        help.contains("--query <TEXT>"),
+        "--help must show --query argument, got:\n{help}"
+    );
+    assert!(
+        !help.contains("The `scryrs route explain` command is deferred"),
+        "--help must not say explain is deferred, got:\n{help}"
+    );
+}
+
+#[test]
+fn route_explain_with_extra_args_exits_2() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(
+            ["route", "explain", "/tmp", "--query", "auth", "extra"],
+            &mut out,
+            &mut err,
+        ),
+        2
+    );
+    assert!(out.is_empty());
+    let err_str = String::from_utf8_lossy(&err);
+    assert!(
+        err_str.contains("unexpected extra argument"),
+        "got: {err_str}"
+    );
 }
