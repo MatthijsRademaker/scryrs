@@ -113,11 +113,11 @@ capture traces  →    scores repeated  →   turn evidence      ───┘
 ```
 
 - **Observe → Detect:** Traces and hotspots provide raw evidence. Every time an agent opens a file, searches a term, or fails to find a concept, scryrs records a trace event. Hotspot analysis identifies the subjects that consume repeated agent effort.
-- **Detect → Graph:** `scryrs graph <PATH>` turns hotspot output into low-level graph nodes and, when docs navigation metadata is valid, adds doc-group/doc-page structure with explicit `contains` edges.
+- **Detect → Graph:** `scryrs graph <PATH>` turns hotspot output into low-level graph nodes, adds doc-group/doc-page structure when docs navigation metadata is valid, and optionally projects accepted semantic grouping evidence from `.scryrs/accepted/*.json` into explicit group nodes plus `contains` edges.
 - **Graph → Route:** `scryrs route <PATH>` already ships as deterministic projection over `.scryrs/graph.json`. It preserves node identity, copies evidence backlinks, and adds grouping only where explicit `contains` edges justify it.
 - **Route → Runtime retrieval (future):** Runtime explanation and context-loading decisions remain separate downstream work. Current route manifests are retrieval-ready artifacts, not retrieval policy.
 
-**Important:** `scryrs graph <PATH>` and `scryrs route <PATH>` are shipped. Cross-domain edge derivation, proposal acceptance as graph input, and `scryrs route explain ...` runtime behavior remain deferred.
+**Important:** `scryrs graph <PATH>` and `scryrs route <PATH>` are shipped. Accepted semantic grouping as graph input is now part of graph build; broader cross-domain edge derivation, other accepted target-type projections, and `scryrs route explain ...` runtime behavior remain deferred.
 
 ## Illustrated JSON Example
 
@@ -183,21 +183,23 @@ Graph build and route projection now exist, but both stay deliberately structura
 |---------|----------|
 | `KnowledgeGraphDocument` wire contract (`GRAPH_SCHEMA_VERSION = "1.0.0"`) | Cross-domain edge derivation such as `symbol:Authenticator -> file:auth.rs` |
 | `GraphNode`, `GraphEdge`, `EvidenceLink`, `EvidenceSourceKind` types | Automatic semantic grouping from shared labels alone |
-| `KnowledgeGraph` container: add nodes/edges, validate structural references, materialize deterministic document | Proposal acceptance flow turning review artifacts into authoritative graph evidence |
+| `KnowledgeGraph` container: add nodes/edges, validate structural references, materialize deterministic document | Projection rules for accepted non-semantic target types |
 | `scryrs graph <PATH>` CLI command | Runtime retrieval and `scryrs route explain ...` |
 | Graph build from `.scryrs/hotspots.json` for all five hotspot subject kinds | Server-side graph query or retrieval APIs |
 | Optional docs layer from `.devagent/docs/docs/_nav.json` with `docs_root`, `doc_group`, and `doc_page` nodes plus `contains` edges | Adapter publishing of graph/route knowledge |
+| Optional accepted-evidence layer from `.scryrs/accepted/*.json`, processed in sorted filename order and projecting only accepted `semantic_graph_grouping` decisions | |
+| Pending `.scryrs/proposals/` and rejected `.scryrs/rejected/` are ignored by graph build | |
 | Hotspot-only fallback when docs directory or `_nav.json` is missing, empty, or malformed (warning on stderr) | |
 | Deterministic output to `.scryrs/graph.json` and `.scryrs/routes.json` | |
 
-`scryrs graph <PATH>` requires `.scryrs/hotspots.json`. Docs metadata is optional: if `.devagent/docs/docs/` or `_nav.json` is missing, empty, or malformed, scryrs warns on stderr and still emits hotspot-only graph. `scryrs route <PATH>` then maps every graph node to one route entry, enriching grouping only from explicit `contains` edges already present in graph.
+`scryrs graph <PATH>` requires `.scryrs/hotspots.json`. Docs metadata is optional: if `.devagent/docs/docs/` or `_nav.json` is missing, empty, or malformed, scryrs warns on stderr and still emits hotspot-only graph. Accepted review decisions are also optional: if `.scryrs/accepted/` is absent, graph build proceeds from hotspot and docs input only. When accepted evidence is present, scryrs validates every artifact before projection, creates accepted group nodes with `recorded_evidence` provenance naming the accepted decision artifact, copies decision `sourceEvidence` onto grouping edges, and fails fast on malformed artifacts, missing source nodes, invalid target-group IDs, or duplicate accepted targets. `scryrs route <PATH>` then maps every graph node to one route entry, enriching grouping only from explicit `contains` edges already present in graph.
 
 ## Deferred Scope
 
 Next graph-layer work is narrower than "make it smarter":
 
-- derive explicit cross-domain edges from stable rules or accepted evidence
-- let accepted proposal output become recorded evidence for later deterministic graph builds
+- derive explicit cross-domain edges from stable rules or accepted evidence beyond semantic grouping
+- project additional accepted target types without teaching route generation about proposal directories
 - add runtime retrieval and explanation over route manifests without hiding provenance
 
 Those features still depend on stable hotspot outputs, live hotspot server contracts, and the identity boundary described on this page. See the [Product Roadmap](./roadmap.mdx) for delivery order.

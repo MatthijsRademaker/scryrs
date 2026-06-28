@@ -36,17 +36,18 @@ Each **route entry** is one graph node rendered as one route target.
 
 ### Grouping
 
-Grouping is intentionally narrow in v1. `grouping` appears only when route source node is target of explicit `contains` edge in graph. Today that mainly means docs navigation hierarchy:
+Grouping is intentionally narrow in v1. `grouping` appears only when route source node is target of explicit `contains` edge in graph. That includes both docs navigation hierarchy and accepted semantic grouping already materialized during graph build:
 
 - `docs_root -> Technical`
 - `Technical -> doc_page:graph`
+- `domain_term:auth -> file:auth`
 
-In that case `doc_page:graph` route entry carries:
+In those cases the child route entry carries the parent identity and label:
 
-- `groupId = "technical"`
-- `groupLabel = "Technical"`
+- `groupId = "technical"`, `groupLabel = "Technical"`
+- `groupId = "domain_term:auth"`, `groupLabel = "Auth"`
 
-Hotspot-backed nodes such as `file:src/main.rs` remain ungrouped unless graph contains explicit parent edge.
+Hotspot-backed nodes such as `file:src/main.rs` remain ungrouped unless graph already contains an explicit parent edge.
 
 ## Deterministic Identity Boundary
 
@@ -62,7 +63,7 @@ Shared text is not enough to merge entries. Higher-level grouping needs explicit
 
 ## Current Command and Artifact
 
-`scryrs route <PATH>` resolves `<PATH>` to repository root, loads `.scryrs/graph.json`, validates `GRAPH_SCHEMA_VERSION`, then emits single-line `RouteManifestDocument` JSON to stdout and writes same bytes to `.scryrs/routes.json`.
+`scryrs route <PATH>` resolves `<PATH>` to repository root, loads `.scryrs/graph.json`, validates `GRAPH_SCHEMA_VERSION`, then emits single-line `RouteManifestDocument` JSON to stdout and writes same bytes to `.scryrs/routes.json`. It does not inspect `.scryrs/accepted/`, `.scryrs/rejected/`, or `.scryrs/proposals/` directly.
 
 Output rules:
 
@@ -78,8 +79,8 @@ Output rules:
 | `RouteManifestDocument`, `RouteEntry`, `RouteGrouping` contracts in `crates/scryrs-types/src/lib.rs` | `scryrs route explain ...` runtime explanation command |
 | `scryrs route <PATH>` CLI command in `crates/scryrs-cli/src/route.rs` | Runtime ranking and retrieval decisions |
 | One route entry per graph node | Inferred semantic grouping from shared labels alone |
-| Optional doc-page grouping from explicit `contains` edges | Proposal acceptance flow turning review artifacts into authoritative graph evidence |
-| Deterministic artifact output at `.scryrs/routes.json` | Any graph mutation during route generation |
+| Grouping only from explicit `contains` edges, including accepted semantic grouping already materialized in `.scryrs/graph.json` | Any graph mutation during route generation |
+| Deterministic artifact output at `.scryrs/routes.json` | |
 
 ## Why Route Manifests Exist
 

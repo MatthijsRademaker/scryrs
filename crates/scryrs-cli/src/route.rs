@@ -138,11 +138,12 @@ fn build_route_entry(
             group_label: String::new(),
         }
     });
+    let subject = raw_subject(node);
 
     RouteEntry {
         id: node.id.clone(),
         subject_kind: node.kind.clone(),
-        subject: node.label.clone(),
+        subject,
         label: node.label.clone(),
         target: node.id.clone(),
         kind: node.kind.clone(),
@@ -150,6 +151,14 @@ fn build_route_entry(
         grouping,
         metadata: node.metadata.clone(),
     }
+}
+
+#[cfg(feature = "graph")]
+fn raw_subject(node: &scryrs_types::GraphNode) -> String {
+    node.id
+        .split_once(':')
+        .map(|(_, subject)| subject.to_string())
+        .unwrap_or_else(|| node.label.clone())
 }
 
 /// Sort evidence links by the documented tie-break chain:
@@ -376,6 +385,26 @@ mod tests {
     }
 
     #[test]
+    fn build_route_entry_uses_raw_subject_from_prefixed_node_id() {
+        let node = GraphNode {
+            id: "domain_term:auth".into(),
+            label: "Auth".into(),
+            description: None,
+            kind: "domain_term".into(),
+            tags: vec![],
+            aliases: vec![],
+            evidence_links: vec![],
+            metadata: None,
+        };
+
+        let entry = build_route_entry(&node, &HashMap::new());
+
+        assert_eq!(entry.subject_kind, "domain_term");
+        assert_eq!(entry.subject, "auth");
+        assert_eq!(entry.label, "Auth");
+    }
+
+    #[test]
     fn enrich_group_labels_fills_empty_labels() {
         let nodes = vec![GraphNode {
             id: "technical".into(),
@@ -518,6 +547,84 @@ mod tests {
 
         // Artifact was written.
         assert!(tmp.path().join(".scryrs/routes.json").exists());
+    }
+
+    #[test]
+    fn accepted_grouping_reaches_route_manifest_via_graph_contains_edges_only() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().expect("tempdir");
+        let scryrs_dir = tmp.path().join(".scryrs");
+        fs::create_dir(&scryrs_dir).expect("create .scryrs");
+        fs::create_dir(scryrs_dir.join("accepted")).expect("create accepted dir");
+        fs::write(scryrs_dir.join("accepted/bad.json"), "not-json")
+            .expect("write ignored accepted artifact");
+
+        let graph_doc = make_test_doc(
+            vec![
+                GraphNode {
+                    id: "domain_term:auth".into(),
+                    label: "Auth".into(),
+                    description: None,
+                    kind: "domain_term".into(),
+                    tags: vec![],
+                    aliases: vec![],
+                    evidence_links: vec![],
+                    metadata: None,
+                },
+                GraphNode {
+                    id: "file:auth".into(),
+                    label: "auth".into(),
+                    description: None,
+                    kind: "file".into(),
+                    tags: vec![],
+                    aliases: vec![],
+                    evidence_links: vec![EvidenceLink {
+                        source_kind: EvidenceSourceKind::LocalTraceRow,
+                        subject: "auth".into(),
+                        row_ids: vec![1],
+                        doc_ref: None,
+                        description: None,
+                        score: Some(10),
+                        metadata: None,
+                    }],
+                    metadata: None,
+                },
+            ],
+            vec![GraphEdge {
+                id: "domain_term:auth_contains_file:auth".into(),
+                source_node_id: "domain_term:auth".into(),
+                target_node_id: "file:auth".into(),
+                relationship: "contains".into(),
+                label: None,
+                tags: vec![],
+                evidence_links: vec![],
+                metadata: None,
+            }],
+        );
+
+        let graph_json = serde_json::to_string(&graph_doc).expect("serialize graph");
+        fs::write(scryrs_dir.join("graph.json"), &graph_json).expect("write graph.json");
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        assert_eq!(
+            write_route_json(&mut out, &mut err, tmp.path().to_str().unwrap()),
+            0
+        );
+
+        let manifest: RouteManifestDocument =
+            serde_json::from_slice(&out).expect("must be valid JSON");
+        let file_entry = manifest
+            .routes
+            .iter()
+            .find(|entry| entry.id == "file:auth")
+            .expect("file route exists");
+        let grouping = file_entry.grouping.as_ref().expect("grouping exists");
+        assert_eq!(grouping.group_id, "domain_term:auth");
+        assert_eq!(grouping.group_label, "Auth");
+        assert!(String::from_utf8_lossy(&err).is_empty());
     }
 
     #[test]
