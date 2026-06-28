@@ -81,8 +81,10 @@ Output rules:
 | One route entry per graph node | Any graph mutation during route generation |
 | Grouping only from explicit `contains` edges, including accepted semantic grouping already materialized in `.scryrs/graph.json` | |
 | Deterministic artifact output at `.scryrs/routes.json` | |
-| `RouteHintDocument`, `RouteHintItem` contract in `crates/scryrs-types/src/lib.rs` | `scryrs route explain` CLI command (deferred) |
+| `RouteHintDocument`, `RouteHintItem` contract in `crates/scryrs-types/src/lib.rs` | |
 | `hints_from_manifest` deterministic producer in `crates/scryrs-runtime/src/lib.rs` | |
+| `explain_hints` query-aware hint producer in `crates/scryrs-runtime/src/lib.rs` | |
+| `scryrs route explain <PATH> --query <TEXT>` CLI command in `crates/scryrs-cli/src/route_explain.rs` | |
 
 ## Route Hint Contract
 
@@ -98,7 +100,38 @@ The route manifest is accompanied by a deterministic `RouteHintDocument` project
 
 **Producer:** `hints_from_manifest(manifest: &RouteManifestDocument) -> RouteHintDocument` in `crates/scryrs-runtime/src/lib.rs`. The function is a pure projection over the manifest — no filesystem I/O, no graph mutation, no model-based ranking.
 
-**CLI command:** The `scryrs route explain` command is deferred to a follow-up task. The contract and producer are available now for library consumers.
+**CLI command:** `scryrs route explain <PATH> --query <TEXT>` reads the route manifest artifact, performs case-insensitive substring matching against `label`, `subject`, `id`, `target`, `kind`, and `evidence_links[].subject`, and returns a filtered, tiered `RouteHintDocument`.
+
+**Example:**
+
+```bash
+scryrs route explain . --query "authentication"
+```
+
+**Match fields:**
+
+| Field | Description |
+|-------|-------------|
+| `label` | Route entry human-readable label |
+| `subject` | Raw subject value from source node |
+| `id` | Source graph node identifier |
+| `target` | Normalized load target |
+| `kind` | String-backed node kind |
+| `evidence_links[].subject` | Evidence provenance subject |
+
+**Match tiers (descending priority):**
+
+| Tier | Description |
+|------|-------------|
+| 3 | Exact string match (field equals query, case-insensitive) |
+| 2 | Prefix match (field starts with query, case-insensitive) |
+| 1 | Substring match (field contains query, case-insensitive) |
+
+Within each tier, entries follow manifest entry order (by `id` ascending). Only entries that match at least one field appear in output. Each matching hint's `reason` field appends `"; query match on {comma-separated field names}"`.
+
+**Zero-match contract:** No matches produces a valid `RouteHintDocument` with empty `hints` array and exit code 0.
+
+**Artifact dependency:** The explain command reads only `.scryrs/routes.json`. It does not inspect `.scryrs/graph.json` or any other artifact.
 
 ## Why Route Manifests Exist
 

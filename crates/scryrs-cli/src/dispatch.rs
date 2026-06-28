@@ -65,6 +65,10 @@ where
         return execute_proposals_cli(&mut out, &mut err, &args[1..]);
     }
 
+    if args.len() >= 2 && args[0] == "route" && args[1] == "explain" {
+        return crate::route_explain::execute_route_explain(&mut out, &mut err, &args[2..]);
+    }
+
     // Unknown command check before clap dispatch.
     // Only known root-level entrypoints pass through to clap.
     // Everything else produces the contract error: "unknown command: 'X'".
@@ -309,10 +313,26 @@ where
         )
         .subcommand(
             Command::new("route")
-                .about("Generate the route manifest from a knowledge graph")
+                .about("Generate the route manifest from a knowledge graph, or explain route entries")
                 .disable_help_flag(true)
                 .disable_version_flag(true)
-                .arg(Arg::new("PATH").required(true).value_name("PATH")),
+                .subcommand_required(false)
+                .arg(Arg::new("PATH").required(false).value_name("PATH"))
+                .subcommand(
+                    Command::new("explain")
+                        .about("Query the route manifest for matching entries")
+                        .disable_help_flag(true)
+                        .disable_version_flag(true)
+                        .arg(Arg::new("PATH").value_name("PATH"))
+                        .arg(
+                            Arg::new("query")
+                                .long("query")
+                                .value_name("TEXT")
+                                .num_args(1)
+                                .action(clap::ArgAction::Set)
+                                .help("Query text for case-insensitive substring matching"),
+                        ),
+                ),
         )
         .subcommand(
             Command::new("propose")
@@ -398,11 +418,36 @@ where
                     write_graph_json(&mut out, &mut err, path)
                 }
                 Some(("route", m)) => {
-                    let path = m
-                        .get_one::<String>("PATH")
-                        .map(|s| s.as_str())
-                        .unwrap_or(".");
-                    write_route_json(&mut out, &mut err, path)
+                    // route explain is intercepted pre-clap, so we only get here
+                    // for bare `scryrs route <PATH>`.
+                    match m.subcommand() {
+                        Some(("explain", _)) => {
+                            // Should not be reached — pre-clap intercept catches this.
+                            // If it does, treat as usage error.
+                            if writeln!(err, "scryrs route explain: internal dispatch error").is_err()
+                                || writeln!(err, "See `scryrs --help`").is_err()
+                            {
+                                1
+                            } else {
+                                2
+                            }
+                        }
+                        _ => {
+                            match m.get_one::<String>("PATH") {
+                                Some(path) => write_route_json(&mut out, &mut err, path),
+                                None => {
+                                    if writeln!(err, "scryrs route: missing required PATH argument").is_err()
+                                        || writeln!(err, "Usage: scryrs route <PATH>").is_err()
+                                        || writeln!(err, "See `scryrs --help`").is_err()
+                                    {
+                                        1
+                                    } else {
+                                        2
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 Some(("propose", m)) => {
                     let path = m

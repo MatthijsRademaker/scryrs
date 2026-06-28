@@ -31,12 +31,20 @@ COMMANDS\n\
   scryrs route <PATH>\n\
       Generate the route manifest from a knowledge graph artifact.\n\
       Emits a single-line RouteManifestDocument JSON to stdout and .scryrs/routes.json.\n\
+  scryrs route explain <PATH> --query <TEXT>\n\
+      Query the route manifest for matching entries.\n\
+      Case-insensitive substring match against label, subject, id, target, kind,\n\
+      and evidence_links[].subject. Match tier (exact > prefix > substring) orders\n\
+      results. Returns single-line RouteHintDocument JSON. Zero matches produces\n\
+      valid document with empty hints array.\n\
+      Example: scryrs route explain . --query \"authentication\"\n\
 \n\
       Route hint contract: Each route entry projects to a RouteHintItem\n\
       (HINT_SCHEMA_VERSION 1.0.0) with routeId, target, label, 1-based\n\
       ordinal rank, evidence citations, and a template-derived reason.\n\
+      The reason field appends \"; query match on <fields>\" for explain results.\n\
       Rank is a deterministic ordinal derived from manifest entry order;\n\
-      relevance is deferred (None). The `scryrs route explain` command is deferred.\n\
+      relevance is deferred (None).\n\
   scryrs propose <PATH>\n\
       Generate reviewable knowledge proposals from hotspot and graph evidence.\n\
       Writes validated ProposalDocument files under .scryrs/proposals/.\n\
@@ -120,7 +128,8 @@ EXAMPLES\n\
   scryrs server\n\
   scryrs server --port 9091\n\
   scryrs graph .
-  scryrs route .\n\n\
+  scryrs route .
+  scryrs route explain . --query \"authentication\"\n\n\
 OPTIONS\n\
   -h, --help       Print this help message and exit\n\
   -V, --version    Print version and exit\n\
@@ -128,7 +137,7 @@ OPTIONS\n\
 EXIT CODES\n\
   0    Success (hotspots: JSON written; record local: all events accepted; record remote: no rejections or failures; init: hook installed; propose/proposals: artifacts written or listed successfully; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)\n\
   1    Hotspots: storage error. Record: rejected events or I/O error (local or server rejections). Init: I/O error. Proposals: serialization or filesystem write failure. Dashboard: port in use or artifact read error. Server: port in use or store error.\n\
-  2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, self-install refusal, invalid mode, or missing/invalid live-mode configuration; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; dashboard: invalid flags or bind failure; server: invalid flags or bind failure",
+  2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, self-install refusal, invalid mode, or missing/invalid live-mode configuration; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; route explain: missing PATH, missing --query, missing/malformed/schema-mismatched routes.json; dashboard: invalid flags or bind failure; server: invalid flags or bind failure",
         SCHEMA_VERSION, SCHEMA_VERSION, HOTSPOT_SCHEMA_VERSION
     )
 }
