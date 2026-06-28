@@ -28,6 +28,28 @@ Phase 2 hotspot materialization is delivered: `scryrs hotspots <PATH>` opens `.s
 
 Key scope rule: **do not build later-suite features on placeholder ingest paths**. Every later phase depends on deterministic evidence collected by earlier phases.
 
+## Production-Ready Suite Path
+
+Current implementation has enough shipped pieces to shift roadmap focus from isolated foundations to closed product loops. Production readiness now means connecting these surfaces without weakening deterministic boundaries:
+
+```text
+Trace capture → Hotspots → Live signals → Graph → Routes → Proposals → Accepted evidence → Publishing → Runtime explain
+```
+
+The next roadmap tranche should optimize for loop closure:
+
+| Milestone | Production outcome | Next blocking work |
+| --- | --- | --- |
+| P1. Acceptance ledger | Proposal files can become reviewed evidence without silent mutation | Define accepted/rejected artifact contract and CLI review workflow |
+| P2. Accepted-evidence graph | Reviewed semantic groupings and docs notes influence graph deterministically | Teach graph build to consume accepted evidence with provenance |
+| P3. Live dashboard | Multi-agent live hotspots are visible without manual API calls | Add dashboard live-server mode, signal timeline, reconnect/resume UX |
+| P4. Runtime explain | Agents can ask what context to load and why | Define route hint contract and implement `scryrs route explain` |
+| P5. Publishing adapters | Reviewed knowledge leaves `.scryrs/` and reaches docs systems | Publish accepted proposals to Markdown first, then Rspress/llms surfaces |
+| P6. LLM assist UX | Models improve proposal quality but never own truth | Expose bounded model assist only over proposal inbox / accepted evidence flow |
+| P7. Release hardening | Suite can ship as production toolchain | Add diagnostics, packaging checks, multi-agent E2E, security/privacy gates |
+
+See [Production Suite Plan](./production-suite.md) for board-aligned task sequencing.
+
 ## Observer-First Product Boundary
 
 scryrs currently positions itself as an **observer-first hotspot detector** focused on stable, high-signal harness-native tool signals. Default trace capture covers file reads, edits, search/navigation, symbol inspection, and document retrieval. Bash command capture is **not default product behavior** — it is debug-gated behind `SCRYRS_DEBUG` to keep default trace data focused on actionable hotspot evidence rather than noisy shell commands.
@@ -168,20 +190,22 @@ Required deliverables:
 
 This phase is where scryrs stops being only a recorder and starts becoming routing infrastructure.
 
-**Partial delivery (2026-06-27):** The `scryrs graph <PATH>` command is shipped. It builds graph nodes from all five hotspot subject kinds and docs navigation hierarchy, producing structural `contains` edges and a deterministic `KnowledgeGraphDocument` to stdout and `.scryrs/graph.json`. It does not semantically collapse same-label subjects across kinds, and it does not infer cross-domain edges such as `search:auth → domain_term:auth` or `symbol:Authenticator → file:auth.rs`. Full cross-domain edge derivation and route-manifest generation remain future work within Phase 5.
+**Partial delivery (2026-06-27):** The `scryrs graph <PATH>` command is shipped. It builds graph nodes from all five hotspot subject kinds and docs navigation hierarchy, producing structural `contains` edges and a deterministic `KnowledgeGraphDocument` to stdout and `.scryrs/graph.json`. The `scryrs route <PATH>` command is shipped, generating a deterministic `RouteManifestDocument` artifact at `.scryrs/routes.json` from `.scryrs/graph.json` input, with evidence backlinks and optional doc-page grouping from `contains` edges. Neither command semantically collapses same-label subjects across kinds or infers cross-domain edges such as `search:auth → domain_term:auth` or `symbol:Authenticator → file:auth.rs`. Full cross-domain edge derivation remains future work within Phase 5.
 
 ### Semantic Grouping Boundary
 
-Hotspot grouping is exact and deterministic: `(subjectKind, subject)` is the identity key. That protects trace truth from accidental semantic merging. A later graph layer may add higher-level domain nodes such as `domain_term:auth` and edges from low-level hotspot subjects, but those edges must come from one of two sources:
+Hotspot grouping is exact and deterministic: `(subjectKind, subject)` is identity key. That protects trace truth from accidental semantic merging. Later graph layer may add higher-level domain nodes such as `domain_term:auth` and edges from low-level hotspot subjects, but those edges must come from one of two sources:
 
 1. deterministic derivation rules with tests and stable provenance, or
 2. reviewable model-assisted proposals that cite existing hotspot, graph, or document evidence.
 
-LLMs may help suggest semantic groupings later, but they must not become the authority that mutates graph truth during ingest, scoring, or base graph materialization. Model output belongs in proposal/review flow first; accepted output can then become recorded evidence consumed by later graph builds.
+LLMs may help suggest semantic groupings later, but they must not become authority that mutates graph truth during ingest, scoring, or base graph materialization. Model output belongs in proposal/review flow first; accepted output can then become recorded evidence consumed by later graph builds.
 
 ## Phase 6 - Proposal Engine
 
 This phase turns evidence into reviewable change suggestions.
+
+**Partial delivery (2026-06-27):** Proposal contract and inbox are shipped. `scryrs propose <PATH>` is shipped, generating validated deterministic `ProposalDocument` files under `.scryrs/proposals/` from `.scryrs/hotspots.json` and `.scryrs/graph.json`. Current deterministic generator emits `docs_note`, `skill`, `memory_patch`, `adr`, and qualifying `semantic_graph_grouping` candidates while keeping writes confined to proposal inbox artifacts only. `debugging_playbook` remains excluded from v1 generation.
 
 Required deliverables:
 
@@ -229,6 +253,8 @@ This direction is documented as strategic intent only. No implementation, schema
 
 Model-backed features belong last because they are interpretation features, not truth-producing features.
 
+**Partial delivery (2026-06-28):** `crates/scryrs-curator-llm` is shipped as bounded library-only assist layer. It exposes `EvidencePack`-based drafting and semantic grouping suggestion APIs over existing deterministic evidence, but adds no CLI command or flag, no default-feature dependency for deterministic paths, no tool use, and no automatic mutation of graph, route, or docs truth.
+
 Valid later uses:
 
 - rank competing proposal drafts,
@@ -266,8 +292,13 @@ If roadmap starts to sprawl, cut work using these rules:
 | M3 - Local dashboard beta | Start `scryrs dashboard`, browse hotspots, sessions, and events in a browser |
 | M4 - Live hotspot server beta | Point multiple agents at one scryrs server and watch hotspot signals update without manually running `scryrs hotspots` |
 | M5 - Routing data beta | Export graph and route manifests for downstream consumers |
-| M6 - Proposal loop beta | Generate reviewable docs and memory proposals from evidence |
-| M7 - Adapter suite beta | Publish approved knowledge into Markdown and Rspress surfaces |
+| M6 - Proposal inbox beta | Generate reviewable docs, memory, ADR, skill, and grouping proposals from evidence |
+| M7 - Review loop beta | Accept or reject proposals and convert accepted output into recorded evidence |
+| M8 - Live dashboard beta | Browse multi-agent live hotspots and signal history from `scryrs dashboard` |
+| M9 - Runtime explain beta | Ask `scryrs route explain` what context to read and inspect evidence-backed reasons |
+| M10 - Adapter suite beta | Publish approved knowledge into Markdown, Rspress, and llms surfaces |
+| M11 - LLM assist beta | Use bounded model drafting/grouping over proposal inbox without auto-acceptance |
+| M12 - Production release | Install, diagnose, test, and operate the full suite through documented release paths |
 
 ## Source-of-Truth Rules
 
@@ -275,12 +306,16 @@ If roadmap starts to sprawl, cut work using these rules:
 - `crates/scryrs-types/src/lib.rs` is current truth for trace event contracts.
 - `crates/scryrs-core/src/lib.rs` is current truth for present hotspot scoring behavior.
 - `.devagent/architecture/*.c4` is source of truth for LikeC4 diagrams embedded in docs.
-- `docs/vision.md` states destination; this page states delivery order.
+- `.devagent/docs/docs/vision.md` states destination; this page states delivery order.
+- `.devagent/docs/docs/production-suite.md` states the loop-closure plan from current shipped artifacts to production suite.
 
 ## Related Pages
 
 - [Vision & Goals](./vision.md) - product destination, principles, and anti-goals.
-- [Architecture](./architecture.md) - current crate topology and runtime flow.
-- [CLI v0 Contract](./cli-v0-contract.md) - current public CLI contract before roadmap phases land.
-- [Graph](./graph.md) — domain-oriented explanation of the knowledge graph and how evidence becomes routing context
-- [Live Hotspots](./live-hotspots.md) — domain narrative and usage guidance for Phase 4 live server features
+- [Production Suite Plan](./production-suite.md) - current loop-closure plan toward production readiness.
+- [Architecture](./architecture.mdx) - current crate topology and runtime flow.
+- [CLI Reference](./cli-v0-contract.md) - current public CLI contract.
+- [Graph](./graph.md) — domain-oriented explanation of graph identity and evidence boundaries.
+- [Route Manifests](./route-manifests.md) — route projection semantics.
+- [Proposals](./proposals.md) — review-first proposal flow and LLM-assist boundary.
+- [Live Hotspots](./live-hotspots.md) — domain narrative and usage guidance for Phase 4 live server features.

@@ -908,6 +908,17 @@ name = "scryrs-curator"
 version = "0.1.0"
 dependencies = [
  "scryrs-types",
+ "serde_json",
+]
+
+[[package]]
+name = "scryrs-curator-llm"
+version = "0.1.0"
+dependencies = [
+ "scryrs-llm",
+ "scryrs-types",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -992,6 +1003,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

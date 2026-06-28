@@ -1,6 +1,14 @@
 //! Agent-side routing and retrieval helper foundation.
 
-use scryrs_types::{FeatureDescriptor, RouteHint};
+use scryrs_types::FeatureDescriptor;
+
+/// Runtime routing hint for agent-side retrieval.
+/// Independent of the route manifest wire contract.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RouteHint {
+    pub target: String,
+    pub reason: String,
+}
 
 pub fn descriptor() -> FeatureDescriptor {
     FeatureDescriptor {

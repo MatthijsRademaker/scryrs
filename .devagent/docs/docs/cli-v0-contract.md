@@ -2,16 +2,17 @@
 
 scryrs CLI helps teams observe agent coding activity, detect knowledge hotspots, inspect them locally, and optionally centralize ingest for live monitoring. It solves the problem of invisible, repeated agent effort: when AI coding assistants spend session after session rediscovering the same files, searching the same terms, and failing the same lookups, scryrs surfaces those patterns so you can document, investigate, or fix the underlying issues.
 
-scryrs supports two main workflow paths:
+scryrs supports three current workflow paths:
 
 - **Local observe → detect loop:** Run `scryrs hook` or `scryrs record` to capture trace events locally, then `scryrs hotspots` to score them, and `scryrs dashboard` to visually browse ranked hotspots, sessions, and events — all from `.scryrs/` in your project root.
 - **Central live-ingest flow:** Configure a remote ingest URL (via `scryrs.json` or `SCRYRS_REMOTE_*` env vars), then `scryrs record` or `scryrs hook` submits events to a `scryrs server` running centrally. The server provides live hotspot rankings and an SSE signal stream for real-time monitoring across multiple agent instances.
+- **Promote → route artifact flow:** Run `scryrs graph`, `scryrs route`, and `scryrs propose` over local hotspot and graph artifacts to produce machine-readable graph and route outputs plus review-first proposal inbox artifacts.
 
 For hotspot interpretation and scoring rationale, see [Hotspots](./hotspots.md). For harness integration rules and fail-open guarantees, see [Trace Hook Contract](./trace-hook-contract.md).
 
 ---
 
-The v0 CLI surface provides six implemented commands: `hotspots`, `record`, `hook`, `init`, `dashboard`, and `server`. This document serves agent integrators and follow-up feature developers.
+The current public CLI surface provides nine implemented commands: `hotspots`, `record`, `hook`, `init`, `graph`, `route`, `propose`, `dashboard`, and `server`. This document serves agent integrators and follow-up feature developers.
 
 ## Binary
 
@@ -204,6 +205,60 @@ Analyzes persisted trace events in `.scryrs/scryrs.db` and emits a deterministic
 | `FailedLookup` | 4 (+2 failure bonus) |
 
 Per-subject score = sum of event weights multiplied by per-type counts. `FailedLookup` events add a fixed `FAILURE_BONUS` of 2 per occurrence in addition to the weight.
+
+### `scryrs graph <PATH>`
+
+Builds deterministic `KnowledgeGraphDocument` artifact from hotspot evidence and optional docs navigation metadata.
+
+| Field | Value |
+|-------|-------|
+| Input | Required local directory `<PATH>` containing `.scryrs/hotspots.json`. Optional docs layer from `.devagent/docs/docs/_nav.json`. |
+| Output | Single-line `KnowledgeGraphDocument` JSON on stdout; `.scryrs/graph.json` artifact file written to `<PATH>/.scryrs/` |
+| Exit 0 | Graph written successfully |
+| Exit 1 | Validation, serialization, stdout write, or artifact write failure |
+| Exit 2 | PATH argument omitted, path cannot be resolved, hotspots artifact missing, or hotspots artifact malformed |
+
+**Behavior notes:**
+
+- Hotspot nodes are built from all five subject kinds.
+- Docs hierarchy is optional. If docs directory or `_nav.json` is missing, empty, or malformed, the command warns on stderr and emits hotspot-only graph.
+- Output is deterministic: top-level fields are `schemaVersion`, `metadata`, `nodes`, and `edges`.
+
+### `scryrs route <PATH>`
+
+Projects `.scryrs/graph.json` into deterministic `RouteManifestDocument` artifact for downstream runtime retrieval.
+
+| Field | Value |
+|-------|-------|
+| Input | Required local directory `<PATH>` containing `.scryrs/graph.json` |
+| Output | Single-line `RouteManifestDocument` JSON on stdout; `.scryrs/routes.json` artifact file written to `<PATH>/.scryrs/` |
+| Exit 0 | Route manifest written successfully |
+| Exit 1 | Serialization, stdout write, or artifact write failure |
+| Exit 2 | PATH argument omitted, path cannot be resolved, graph artifact missing, graph artifact malformed, or graph schema mismatch |
+
+**Behavior notes:**
+
+- Every graph node becomes exactly one route entry.
+- `grouping` is present only when explicit `contains` edge from parent group node exists.
+- Output is deterministic: routes sort by node `id` ascending and carry no wall-clock generation fields.
+
+### `scryrs propose <PATH>`
+
+Generates validated review-only `ProposalDocument` inbox artifacts from hotspot and graph evidence.
+
+| Field | Value |
+|-------|-------|
+| Input | Required local directory `<PATH>` containing `.scryrs/hotspots.json` and `.scryrs/graph.json` |
+| Output | Plain-text count on stdout; individual proposal JSON files under `<PATH>/.scryrs/proposals/` |
+| Exit 0 | Proposals generated and written successfully |
+| Exit 1 | Generated proposal failed validation; proposals directory could not be created; serialization or file write failure |
+| Exit 2 | PATH argument omitted, path cannot be resolved, hotspots artifact missing/malformed, or graph artifact missing/malformed |
+
+**Behavior notes:**
+
+- Writes are confined to `.scryrs/proposals/`.
+- Each proposal is validated before persistence.
+- Proposal generation does not mutate docs source, `.scryrs/graph.json`, or `.scryrs/routes.json`.
 
 ### `scryrs init --agent <NAME>`
 
@@ -428,9 +483,9 @@ Agents should check `surfaceVersion` before parsing to detect format changes. Th
 
 | Code | Meaning |
 |------|---------|
-| 0 | Hotspots: report written successfully (may have zero entries). Record local: all events accepted. Record remote: all events accepted (duplicates non-fatal). Init: hook installed. Dashboard: server shut down cleanly. Server: server shut down cleanly. Hook: always — fail-open, never blocks the harness. Help/version/surface display. |
-| 1 | Hotspots: I/O error writing stdout or artifact file. Record: one or more events rejected (local or server), or I/O error writing output. Init: I/O error. Dashboard: port in use or server startup I/O failure. Server: port in use, bind failure, or server I/O error. |
-| 2 | Hotspots: missing PATH, store not found, corrupt store. Record local: fatal I/O error (unreadable file, store failure). Record remote: missing remote identity, transport timeout, connection failure, non-2xx response, malformed response. Init: unsupported harness, collision, self-install refusal, missing/empty `--agent`. Dashboard: invalid flags or bind address. Server: invalid port/bind/store, or feature not compiled. Unknown commands, missing required arguments, invalid arguments (usage errors). |
+| 0 | Hotspots, graph, and route artifacts written successfully; proposals written successfully; record local accepted all events; record remote accepted all events (duplicates non-fatal); init installed hook; dashboard/server shut down cleanly; hook always fail-open; help/version/surface display. |
+| 1 | Hotspots/graph/route stdout or artifact write failure; record rejected one or more events or hit output I/O error; propose validation, directory creation, serialization, or file write failure; init I/O error; dashboard/server startup or runtime I/O failure. |
+| 2 | Usage error. Also: hotspots missing/corrupt store; graph missing/malformed hotspots input; route missing/malformed/schema-mismatched graph input; propose missing/malformed hotspot or graph input; record local fatal I/O error; record remote identity/transport failure; init unsupported harness or collision; dashboard invalid flags or bind address; server invalid port/bind/store or feature not compiled. |
 
 All error messages and human-facing diagnostics are written to stderr.
 
@@ -447,6 +502,48 @@ All error messages and human-facing diagnostics are written to stderr.
 - Exit 0: Report available (may have zero entries if store is empty).
 - Exit 1: I/O or storage error (stdout write failure, artifact write failure). May retry.
 - Exit 2: Missing PATH, store not found at `<PATH>/.scryrs/scryrs.db`, or corrupt store. Do not retry without fixing input.
+
+### Graph command
+
+**When to call:** An agent should call `scryrs graph <PATH>` when hotspot evidence already exists and the next step is to materialize deterministic graph structure for routing or proposal generation.
+
+**Input:** Explicit local directory path containing `.scryrs/hotspots.json`. Docs navigation layer from `.devagent/docs/docs/_nav.json` is optional.
+
+**Output:** Parseable JSON `KnowledgeGraphDocument` on stdout and `.scryrs/graph.json` artifact file.
+
+**Exit codes:**
+
+- Exit 0: Graph available.
+- Exit 1: Validation, serialization, stdout write, or artifact write failure.
+- Exit 2: Missing PATH, unresolved path, missing hotspots artifact, or malformed hotspots artifact.
+
+### Route command
+
+**When to call:** An agent should call `scryrs route <PATH>` when graph artifact exists and runtime-facing route projection is needed.
+
+**Input:** Explicit local directory path containing `.scryrs/graph.json`.
+
+**Output:** Parseable JSON `RouteManifestDocument` on stdout and `.scryrs/routes.json` artifact file.
+
+**Exit codes:**
+
+- Exit 0: Route manifest available.
+- Exit 1: Serialization, stdout write, or artifact write failure.
+- Exit 2: Missing PATH, unresolved path, missing graph artifact, malformed graph artifact, or graph schema mismatch.
+
+### Propose command
+
+**When to call:** An agent should call `scryrs propose <PATH>` when hotspot and graph artifacts already exist and reviewable knowledge proposals are needed.
+
+**Input:** Explicit local directory path containing `.scryrs/hotspots.json` and `.scryrs/graph.json`.
+
+**Output:** Proposal count on stdout and validated `ProposalDocument` JSON files under `.scryrs/proposals/`.
+
+**Exit codes:**
+
+- Exit 0: Proposal inbox updated successfully.
+- Exit 1: Validation, serialization, directory creation, or file write failure.
+- Exit 2: Missing PATH, unresolved path, or missing/malformed hotspots or graph artifact.
 
 ### Dashboard command
 
@@ -534,7 +631,7 @@ All error messages and human-facing diagnostics are written to stderr.
 
 ## Out of scope for v0
 
-Any command other than the six implemented commands (`hotspots`, `record`, `hook`, `init`, `dashboard`, `server`) is unrecognized and exits 2 with a usage error.
+Any command other than the nine implemented commands (`hotspots`, `record`, `hook`, `init`, `graph`, `route`, `propose`, `dashboard`, `server`) is unrecognized and exits 2 with a usage error.
 
 ## Local Development Testing
 
@@ -577,7 +674,10 @@ cargo install cargo-insta
 
 ## Related Pages
 
-- [Hotspots](./hotspots.md) — domain concept and interpretation guide (this page covers the CLI output contract and exit codes)
+- [Hotspots](./hotspots.md) — domain concept and interpretation guide for hotspot outputs
+- [Graph](./graph.md) — graph artifact semantics and evidence boundaries
+- [Route Manifests](./route-manifests.md) — route artifact semantics and identity preservation
+- [Proposals](./proposals.md) — review-first proposal flow and optional model-assisted curation boundary
 - [Live Hotspots](./live-hotspots.md) — domain narrative, mode comparison, and end-to-end live workflow
 - [Trace Hook Contract](./trace-hook-contract.md) — how harness hooks capture TraceEvent records for hotspot analysis
-- [Architecture](./architecture.mdx) — crate topology including scryrs-core scoring and the HotspotsReport data flow
+- [Architecture](./architecture.mdx) — crate topology including scoring, graph, route, and proposal composition

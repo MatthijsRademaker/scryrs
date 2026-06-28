@@ -33,7 +33,8 @@ The LLM layer is not in the policy path. `crates/scryrs-llm` is an optional tran
 | `crates/scryrs-core` | Trace and hotspot foundation | Preserves standalone hotspot detection without docs-site assumptions. Exports shared `per_event_contribution()` contract for deterministic batch and live scoring alignment. |
 | `crates/scryrs-server` | Central trace ingest and live hotspot server | Long-lived HTTP server for `POST /v1/trace-events/batch` with server-owned SQLite persistence and first-writer-wins idempotency. Also exposes read-only `GET /v1/repositories/{repository_id}/hotspots` (cumulative and session-scoped live hotspot rankings) and `GET /v1/repositories/{repository_id}/signals` (SSE stream of `HotspotSignal` records with `?after=<signal_id>` cursor replay/resume). Signals are fanned out via a `tokio::sync::broadcast` channel; subscribers receive a replay-then-live stream that prevents gaps. |
 | `crates/scryrs-graph` | Knowledge graph foundation | Owns routing graph concepts separate from trace collection. |
-| `crates/scryrs-curator` | Proposal foundation | Turns hotspots into reviewable docs, skill, decision, or memory proposals. |
+| `crates/scryrs-curator` | Deterministic proposal engine | Turns hotspot and graph evidence into reviewable docs, skill, decision, memory, or grouping proposals. |
+| `crates/scryrs-curator-llm` | Optional model-assisted curator layer | Drafts or suggests proposals over bounded evidence without entering deterministic ingest, scoring, graph, or route paths. |
 | `crates/scryrs-runtime` | Agent-side routing foundation | Helps future agents choose relevant context faster. |
 | `crates/scryrs-adapter-markdown` | Markdown publishing adapter | Supports generic docs repos and simple file-based output. |
 | `crates/scryrs-adapter-rspress` | Rspress publishing adapter | Makes Rspress first-class without making it foundational. |
@@ -121,13 +122,16 @@ Adapters depend on shared contracts and suite outputs. Core detection should nev
 
 | Crate | Tests | Notes |
 | --- | --- | --- |
-| `scryrs-cli` | Comprehensive | CLI contract, record, init, hotspots integration |
+| `scryrs-cli` | Comprehensive | CLI contract, record, hotspots, graph, route, propose, init, dashboard, server |
 | `scryrs-core` | Comprehensive | Trace events, hotspot scoring, shared live contribution API |
 | `scryrs-server` | 57 | Config, time, store schema/ingest idempotency, live hotspot accumulators, threshold-crossing signals, cumulative and session-scoped hotspot materialization, SSE signal streaming with cursor replay, concurrent ingest correctness, RFC 3339 validation |
-| `scryrs-types` | 44 | Serialization, type-level contracts, server ingest envelope types |
-| `scryrs-curator` | 3 | `propose_from_hotspot`, title/rationale/edge cases |
+| `scryrs-types` | 44 | Serialization, type-level contracts, graph/route/proposal schemas, server ingest envelope types |
+| `scryrs-curator` | 25 | Deterministic proposal heuristics, semantic grouping rules, validation assumptions |
+| `scryrs-curator-llm` | 28 | EvidencePack budgets, draft/grouping validation, hallucination rejection, tool-free model requests |
+| `scryrs-runtime` | 6 | Route-hint foundation |
+| `scryrs-adapter-markdown` | 6 | Proposal markdown rendering |
 | `scryrs-sandbox` | 5 | `ToolPolicy::read_only`, `can_write` path matching |
-| Other scaffold crates | 1 each | Sentinel descriptor test only |
+| Remaining scaffold crates | 1 each | Descriptor / sentinel coverage only (`scryrs-graph`, `scryrs-adapter-rspress`, `scryrs-policy`, `scryrs-telemetry`) |
 
 ## Current Limitations
 
@@ -136,7 +140,9 @@ Adapters depend on shared contracts and suite outputs. Core detection should nev
   - **Shared scoring contract**: Live accumulation reuses `per_event_contribution()` from `crates/scryrs-core/src/scoring.rs`, keeping deterministic batch scoring and live accumulation aligned on base weights and failure bonus without duplicated weight tables.
   - **Live hotspot query API**: `GET /v1/repositories/{repository_id}/hotspots` returns a versioned `LiveHotspotsResponse` with ranked `HotspotEntry` items. Supports `?window=cumulative` (default, cumulative scores from `hotspot_accumulators`) and optional `?session_id` (session-scoped recomputation via `score_hotspots` over filtered `server_trace_events`). Entries are ranked by the same six-key tie-break chain used by `scryrs hotspots`.
   - **SSE signal streaming**: `GET /v1/repositories/{repository_id}/signals` returns a `text/event-stream` with `HotspotSignal` records (id, subject identity, score, delta, window, threshold, evidence row IDs, created-at timestamp). Supports `?after=<signal_id>` for cursor-based replay/resume. The stream is infinite (replay phases then live broadcast); subscribers should disconnect cleanly rather than draining it.
-  - Graph, curator, and adapter crates remain scaffold-level (sentinel descriptor tests only).
+  - **Graph / route / proposal state**: `scryrs graph`, `scryrs route`, and `scryrs propose` are shipped artifact commands. Current graph build is structural (hotspot subject nodes plus optional docs hierarchy), route generation is one-entry-per-node with explicit `contains` grouping only, and proposal generation is review-first JSON output under `.scryrs/proposals/` only.
+  - **Optional LLM boundary**: `crates/scryrs-curator-llm` is library-only. It adds bounded drafting and grouping suggestion APIs, but no CLI command, no default-feature dependency, and no automatic mutation of graph, route, or docs truth.
+  - **Still deferred**: runtime retrieval decisions, proposal acceptance workflow, and adapter publishing remain downstream work.
 - LikeC4 views on this page are high-level architecture projections, not exhaustive Cargo dependency graphs.
 - Rust toolchain is not installed in the current local environment, so cargo-backed verification is blocked until `rust-toolchain.toml` can be installed.
 - `tests/golden/`, `tests/integration/`, and `tests/llm/` are `.gitkeep` placeholder directories with no active test suites. These remain deferred until a real test suite is designed to occupy each directory. Adding tests to these directories before their purpose is defined would create untethered suites with no clear assertion boundary.
@@ -144,7 +150,10 @@ Adapters depend on shared contracts and suite outputs. Core detection should nev
 ## Related Pages
 
 - [Vision & Goals](./vision.md) — product positioning, suite narrative, scope, and anti-goals.
-- [Product Roadmap](./roadmap.md) — delivery order, phase boundaries, and scope guardrails.
+- [Product Roadmap](./roadmap.mdx) — delivery order, phase boundaries, and scope guardrails.
+- [Production Suite Plan](./production-suite.md) — loop-closure plan from current shipped artifacts to production readiness.
 - [Hotspots](./hotspots.md) — domain-oriented explanation of what hotspots are, how they are scored, and how to interpret a report.
-- [Graph](./graph.md) — domain-oriented explanation of the knowledge graph and how evidence becomes routing context
-- [Live Hotspots](./live-hotspots.md) — domain-oriented explanation of live server mode, shared state, and signal streaming
+- [Graph](./graph.md) — domain-oriented explanation of graph nodes, edges, and evidence boundaries.
+- [Route Manifests](./route-manifests.md) — route projection semantics and identity preservation.
+- [Proposals](./proposals.md) — review-first proposal flow plus optional model-assisted curation boundary.
+- [Live Hotspots](./live-hotspots.md) — domain-oriented explanation of live server mode, shared state, and signal streaming.

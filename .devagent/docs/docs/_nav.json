@@ -3,7 +3,8 @@
     "text": "Vision & Strategy",
     "items": [
       { "text": "Vision & Goals", "link": "/vision" },
-      { "text": "Product Roadmap", "link": "/roadmap" }
+      { "text": "Product Roadmap", "link": "/roadmap" },
+      { "text": "Production Suite Plan", "link": "/production-suite" }
     ]
   },
   {
@@ -19,6 +20,8 @@
       { "text": "Trace Hook Contract", "link": "/trace-hook-contract" },
       { "text": "Hotspots", "link": "/hotspots" },
       { "text": "Graph", "link": "/graph" },
+      { "text": "Route Manifests", "link": "/route-manifests" },
+      { "text": "Proposals", "link": "/proposals" },
       { "text": "Live Hotspots", "link": "/live-hotspots" }
     ]
   }

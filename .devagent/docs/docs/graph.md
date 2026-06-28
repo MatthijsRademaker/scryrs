@@ -83,6 +83,18 @@ Graph output is deterministic: the same nodes and edges always produce the same 
 
 Given the same input, the graph materializes to the same JSON every time — there is no randomness, no model inference, and no time-dependent behavior beyond the `schemaVersion` field carried as `GRAPH_SCHEMA_VERSION`.
 
+## Semantic Grouping Boundary
+
+Low-level graph identity stays exact. Current graph build keys hotspot-backed nodes by `(subjectKind, subject)`, so `file:auth`, `search:auth`, and `symbol:auth` remain three distinct nodes unless explicit evidence creates a higher-level relationship.
+
+That boundary matters because scryrs distinguishes three different things:
+
+- **graph truth** — deterministic nodes and edges already materialized
+- **route projection** — deterministic route entries derived from graph truth
+- **proposal candidates** — review-only suggestions such as `domain_term:auth`
+
+A future higher-level domain node is valid only when it comes from deterministic derivation rules or accepted reviewable evidence. Shared labels alone are not enough.
+
 ## How the Graph Fits the Product Loop
 
 The graph is the foundational structure that makes **Route** possible in scryrs' Observe → Detect → Promote → Route product loop:
@@ -100,11 +112,12 @@ capture traces  →    scores repeated  →   turn evidence      ───┘
                     relationships
 ```
 
-- **Observe → Detect:** Traces and hotspots provide the raw evidence. Every time an agent opens a file, searches a term, or fails to find a concept, scryrs records a trace event. Hotspot analysis identifies the subjects that consume the most repeated agent effort.
-- **Detect → Graph:** The graph organizes that evidence into structured, queryable relationships. Hotspot evidence (score, row IDs, subject identity) becomes evidence links on graph nodes. Doc references and recorded evidence complement trace-based evidence for concepts not yet appearing in agent sessions.
-- **Graph → Route (Future Phase 5+):** Route manifests will consume graph relationships to tell agents what context to load for a given task. When an agent asks about authentication, the routing layer can trace the graph from the `auth` node, follow `depends_on` and `documents` edges, and load the right set of files and docs — with evidence chains explaining why each recommendation exists.
+- **Observe → Detect:** Traces and hotspots provide raw evidence. Every time an agent opens a file, searches a term, or fails to find a concept, scryrs records a trace event. Hotspot analysis identifies the subjects that consume repeated agent effort.
+- **Detect → Graph:** `scryrs graph <PATH>` turns hotspot output into low-level graph nodes and, when docs navigation metadata is valid, adds doc-group/doc-page structure with explicit `contains` edges.
+- **Graph → Route:** `scryrs route <PATH>` already ships as deterministic projection over `.scryrs/graph.json`. It preserves node identity, copies evidence backlinks, and adds grouping only where explicit `contains` edges justify it.
+- **Route → Runtime retrieval (future):** Runtime explanation and context-loading decisions remain separate downstream work. Current route manifests are retrieval-ready artifacts, not retrieval policy.
 
-**Important:** Graph build, route manifests, and runtime retrieval are **Future Phase 5+** work. Today, the graph foundation provides the contract and container so evidence can be organized — the pipeline that populates the graph from hotspots, docs, and traces, and the routing infrastructure that consumes it, are explicitly deferred.
+**Important:** `scryrs graph <PATH>` and `scryrs route <PATH>` are shipped. Cross-domain edge derivation, proposal acceptance as graph input, and `scryrs route explain ...` runtime behavior remain deferred.
 
 ## Illustrated JSON Example
 
@@ -164,37 +177,38 @@ Key points illustrated:
 
 ## Current Implementation Boundary
 
-The graph foundation today provides the contract and the container. The build pipeline, manifests, and runtime retrieval are explicitly deferred.
+Graph build and route projection now exist, but both stay deliberately structural.
 
-| Shipped | Deferred (Future Phase 5+) |
-|---------|---------------------------|
-| `KnowledgeGraphDocument` wire contract (`GRAPH_SCHEMA_VERSION = "1.0.0"`) | Graph build pipeline (populating nodes and edges from hotspots, docs, traces) — partial: structural `contains` edges from docs nav hierarchy shipped; full pipeline including cross-domain edges deferred |
-| `GraphNode`, `GraphEdge`, `EvidenceLink`, `EvidenceSourceKind` types | Route-manifest generator |
-| `KnowledgeGraph` container: add nodes/edges, validate structural references, materialize deterministic document | Docs crawler for automatic doc→node extraction |
-| Deterministic serialization (node/edge/evidence-link ordering) | Adapter integration for publishing graph data into docs systems |
-| Structural validation rejecting dangling edge references | Server endpoints for graph query or retrieval |
-| Independent schema versioning from trace and hotspot contracts | Runtime retrieval (agents consuming graph relationships to load context) |
-| `scryrs graph <PATH>` CLI command | |
-| Graph build from hotspot evidence (all five subject kinds) and docs nav hierarchy | |
-| Output to stdout and `.scryrs/graph.json` | |
+| Shipped | Deferred |
+|---------|----------|
+| `KnowledgeGraphDocument` wire contract (`GRAPH_SCHEMA_VERSION = "1.0.0"`) | Cross-domain edge derivation such as `symbol:Authenticator -> file:auth.rs` |
+| `GraphNode`, `GraphEdge`, `EvidenceLink`, `EvidenceSourceKind` types | Automatic semantic grouping from shared labels alone |
+| `KnowledgeGraph` container: add nodes/edges, validate structural references, materialize deterministic document | Proposal acceptance flow turning review artifacts into authoritative graph evidence |
+| `scryrs graph <PATH>` CLI command | Runtime retrieval and `scryrs route explain ...` |
+| Graph build from `.scryrs/hotspots.json` for all five hotspot subject kinds | Server-side graph query or retrieval APIs |
+| Optional docs layer from `.devagent/docs/docs/_nav.json` with `docs_root`, `doc_group`, and `doc_page` nodes plus `contains` edges | Adapter publishing of graph/route knowledge |
+| Hotspot-only fallback when docs directory or `_nav.json` is missing, empty, or malformed (warning on stderr) | |
+| Deterministic output to `.scryrs/graph.json` and `.scryrs/routes.json` | |
 
-The `scryrs graph <PATH>` command assembles graph nodes from hotspot evidence (`.scryrs/hotspots.json`) and docs navigation hierarchy (`.devagent/docs/docs/_nav.json`). It emits a deterministic `KnowledgeGraphDocument` to stdout and persists it to `.scryrs/graph.json`. See `scryrs --help` for usage. Route-manifest generation, runtime retrieval, and cross-domain edge derivation remain deferred future work. The graph foundation provides the contract so evidence can be organized; the full pipeline that fills the graph with cross-domain edges and the routing infrastructure that reads it are Phase 5+ work.
+`scryrs graph <PATH>` requires `.scryrs/hotspots.json`. Docs metadata is optional: if `.devagent/docs/docs/` or `_nav.json` is missing, empty, or malformed, scryrs warns on stderr and still emits hotspot-only graph. `scryrs route <PATH>` then maps every graph node to one route entry, enriching grouping only from explicit `contains` edges already present in graph.
 
-## Future Scope
+## Deferred Scope
 
-Graph build, route manifests, and runtime retrieval are Phase 5+ roadmap items. In brief:
+Next graph-layer work is narrower than "make it smarter":
 
-- **Graph build** — populate graph nodes and edges from hotspot evidence, documentation structure, and recorded evidence descriptors. This is the pipeline that turns raw evidence into organized graph relationships.
-- **Route manifests** — export graph relationships as route-ready manifests that routing infrastructure can consume. This is the bridge from graph structure to runtime retrieval.
-- **Runtime retrieval** — agents consume route manifests to load the right context for a given task without rediscovering relationships that the graph already maps.
+- derive explicit cross-domain edges from stable rules or accepted evidence
+- let accepted proposal output become recorded evidence for later deterministic graph builds
+- add runtime retrieval and explanation over route manifests without hiding provenance
 
-These features depend on stable hotspot outputs (Phase 2), live hotspot server contracts (Phase 4), and the graph foundation described on this page. See the [Product Roadmap](./roadmap.mdx) for the full delivery sequence.
+Those features still depend on stable hotspot outputs, live hotspot server contracts, and the identity boundary described on this page. See the [Product Roadmap](./roadmap.mdx) for delivery order.
 
 ## Related Pages
 
 - [Vision & Goals](./vision.md) — product positioning, suite narrative, and the Observe → Detect → Promote → Route product loop
-- [Architecture](./architecture.mdx) — crate topology including `scryrs-graph` and `scryrs-types`
-- [Product Roadmap](./roadmap.mdx) — delivery sequence with Phase 5 graph and route-manifest milestones
+- [Architecture](./architecture.mdx) — crate topology including `scryrs-graph`, `scryrs-cli`, and `scryrs-types`
+- [Route Manifests](./route-manifests.md) — how graph nodes become retrieval-ready route entries
+- [Proposals](./proposals.md) — review-first proposal flow and semantic grouping candidates
+- [Product Roadmap](./roadmap.mdx) — delivery sequence with Phase 5 graph and routing milestones
 - [Hotspots](./hotspots.md) — how hotspot evidence feeds graph nodes and edges through evidence links
 - [Trace Hook Contract](./trace-hook-contract.md) — how harness hooks capture the trace events that become graph evidence
 - [Graph Contract Spec](https://github.com/scryrs-project/scryrs/blob/main/openspec/specs/graph-contract/spec.md) — canonical wire-contract requirements including deterministic ordering and validation rules

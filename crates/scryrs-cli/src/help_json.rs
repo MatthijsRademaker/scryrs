@@ -4,7 +4,7 @@ use serde_json::json;
 
 /// Version of the `--help-json` surface document format, independent of
 /// `SCHEMA_VERSION` which governs command output envelopes.
-const SURFACE_VERSION: &str = "0.7.0";
+const SURFACE_VERSION: &str = "0.8.0";
 
 pub(crate) fn cli_surface_doc() -> String {
     let doc = json!({
@@ -155,6 +155,22 @@ pub(crate) fn cli_surface_doc() -> String {
                 }
             },
             {
+                "name": "propose",
+                "description": "Generate reviewable knowledge proposals from hotspot and graph evidence",
+                "arguments": [
+                    {
+                        "name": "PATH",
+                        "type": "string",
+                        "required": true,
+                        "description": "Path to the repository root directory"
+                    }
+                ],
+                "output": {
+                    "mimeType": "application/json",
+                    "description": "Validated ProposalDocument JSON files written to .scryrs/proposals/. Count written to stdout. Errors on stderr."
+                }
+            },
+            {
                 "name": "dashboard",
                 "description": "Start local dashboard server and open the browser dashboard",
                 "flags": [
@@ -200,6 +216,22 @@ pub(crate) fn cli_surface_doc() -> String {
                 "output": {
                     "mimeType": "application/json",
                     "description": "Single-line KnowledgeGraphDocument JSON written to stdout. Also persisted to .scryrs/graph.json."
+                }
+            },
+            {
+                "name": "route",
+                "description": "Generate the route manifest from a knowledge graph artifact",
+                "arguments": [
+                    {
+                        "name": "PATH",
+                        "type": "string",
+                        "required": true,
+                        "description": "Path to the repository root directory"
+                    }
+                ],
+                "output": {
+                    "mimeType": "application/json",
+                    "description": "Single-line RouteManifestDocument JSON written to stdout. Also persisted to .scryrs/routes.json."
                 }
             }
         ],

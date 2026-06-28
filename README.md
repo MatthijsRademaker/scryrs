@@ -77,6 +77,12 @@ cargo run -p scryrs-cli -- server
 
 # Graph build from hotspot evidence and docs structure
 cargo run -p scryrs-cli -- graph .
+
+# Route manifest generation
+cargo run -p scryrs-cli -- route .
+
+# Proposal generation from hotspot and graph evidence
+cargo run -p scryrs-cli -- propose .
 ```
 
 Default features include the standalone suite, Markdown adapter, runtime, and deterministic guardrail support. `full` adds the optional LLM boundary and Rspress adapter.
@@ -329,7 +335,7 @@ See `scryrs --help`
 
 ### Current limitations
 
-- **Six commands:** `hotspots`, `record`, `hook`, `init`, `dashboard`, and `server` are the supported commands. Everything else (`trace`, `propose`, `graph`, `route`, `adapters`, `report`, `suggest-docs`) produces an "unknown command" error.
+- **Nine commands:** `hotspots`, `record`, `hook`, `init`, `dashboard`, `server`, `graph`, `route`, and `propose` are the supported commands. Everything else (`trace`, `adapters`, `report`, `suggest-docs`) produces an "unknown command" error.
 - **Hotspot analysis:** `hotspots` reads from `.scryrs/scryrs.db` and produces ranked `HotspotEntry` results. Empty or missing stores produce distinct exit codes.
 - **Record is ingestion-only:** `scryrs record` validates and persists trace events. It does not trigger hotspot analysis, graph building, or other downstream processing.
 - **What's not listed:** No speculative future commands or features appear here. The quickstart documents exactly what exists today.
@@ -346,7 +352,7 @@ See `scryrs --help`
 
 ## Current status
 
-v0 CLI contract. `scryrs record` ingests JSONL trace events via `--stdin` or `--file <PATH>`, validates against the shared `TraceEvent` schema, persists accepted events to `.scryrs/scryrs.db`, and returns deterministic summary counts and rejection diagnostics. `scryrs hotspots <PATH>` reads from `.scryrs/scryrs.db`, scores subjects with a deterministic weight table and failure bonus, produces a versioned `HotspotsReport` envelope with ranked evidence-carrying entries, and writes the report to stdout and `.scryrs/hotspots.json`. `scryrs dashboard` starts a local dashboard server with a Vue.js SPA for trace and hotspot visualization. `scryrs server` starts a long-lived central trace ingest server at `POST /v1/trace-events/batch` with server-owned SQLite persistence and first-writer-wins idempotency.
+Current CLI surface ships full local evidence loop plus first graph, route, and proposal artifacts. `scryrs record` ingests JSONL trace events via `--stdin` or `--file <PATH>`, validates against the shared `TraceEvent` schema, and persists accepted events locally or submits them remotely. `scryrs hotspots <PATH>` scores subjects with deterministic weights and writes `.scryrs/hotspots.json`. `scryrs graph <PATH>` builds deterministic `KnowledgeGraphDocument` output from hotspots plus optional docs navigation metadata. `scryrs route <PATH>` projects `.scryrs/graph.json` into deterministic `.scryrs/routes.json`. `scryrs propose <PATH>` writes validated review-only `ProposalDocument` artifacts under `.scryrs/proposals/`. `scryrs dashboard` serves local hotspot and session UI. `scryrs server` starts the central live-ingest server at `POST /v1/trace-events/batch` with live hotspot query and SSE signal streaming. Optional model-assisted curation is present only as library crate `crates/scryrs-curator-llm`; no model-backed CLI path exists.
 
 ## Local checks
 

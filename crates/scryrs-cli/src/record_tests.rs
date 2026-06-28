@@ -2,7 +2,21 @@ use std::io::Read;
 
 use scryrs_types::SCHEMA_VERSION;
 
-use crate::run_with_io;
+use crate::run_with_io as base_run_with_io;
+
+fn run_with_io<I, S, O, E, R>(args: I, out: O, err: E, stdin: R) -> i32
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+    O: std::io::Write,
+    E: std::io::Write,
+    R: std::io::Read,
+{
+    let _cwd_guard = crate::test_support::CWD_GUARD
+        .lock()
+        .unwrap_or_else(|e| panic!("CWD guard poisoned: {e}"));
+    base_run_with_io(args, out, err, stdin)
+}
 
 fn run_record_with_io<I, S, R>(args: I, out: &mut Vec<u8>, err: &mut Vec<u8>, stdin: R) -> i32
 where
@@ -10,9 +24,6 @@ where
     S: Into<String>,
     R: Read,
 {
-    let _cwd_guard = crate::test_support::CWD_GUARD
-        .lock()
-        .unwrap_or_else(|e| panic!("CWD guard poisoned: {e}"));
     run_with_io(args, out, err, stdin)
 }
 
