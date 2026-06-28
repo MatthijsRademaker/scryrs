@@ -9,6 +9,7 @@ use crate::help_text::write_help;
 use crate::hook::execute_hook;
 use crate::hotspots::write_hotspots_json;
 use crate::init;
+use crate::proposals::execute_proposals_cli;
 use crate::propose::write_proposals;
 use crate::record::execute_record;
 use crate::route::write_route_json;
@@ -60,6 +61,10 @@ where
         return write_server_help(&mut out).map_or(1, |_| 0);
     }
 
+    if !args.is_empty() && args[0] == "proposals" {
+        return execute_proposals_cli(&mut out, &mut err, &args[1..]);
+    }
+
     // Unknown command check before clap dispatch.
     // Only known root-level entrypoints pass through to clap.
     // Everything else produces the contract error: "unknown command: 'X'".
@@ -74,6 +79,7 @@ where
             && first != "graph"
             && first != "route"
             && first != "propose"
+            && first != "proposals"
             && first != "--help"
             && first != "-h"
             && first != "--version"

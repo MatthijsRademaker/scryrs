@@ -4,7 +4,7 @@ use serde_json::json;
 
 /// Version of the `--help-json` surface document format, independent of
 /// `SCHEMA_VERSION` which governs command output envelopes.
-const SURFACE_VERSION: &str = "0.8.0";
+const SURFACE_VERSION: &str = "0.9.0";
 
 pub(crate) fn cli_surface_doc() -> String {
     let doc = json!({
@@ -171,6 +171,78 @@ pub(crate) fn cli_surface_doc() -> String {
                 }
             },
             {
+                "name": "proposals",
+                "description": "Review proposal inbox artifacts without mutating source-of-truth surfaces",
+                "subcommands": [
+                    {
+                        "name": "list",
+                        "description": "Emit deterministic JSON rows for pending, accepted, and rejected proposal states",
+                        "arguments": [
+                            {
+                                "name": "PATH",
+                                "type": "string",
+                                "required": true,
+                                "description": "Path to the repository root directory"
+                            }
+                        ],
+                        "flags": [
+                            {
+                                "name": "state",
+                                "long": "--state",
+                                "type": "string",
+                                "default": "all",
+                                "values": ["pending", "accepted", "rejected", "all"],
+                                "description": "Optional proposal state filter"
+                            }
+                        ],
+                        "output": {
+                            "mimeType": "application/json",
+                            "fields": [
+                                {"name": "proposalId", "type": "string", "description": "Deterministic proposal identifier", "optional": false},
+                                {"name": "title", "type": "string", "description": "Reviewer-facing proposal title", "optional": false},
+                                {"name": "targetType", "type": "string", "description": "Proposal target kind", "optional": false},
+                                {"name": "createdAt", "type": "string", "description": "RFC 3339 proposal creation timestamp", "optional": false},
+                                {"name": "state", "type": "string", "description": "Current review state: pending, accepted, or rejected", "optional": false}
+                            ]
+                        }
+                    },
+                    {
+                        "name": "accept",
+                        "description": "Write a deterministic accepted ProposalReviewDecision under .scryrs/accepted/",
+                        "arguments": [
+                            {"name": "PATH", "type": "string", "required": true, "description": "Path to the repository root directory"},
+                            {"name": "ID", "type": "string", "required": true, "description": "Proposal identifier to review"}
+                        ],
+                        "flags": [
+                            {"name": "reviewer", "long": "--reviewer", "type": "string", "required": true, "description": "Reviewer identity"},
+                            {"name": "rationale", "long": "--rationale", "type": "string", "required": true, "description": "Non-empty review rationale"},
+                            {"name": "decided-at", "long": "--decided-at", "type": "string", "required": true, "description": "Explicit RFC 3339 review timestamp"}
+                        ],
+                        "output": {
+                            "mimeType": "none",
+                            "description": "Writes .scryrs/accepted/{proposalId}.json on success and preserves .scryrs/proposals/{proposalId}.json unchanged."
+                        }
+                    },
+                    {
+                        "name": "reject",
+                        "description": "Write a deterministic rejected ProposalReviewDecision under .scryrs/rejected/",
+                        "arguments": [
+                            {"name": "PATH", "type": "string", "required": true, "description": "Path to the repository root directory"},
+                            {"name": "ID", "type": "string", "required": true, "description": "Proposal identifier to review"}
+                        ],
+                        "flags": [
+                            {"name": "reviewer", "long": "--reviewer", "type": "string", "required": true, "description": "Reviewer identity"},
+                            {"name": "rationale", "long": "--rationale", "type": "string", "required": true, "description": "Non-empty review rationale"},
+                            {"name": "decided-at", "long": "--decided-at", "type": "string", "required": true, "description": "Explicit RFC 3339 review timestamp"}
+                        ],
+                        "output": {
+                            "mimeType": "none",
+                            "description": "Writes .scryrs/rejected/{proposalId}.json on success and preserves .scryrs/proposals/{proposalId}.json unchanged."
+                        }
+                    }
+                ]
+            },
+            {
                 "name": "dashboard",
                 "description": "Start local dashboard server and open the browser dashboard",
                 "flags": [
@@ -242,9 +314,9 @@ pub(crate) fn cli_surface_doc() -> String {
         ],
         "rootBehavior": {"action": "help", "exitCode": 0},
         "exitCodes": {
-            "0": "Success (hotspots: JSON written, including empty entries; record local: all events accepted; record remote: no rejections or failures; init: hook installed; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)",
-            "1": "Hotspots: storage error. Record: one or more events rejected (local or server), or I/O error writing output. Init: I/O error. Dashboard: port in use or artifact read error. Server: port in use or store error.",
-            "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, self-install refusal, invalid mode, or missing/invalid live-mode configuration; dashboard: invalid flags; server: invalid flags or bind failure."
+            "0": "Success (hotspots: JSON written, including empty entries; record local: all events accepted; record remote: no rejections or failures; init: hook installed; propose/proposals: artifacts written or listed successfully; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)",
+            "1": "Hotspots: storage error. Record: one or more events rejected (local or server), or I/O error writing output. Init: I/O error. Proposals: serialization or filesystem write failure. Dashboard: port in use or artifact read error. Server: port in use or store error.",
+            "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, self-install refusal, invalid mode, or missing/invalid live-mode configuration; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; dashboard: invalid flags; server: invalid flags or bind failure."
         }
     });
     serde_json::to_string(&doc).unwrap_or_else(|_| "{}".into())

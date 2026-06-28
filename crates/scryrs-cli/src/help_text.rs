@@ -35,6 +35,14 @@ COMMANDS\n\
       Generate reviewable knowledge proposals from hotspot and graph evidence.\n\
       Writes validated ProposalDocument files under .scryrs/proposals/.\n\
       Timestamps derive from the hotspot artifact's generatedAt for determinism.\n\
+      Note: singular `propose` generates proposals; plural `proposals` reviews them.\n\
+  scryrs proposals list <PATH> [--state pending|accepted|rejected|all]\n\
+      List pending and reviewed proposal states from .scryrs/proposals/,\n\
+      .scryrs/accepted/, and .scryrs/rejected/ as deterministic JSON.\n\
+  scryrs proposals accept <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>\n\
+      Accept a validated proposal without mutating the proposal inbox artifact.\n\
+  scryrs proposals reject <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>\n\
+      Reject a validated proposal without mutating the proposal inbox artifact.\n\
   scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]\n\
       Start local dashboard server and open the browser dashboard.\n\
   scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]\n\
@@ -112,9 +120,9 @@ OPTIONS\n\
   -V, --version    Print version and exit\n\
   -hj, --help-json Print machine-readable CLI surface description and exit\n\n\
 EXIT CODES\n\
-  0    Success (hotspots: JSON written; record local: all events accepted; record remote: no rejections or failures; init: hook installed; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)\n\
-  1    Hotspots: storage error. Record: rejected events or I/O error (local or server rejections). Init: I/O error. Dashboard: port in use or artifact read error. Server: port in use or store error.\n\
-  2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, self-install refusal, invalid mode, or missing/invalid live-mode configuration; dashboard: invalid flags or bind failure; server: invalid flags or bind failure",
+  0    Success (hotspots: JSON written; record local: all events accepted; record remote: no rejections or failures; init: hook installed; propose/proposals: artifacts written or listed successfully; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)\n\
+  1    Hotspots: storage error. Record: rejected events or I/O error (local or server rejections). Init: I/O error. Proposals: serialization or filesystem write failure. Dashboard: port in use or artifact read error. Server: port in use or store error.\n\
+  2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, self-install refusal, invalid mode, or missing/invalid live-mode configuration; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; dashboard: invalid flags or bind failure; server: invalid flags or bind failure",
         SCHEMA_VERSION, SCHEMA_VERSION, HOTSPOT_SCHEMA_VERSION
     )
 }

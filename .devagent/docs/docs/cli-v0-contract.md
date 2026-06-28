@@ -6,13 +6,13 @@ scryrs supports three current workflow paths:
 
 - **Local observe → detect loop:** Run `scryrs hook` or `scryrs record` to capture trace events locally, then `scryrs hotspots` to score them, and `scryrs dashboard` to visually browse ranked hotspots, sessions, and events — all from `.scryrs/` in your project root.
 - **Central live-ingest flow:** Configure a remote ingest URL (via `scryrs.json` or `SCRYRS_REMOTE_*` env vars), then `scryrs record` or `scryrs hook` submits events to a `scryrs server` running centrally. The server provides live hotspot rankings and an SSE signal stream for real-time monitoring across multiple agent instances.
-- **Promote → route artifact flow:** Run `scryrs graph`, `scryrs route`, and `scryrs propose` over local hotspot and graph artifacts to produce machine-readable graph and route outputs plus review-first proposal inbox artifacts.
+- **Promote → review artifact flow:** Run `scryrs graph`, `scryrs route`, and `scryrs propose` to produce machine-readable graph, route, and inbox proposal artifacts, then use `scryrs proposals list|accept|reject` to review those inbox proposals without mutating source-of-truth docs or graph/route artifacts.
 
 For hotspot interpretation and scoring rationale, see [Hotspots](./hotspots.md). For harness integration rules and fail-open guarantees, see [Trace Hook Contract](./trace-hook-contract.md).
 
 ---
 
-The current public CLI surface provides nine implemented commands: `hotspots`, `record`, `hook`, `init`, `graph`, `route`, `propose`, `dashboard`, and `server`. This document serves agent integrators and follow-up feature developers.
+The current public CLI surface provides ten implemented root commands: `hotspots`, `record`, `hook`, `init`, `graph`, `route`, `propose`, `proposals`, `dashboard`, and `server`. This document serves agent integrators and follow-up feature developers.
 
 ## Binary
 
@@ -259,6 +259,25 @@ Generates validated review-only `ProposalDocument` inbox artifacts from hotspot 
 - Writes are confined to `.scryrs/proposals/`.
 - Each proposal is validated before persistence.
 - Proposal generation does not mutate docs source, `.scryrs/graph.json`, or `.scryrs/routes.json`.
+- Singular `propose` is generation-only; plural `proposals` is the review surface.
+
+### `scryrs proposals list|accept|reject`
+
+Reviews inbox proposal artifacts without mutating the inbox file itself.
+
+| Subcommand | Input | Output | Exit 0 | Exit 1 | Exit 2 |
+|-------|-------|-------|-------|-------|-------|
+| `proposals list <PATH> [--state pending|accepted|rejected|all]` | Repository path containing `.scryrs/proposals/` and optional `.scryrs/accepted/` / `.scryrs/rejected/` | Deterministic JSON array of proposal rows sorted by `proposalId` ascending | Rows emitted successfully | Serialization failure writing stdout | Invalid filter, invalid proposal/review artifact, conflicting accepted+rejected state, or unreadable/malformed input artifact |
+| `proposals accept <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>` | Valid proposal inbox file plus explicit review metadata | No stdout; writes `.scryrs/accepted/{proposalId}.json` | Accepted artifact written, or idempotent byte-identical rerun | Filesystem write or serialization failure | Unknown proposal ID, invalid proposal document, invalid metadata, conflicting opposite-outcome artifact, or same-outcome overwrite with different bytes |
+| `proposals reject <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>` | Valid proposal inbox file plus explicit review metadata | No stdout; writes `.scryrs/rejected/{proposalId}.json` | Rejected artifact written, or idempotent byte-identical rerun | Filesystem write or serialization failure | Unknown proposal ID, invalid proposal document, invalid metadata, conflicting opposite-outcome artifact, or same-outcome overwrite with different bytes |
+
+**Behavior notes:**
+
+- `list` validates every encountered `ProposalDocument` and `ProposalReviewDecision` before emitting output.
+- `accept` copies proposal `targetType`, `proposedContent`, and `evidence` into the accepted `ProposalReviewDecision`.
+- `reject` copies only proposal `evidence`; rejected decisions omit `targetType` and `acceptedContent`.
+- Review commands never mutate `.scryrs/proposals/{proposalId}.json`, `.devagent/docs/`, `.scryrs/graph.json`, or `.scryrs/routes.json`.
+- `--help-json` represents `proposals` as a grouped command with nested `list`, `accept`, and `reject` subcommands. `surfaceVersion` is now `0.9.0`.
 
 ### `scryrs init --agent <NAME>`
 
@@ -545,6 +564,29 @@ All error messages and human-facing diagnostics are written to stderr.
 - Exit 1: Validation, serialization, directory creation, or file write failure.
 - Exit 2: Missing PATH, unresolved path, or missing/malformed hotspots or graph artifact.
 
+**Naming note:** `propose` generates inbox artifacts. `proposals` reviews them.
+
+### Proposals command
+
+**When to call:** An agent should call `scryrs proposals list <PATH>` to inspect pending versus terminal review state, `scryrs proposals accept <PATH> <ID> ...` to publish an accepted `ProposalReviewDecision`, or `scryrs proposals reject <PATH> <ID> ...` to publish a rejected `ProposalReviewDecision`.
+
+**Input:**
+
+- `list`: explicit local directory path containing `.scryrs/proposals/` and optional `.scryrs/accepted/` / `.scryrs/rejected/`
+- `accept` / `reject`: explicit local directory path, proposal ID, and mandatory `--reviewer`, `--rationale`, `--decided-at <RFC3339>` metadata
+
+**Output:**
+
+- `list`: JSON array of rows with `proposalId`, `title`, `targetType`, `createdAt`, and `state`
+- `accept`: no stdout; writes `.scryrs/accepted/{proposalId}.json`
+- `reject`: no stdout; writes `.scryrs/rejected/{proposalId}.json`
+
+**Exit codes:**
+
+- Exit 0: Listing succeeded or the requested review artifact exists/wrote successfully.
+- Exit 1: Serialization or filesystem write failure.
+- Exit 2: Invalid filter, invalid proposal/review artifact, unknown proposal ID, conflicting opposite-outcome artifact, or same-outcome rerun with different bytes.
+
 ### Dashboard command
 
 **When to call:** An agent should call `scryrs dashboard` when it needs to visually browse hotspot, session, and event data from a local `.scryrs/` store. The command starts a local HTTP server and opens the dashboard SPA in the default browser.
@@ -631,7 +673,7 @@ All error messages and human-facing diagnostics are written to stderr.
 
 ## Out of scope for v0
 
-Any command other than the nine implemented commands (`hotspots`, `record`, `hook`, `init`, `graph`, `route`, `propose`, `dashboard`, `server`) is unrecognized and exits 2 with a usage error.
+Any command other than the ten implemented root commands (`hotspots`, `record`, `hook`, `init`, `graph`, `route`, `propose`, `proposals`, `dashboard`, `server`) is unrecognized and exits 2 with a usage error.
 
 ## Local Development Testing
 

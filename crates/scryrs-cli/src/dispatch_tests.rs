@@ -1271,3 +1271,65 @@ fn propose_appears_in_help_json_output() {
         "--help-json propose entry must mention ProposalDocument, got:\n{json_str}"
     );
 }
+
+#[test]
+fn proposals_appear_in_help_output() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(run_with_writers(["--help"], &mut out, &mut err), 0);
+    assert!(err.is_empty());
+    let help = String::from_utf8_lossy(&out);
+    assert!(
+        help.contains("scryrs proposals list <PATH>"),
+        "--help must list grouped proposals review commands, got:\n{help}"
+    );
+    assert!(
+        help.contains("singular `propose` generates proposals; plural `proposals` reviews them"),
+        "--help must explain singular/plural split, got:\n{help}"
+    );
+}
+
+#[test]
+fn proposals_help_exits_0_and_lists_subcommands_and_required_metadata() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(["proposals", "--help"], &mut out, &mut err),
+        0
+    );
+    assert!(err.is_empty());
+    let help = String::from_utf8_lossy(&out);
+    assert!(help.contains("scryrs proposals list <PATH> [--state pending|accepted|rejected|all]"));
+    assert!(help.contains("scryrs proposals accept <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>"));
+    assert!(help.contains("scryrs proposals reject <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>"));
+    assert!(help.contains("--reviewer <NAME>"));
+    assert!(help.contains("--rationale <TEXT>"));
+    assert!(help.contains("--decided-at <RFC3339>"));
+}
+
+#[test]
+fn help_json_contains_grouped_proposals_surface_and_bumped_version() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(run_with_writers(["--help-json"], &mut out, &mut err), 0);
+    assert!(err.is_empty());
+    let json_str = String::from_utf8_lossy(&out);
+    assert!(
+        json_str.contains("\"surfaceVersion\":\"0.9.0\""),
+        "--help-json must bump surfaceVersion to 0.9.0, got:\n{json_str}"
+    );
+    assert!(
+        json_str.contains("\"name\":\"proposals\""),
+        "--help-json must contain proposals command, got:\n{json_str}"
+    );
+    assert!(
+        json_str.contains("\"subcommands\""),
+        "--help-json proposals entry must expose nested subcommands, got:\n{json_str}"
+    );
+    assert!(json_str.contains("\"name\":\"list\""));
+    assert!(json_str.contains("\"name\":\"accept\""));
+    assert!(json_str.contains("\"name\":\"reject\""));
+}
