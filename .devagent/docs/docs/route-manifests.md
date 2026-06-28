@@ -76,11 +76,29 @@ Output rules:
 
 | Shipped | Deferred |
 | --- | --- |
-| `RouteManifestDocument`, `RouteEntry`, `RouteGrouping` contracts in `crates/scryrs-types/src/lib.rs` | `scryrs route explain ...` runtime explanation command |
-| `scryrs route <PATH>` CLI command in `crates/scryrs-cli/src/route.rs` | Runtime ranking and retrieval decisions |
-| One route entry per graph node | Inferred semantic grouping from shared labels alone |
-| Grouping only from explicit `contains` edges, including accepted semantic grouping already materialized in `.scryrs/graph.json` | Any graph mutation during route generation |
+| `RouteManifestDocument`, `RouteEntry`, `RouteGrouping` contracts in `crates/scryrs-types/src/lib.rs` | Runtime ranking and retrieval decisions |
+| `scryrs route <PATH>` CLI command in `crates/scryrs-cli/src/route.rs` | Inferred semantic grouping from shared labels alone |
+| One route entry per graph node | Any graph mutation during route generation |
+| Grouping only from explicit `contains` edges, including accepted semantic grouping already materialized in `.scryrs/graph.json` | |
 | Deterministic artifact output at `.scryrs/routes.json` | |
+| `RouteHintDocument`, `RouteHintItem` contract in `crates/scryrs-types/src/lib.rs` | `scryrs route explain` CLI command (deferred) |
+| `hints_from_manifest` deterministic producer in `crates/scryrs-runtime/src/lib.rs` | |
+
+## Route Hint Contract
+
+The route manifest is accompanied by a deterministic `RouteHintDocument` projection that downstream runtimes can consume directly. Each `RouteEntry` produces exactly one `RouteHintItem` preserving source identity (`routeId`, `target`, `label`), a 1-based ordinal `rank`, deferred `relevance` (`None`), a template-derived `reason`, and verbatim `evidence` copied from the source entry.
+
+**Schema version:** `HINT_SCHEMA_VERSION = "1.0.0"` (independent from `ROUTE_SCHEMA_VERSION`).
+
+**Identity preservation:** `file:auth`, `search:auth`, and `symbol:auth` produce three distinct `RouteHintItem` values with distinct `routeId` fields — no merging, no deduplication.
+
+**Rank semantics:** `rank` is a deterministic 1-based ordinal derived from manifest entry sort order (by `id` ascending). It is explicitly documented as a placeholder, not a frozen long-term ranking formula.
+
+**Relevance semantics:** `relevance` is `Option<u32>` with value `None` in the initial implementation — deferred for future enhancement. Serialized JSON omits the field entirely when absent.
+
+**Producer:** `hints_from_manifest(manifest: &RouteManifestDocument) -> RouteHintDocument` in `crates/scryrs-runtime/src/lib.rs`. The function is a pure projection over the manifest — no filesystem I/O, no graph mutation, no model-based ranking.
+
+**CLI command:** The `scryrs route explain` command is deferred to a follow-up task. The contract and producer are available now for library consumers.
 
 ## Why Route Manifests Exist
 

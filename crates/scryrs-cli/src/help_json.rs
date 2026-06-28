@@ -304,6 +304,43 @@ pub(crate) fn cli_surface_doc() -> String {
                 "output": {
                     "mimeType": "application/json",
                     "description": "Single-line RouteManifestDocument JSON written to stdout. Also persisted to .scryrs/routes.json."
+                },
+                "routeHintOutput": {
+                    "mimeType": "application/json",
+                    "description": "Deterministic RouteHintDocument projection derived from the route manifest. Each route entry produces one RouteHintItem with identity, target, label, 1-based ordinal rank, evidence citations, and a template-derived reason. Rank is a deterministic ordinal derived from manifest entry sort order; relevance is deferred (None) for future enhancement. The `scryrs route explain` command is deferred.",
+                    "fields": [
+                        {"name": "schemaVersion", "type": "string", "description": "Route hint schema version (always HINT_SCHEMA_VERSION = 1.0.0)", "optional": false},
+                        {"name": "hints", "type": "array", "description": "Deterministically ordered array of RouteHintItem objects", "optional": false}
+                    ],
+                    "hintItemFields": [
+                        {"name": "routeId", "type": "string", "description": "Source route entry id", "optional": false},
+                        {"name": "target", "type": "string", "description": "Normalized load target", "optional": false},
+                        {"name": "label", "type": "string", "description": "Human-readable label", "optional": false},
+                        {"name": "rank", "type": "number", "description": "1-based ordinal rank from manifest entry sort order (deterministic ordinal, not final ranking)", "optional": false},
+                        {"name": "relevance", "type": "number|null", "description": "Optional relevance score — deferred for future enhancement (always null in current version)", "optional": true},
+                        {"name": "reason", "type": "string", "description": "Deterministic template reason citing route entry identity and evidence count", "optional": false},
+                        {"name": "evidence", "type": "array", "description": "Evidence provenance links copied from source route entry", "optional": true}
+                    ],
+                    "example": {
+                        "schemaVersion": "1.0.0",
+                        "hints": [
+                            {
+                                "routeId": "file:src/main.rs",
+                                "target": "file:src/main.rs",
+                                "label": "src/main.rs",
+                                "rank": 1,
+                                "reason": "Route 'src/main.rs' (file:src/main.rs): 2 evidence link(s), subject kind file",
+                                "evidence": [
+                                    {
+                                        "sourceKind": "local_trace_row",
+                                        "subject": "src/main.rs",
+                                        "rowIds": [1, 2]
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    "rankingPolicy": "Rank is a deterministic 1-based ordinal derived from manifest entry sort order (by id ascending). Relevance is deferred (None) and does not represent a frozen long-term ranking formula. Both fields are explicitly documented as deferred or ordinal."
                 }
             }
         ],

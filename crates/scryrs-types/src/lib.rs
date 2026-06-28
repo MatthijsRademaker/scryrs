@@ -40,6 +40,13 @@ pub const PROPOSAL_SCHEMA_VERSION: &str = "1.0.0";
 /// `ROUTE_SCHEMA_VERSION`, and `PROPOSAL_SCHEMA_VERSION`.
 pub const REVIEW_DECISION_SCHEMA_VERSION: &str = "1.0.0";
 
+/// Version for the route hint contract, independent of
+/// `SCHEMA_VERSION`, `HOTSPOT_SCHEMA_VERSION`,
+/// `LIVE_HOTSPOT_SCHEMA_VERSION`, `GRAPH_SCHEMA_VERSION`,
+/// `ROUTE_SCHEMA_VERSION`, `PROPOSAL_SCHEMA_VERSION`, and
+/// `REVIEW_DECISION_SCHEMA_VERSION`.
+pub const HINT_SCHEMA_VERSION: &str = "1.0.0";
+
 /// Suite component metadata used by feature-gated crates and CLI output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FeatureDescriptor {
@@ -927,6 +934,44 @@ pub struct RouteManifestDocument {
     pub metadata: GraphMetadata,
     /// Deterministically ordered route entries.
     pub routes: Vec<RouteEntry>,
+}
+
+// --- Route hint contract types ---
+
+/// A single route hint produced by deterministic projection from a
+/// `RouteEntry`. Carries identity, target, rank, evidence citations,
+/// and a template-derived explanation reason.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteHintItem {
+    /// Source route entry id.
+    pub route_id: String,
+    /// Normalized load target.
+    pub target: String,
+    /// Human-readable label for display and filtering.
+    pub label: String,
+    /// 1-based ordinal rank derived from manifest entry sort order.
+    pub rank: u32,
+    /// Optional relevance score, deferred for future enhancement.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relevance: Option<u32>,
+    /// Deterministic template reason citing entry identity and evidence count.
+    pub reason: String,
+    /// Evidence provenance links copied from the source route entry.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub evidence: Vec<EvidenceLink>,
+}
+
+/// Versioned route hint document — the top-level wire contract for
+/// deterministic route hint projections. Carries an independent
+/// `HINT_SCHEMA_VERSION` and a deterministically ordered hints array.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteHintDocument {
+    /// Schema version, always equal to `HINT_SCHEMA_VERSION`.
+    pub schema_version: String,
+    /// Deterministically ordered route hint items.
+    pub hints: Vec<RouteHintItem>,
 }
 
 #[cfg(test)]
@@ -3611,5 +3656,137 @@ mod tests {
         assert!(json.contains("\"sourceKind\":\"hotspot_subject\""));
         assert!(json.contains("\"subject\":\"test-subject\""));
         assert!(json.contains("\"rowIds\":[1]"));
+    }
+
+    // --- Route hint contract round-trip tests ---
+
+    fn make_hint_evidence_link(source_kind: EvidenceSourceKind, subject: &str) -> EvidenceLink {
+        EvidenceLink {
+            source_kind,
+            subject: subject.into(),
+            row_ids: vec![1, 2],
+            doc_ref: None,
+            description: None,
+            score: Some(10),
+            metadata: None,
+        }
+    }
+
+    #[test]
+    fn route_hint_item_round_trips() {
+        let item = RouteHintItem {
+            route_id: "file:src/main.rs".into(),
+            target: "file:src/main.rs".into(),
+            label: "src/main.rs".into(),
+            rank: 1,
+            relevance: None,
+            reason: "Route 'src/main.rs' (file:src/main.rs): 2 evidence link(s), subject kind file"
+                .into(),
+            evidence: vec![make_hint_evidence_link(
+                EvidenceSourceKind::LocalTraceRow,
+                "src/main.rs",
+            )],
+        };
+        let json = serialize_json(&item);
+        let reconstructed: RouteHintItem = deserialize_json(&json);
+        assert_eq!(reconstructed, item);
+    }
+
+    #[test]
+    fn route_hint_item_json_uses_camel_case() {
+        let item = RouteHintItem {
+            route_id: "file:auth".into(),
+            target: "file:auth".into(),
+            label: "auth".into(),
+            rank: 2,
+            relevance: Some(42),
+            reason: "reason text".into(),
+            evidence: vec![],
+        };
+        let json = serialize_json(&item);
+        assert!(json.contains("\"routeId\""));
+        assert!(!json.contains("\"route_id\""));
+        assert!(json.contains("\"rank\":2"));
+        assert!(json.contains("\"relevance\":42"));
+    }
+
+    #[test]
+    fn route_hint_item_omits_none_relevance() {
+        let item = RouteHintItem {
+            route_id: "search:foo".into(),
+            target: "search:foo".into(),
+            label: "foo".into(),
+            rank: 1,
+            relevance: None,
+            reason: "r".into(),
+            evidence: vec![],
+        };
+        let json = serialize_json(&item);
+        assert!(!json.contains("relevance"));
+    }
+
+    #[test]
+    fn route_hint_item_omits_empty_evidence() {
+        let item = RouteHintItem {
+            route_id: "symbol:bar".into(),
+            target: "symbol:bar".into(),
+            label: "bar".into(),
+            rank: 1,
+            relevance: None,
+            reason: "r".into(),
+            evidence: vec![],
+        };
+        let json = serialize_json(&item);
+        assert!(!json.contains("evidence"));
+    }
+
+    #[test]
+    fn route_hint_document_round_trips() {
+        let hints = vec![
+            RouteHintItem {
+                route_id: "file:auth".into(),
+                target: "file:auth".into(),
+                label: "auth".into(),
+                rank: 1,
+                relevance: None,
+                reason: "Route 'auth' (file:auth): 1 evidence link(s), subject kind file".into(),
+                evidence: vec![make_hint_evidence_link(
+                    EvidenceSourceKind::LocalTraceRow,
+                    "auth",
+                )],
+            },
+            RouteHintItem {
+                route_id: "search:auth".into(),
+                target: "search:auth".into(),
+                label: "auth".into(),
+                rank: 2,
+                relevance: None,
+                reason: "Route 'auth' (search:auth): 2 evidence link(s), subject kind search"
+                    .into(),
+                evidence: vec![
+                    make_hint_evidence_link(EvidenceSourceKind::LocalTraceRow, "auth-search"),
+                    make_hint_evidence_link(EvidenceSourceKind::LocalTraceRow, "auth-search-2"),
+                ],
+            },
+        ];
+        let doc = RouteHintDocument {
+            schema_version: HINT_SCHEMA_VERSION.into(),
+            hints: hints.clone(),
+        };
+        let json = serialize_json(&doc);
+        let reconstructed: RouteHintDocument = deserialize_json(&json);
+        assert_eq!(reconstructed, doc);
+    }
+
+    #[test]
+    fn route_hint_document_json_uses_camel_case() {
+        let doc = RouteHintDocument {
+            schema_version: HINT_SCHEMA_VERSION.into(),
+            hints: vec![],
+        };
+        let json = serialize_json(&doc);
+        assert!(json.contains("\"schemaVersion\""));
+        assert!(json.contains("\"hints\""));
+        assert!(json.contains(HINT_SCHEMA_VERSION));
     }
 }

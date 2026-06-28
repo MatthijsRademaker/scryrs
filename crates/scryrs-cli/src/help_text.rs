@@ -31,6 +31,12 @@ COMMANDS\n\
   scryrs route <PATH>\n\
       Generate the route manifest from a knowledge graph artifact.\n\
       Emits a single-line RouteManifestDocument JSON to stdout and .scryrs/routes.json.\n\
+\n\
+      Route hint contract: Each route entry projects to a RouteHintItem\n\
+      (HINT_SCHEMA_VERSION 1.0.0) with routeId, target, label, 1-based\n\
+      ordinal rank, evidence citations, and a template-derived reason.\n\
+      Rank is a deterministic ordinal derived from manifest entry order;\n\
+      relevance is deferred (None). The `scryrs route explain` command is deferred.\n\
   scryrs propose <PATH>\n\
       Generate reviewable knowledge proposals from hotspot and graph evidence.\n\
       Writes validated ProposalDocument files under .scryrs/proposals/.\n\
