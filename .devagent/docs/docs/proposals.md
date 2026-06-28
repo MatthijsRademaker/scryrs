@@ -96,7 +96,7 @@ Low-level subject identities remain authoritative:
 - `search:auth`
 - `symbol:auth`
 
-A semantic grouping proposal such as `domain_term:auth` is review artifact only. It cites exact source node IDs and evidence, but it does not rewrite graph truth by existing.
+A semantic grouping proposal such as `domain_term:auth` is review artifact only while it remains in `.scryrs/proposals/`. It cites exact source node IDs and evidence, but it does not rewrite graph truth by existing. That proposal can become graph input only after review records an accepted `ProposalReviewDecision` under `.scryrs/accepted/`.
 
 ## Review-First Boundary
 
@@ -139,6 +139,12 @@ Proposal inbox files and review decision artifacts live in separate paths so pro
 Accepted and rejected review decisions are recorded as separate `ProposalReviewDecision` artifacts rather than by mutating the original proposal inbox files. The original `.scryrs/proposals/{proposalId}.json` remains a review-only record regardless of acceptance or rejection.
 
 `ProposalReviewDecision` is a versioned contract (`REVIEW_DECISION_SCHEMA_VERSION = "1.0.0"`) that reuses the existing `EvidenceLink`, `ProposalTargetType`, `ProposedContent`, and `SemanticGraphGrouping` types. Accepted decisions carry `targetType` plus `acceptedContent`; rejected decisions carry no accepted-content payload.
+
+Trust boundary:
+
+- `.scryrs/proposals/` remains non-authoritative inbox state only
+- `.scryrs/accepted/` can become graph-build input when the accepted decision targets `semantic_graph_grouping`
+- `.scryrs/rejected/` records explicit rejections but is ignored by graph and route generation
 
 ## Review CLI
 
@@ -237,8 +243,9 @@ Model output is proposal input only.
 ## Current Limitations
 
 - Proposal generation is deterministic and local-file based. No dashboard review flow exists yet.
-- Proposal inbox artifacts are not consumed automatically by graph build, route generation, or adapters.
-- Current graph build is structural. Semantic grouping proposals depend on explicit qualifying graph evidence rather than hidden inference.
+- Proposal inbox artifacts are still not consumed automatically by graph build, route generation, or adapters.
+- Accepted review decisions can affect graph build only through `.scryrs/accepted/`, and only accepted `semantic_graph_grouping` targets project into graph structure today.
+- Route generation still consumes `.scryrs/graph.json` only; it never reads proposal or review-artifact directories directly.
 - Publishing approved proposals into Markdown or Rspress remains adapter-phase work.
 
 ## Related Pages

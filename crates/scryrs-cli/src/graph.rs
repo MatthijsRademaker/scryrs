@@ -1,12 +1,19 @@
 use std::io::Write;
 
 #[cfg(feature = "graph")]
-use std::path::Path;
+use std::{
+    collections::HashSet,
+    ffi::OsStr,
+    path::{Path, PathBuf},
+};
 
 #[cfg(feature = "graph")]
 use scryrs_graph::KnowledgeGraph;
 #[cfg(feature = "graph")]
-use scryrs_types::{EvidenceLink, EvidenceSourceKind, GraphEdge, GraphNode};
+use scryrs_types::{
+    EvidenceLink, EvidenceSourceKind, GraphEdge, GraphNode, ProposalReviewDecision,
+    ProposalTargetType, ProposedContent, ReviewOutcome,
+};
 
 #[cfg(feature = "graph")]
 pub(crate) fn write_graph_json(out: &mut impl Write, err: &mut impl Write, path: &str) -> i32 {
@@ -75,6 +82,11 @@ pub(crate) fn write_graph_json(out: &mut impl Write, err: &mut impl Write, path:
     // Doc nodes and nav-hierarchy contains edges.
     if docs_exist {
         build_doc_layer(&mut kg, &nav_groups);
+    }
+
+    if let Err(error) = load_accepted_evidence(&repo_root, &mut kg, err) {
+        let _ = writeln!(err, "scryrs graph: {error}");
+        return 2;
     }
 
     // Validate and materialize.
@@ -269,6 +281,189 @@ fn slugify(text: &str) -> String {
     text.to_lowercase().replace(' ', "-")
 }
 
+#[cfg(feature = "graph")]
+fn load_accepted_evidence(
+    repo_root: &Path,
+    kg: &mut KnowledgeGraph,
+    err: &mut impl Write,
+) -> Result<(), String> {
+    let accepted_dir = repo_root.join(".scryrs/accepted");
+    let accepted_paths = json_files_in_dir(&accepted_dir)?;
+    let baseline_node_ids: HashSet<String> =
+        kg.nodes().iter().map(|node| node.id.clone()).collect();
+    let mut projected_group_ids = HashSet::new();
+    let mut grouped_source_node_ids = HashSet::new();
+
+    for path in accepted_paths {
+        let decision = load_accepted_decision(&path)?;
+        let target_type = decision.target_type.as_ref().ok_or_else(|| {
+            format!(
+                "invalid accepted artifact {}: missing targetType",
+                path.display()
+            )
+        })?;
+
+        if *target_type != ProposalTargetType::SemanticGraphGrouping {
+            let _ = writeln!(
+                err,
+                "scryrs graph: warning: skipping accepted targetType '{}' from {}",
+                proposal_target_type_name(target_type),
+                path.display()
+            );
+            continue;
+        }
+
+        let grouping = match decision.accepted_content.as_ref() {
+            Some(ProposedContent::SemanticGraphGrouping(grouping)) => grouping,
+            Some(_) => {
+                return Err(format!(
+                    "invalid accepted artifact {}: semantic_graph_grouping targetType requires semantic_graph_grouping acceptedContent",
+                    path.display()
+                ));
+            }
+            None => {
+                return Err(format!(
+                    "invalid accepted artifact {}: missing acceptedContent",
+                    path.display()
+                ));
+            }
+        };
+
+        if baseline_node_ids.contains(&grouping.target_group_node_id) {
+            return Err(format!(
+                "accepted target group node ID '{}' collides with existing graph node ID",
+                grouping.target_group_node_id
+            ));
+        }
+
+        if !projected_group_ids.insert(grouping.target_group_node_id.clone()) {
+            return Err(format!(
+                "conflicting accepted grouping for target group node ID '{}'",
+                grouping.target_group_node_id
+            ));
+        }
+
+        let group_kind =
+            group_kind_from_node_id(&grouping.target_group_node_id).ok_or_else(|| {
+                format!(
+                    "cannot derive node kind from accepted target group node ID '{}' in {}",
+                    grouping.target_group_node_id,
+                    path.display()
+                )
+            })?;
+
+        for source_node_id in &grouping.source_node_ids {
+            if !baseline_node_ids.contains(source_node_id) {
+                return Err(format!(
+                    "accepted decision '{}' references missing source node ID '{}'",
+                    decision.proposal_id, source_node_id
+                ));
+            }
+            if !grouped_source_node_ids.insert(source_node_id.clone()) {
+                return Err(format!(
+                    "conflicting accepted grouping for source node ID '{}'",
+                    source_node_id
+                ));
+            }
+        }
+
+        kg.add_node(GraphNode {
+            id: grouping.target_group_node_id.clone(),
+            label: grouping.target_group_label.clone(),
+            description: None,
+            kind: group_kind.to_string(),
+            tags: vec![],
+            aliases: vec![],
+            evidence_links: vec![EvidenceLink {
+                source_kind: EvidenceSourceKind::RecordedEvidence,
+                subject: decision.proposal_id.clone(),
+                row_ids: vec![],
+                doc_ref: None,
+                description: Some(path.display().to_string()),
+                score: None,
+                metadata: None,
+            }],
+            metadata: None,
+        });
+
+        for source_node_id in &grouping.source_node_ids {
+            kg.add_edge(GraphEdge {
+                id: format!(
+                    "{}_contains_{}",
+                    grouping.target_group_node_id, source_node_id
+                ),
+                source_node_id: grouping.target_group_node_id.clone(),
+                target_node_id: source_node_id.clone(),
+                relationship: "contains".into(),
+                label: None,
+                tags: vec![],
+                evidence_links: decision.source_evidence.clone(),
+                metadata: None,
+            });
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "graph")]
+fn load_accepted_decision(path: &Path) -> Result<ProposalReviewDecision, String> {
+    let json = std::fs::read_to_string(path)
+        .map_err(|error| format!("cannot read accepted artifact {}: {error}", path.display()))?;
+    let decision: ProposalReviewDecision = serde_json::from_str(&json)
+        .map_err(|error| format!("invalid accepted artifact {}: {error}", path.display()))?;
+    decision
+        .validate()
+        .map_err(|error| format!("invalid accepted artifact {}: {error}", path.display()))?;
+    if decision.outcome != ReviewOutcome::Accepted {
+        return Err(format!(
+            "invalid accepted artifact {}: outcome must be accepted",
+            path.display()
+        ));
+    }
+    Ok(decision)
+}
+
+#[cfg(feature = "graph")]
+fn json_files_in_dir(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    if !dir.is_dir() {
+        return Err(format!("expected directory {}", dir.display()));
+    }
+
+    let mut paths = Vec::new();
+    for entry in std::fs::read_dir(dir)
+        .map_err(|error| format!("cannot read directory {}: {error}", dir.display()))?
+    {
+        let entry =
+            entry.map_err(|error| format!("cannot read directory {}: {error}", dir.display()))?;
+        let path = entry.path();
+        if path.is_file() && path.extension() == Some(OsStr::new("json")) {
+            paths.push(path);
+        }
+    }
+    paths.sort();
+    Ok(paths)
+}
+
+#[cfg(feature = "graph")]
+fn group_kind_from_node_id(node_id: &str) -> Option<&str> {
+    let (kind, _) = node_id.split_once(':')?;
+    if kind.is_empty() {
+        return None;
+    }
+    Some(kind)
+}
+
+#[cfg(feature = "graph")]
+fn proposal_target_type_name(target_type: &ProposalTargetType) -> String {
+    serde_json::to_string(target_type)
+        .map(|value| value.trim_matches('"').to_string())
+        .unwrap_or_else(|_| "<unknown>".into())
+}
+
 /// Partial deserialization target for hotspots.json — only the entries array.
 #[cfg(feature = "graph")]
 #[derive(Debug, serde::Deserialize)]
@@ -304,7 +499,89 @@ pub(crate) fn write_graph_json(_out: &mut impl Write, err: &mut impl Write, _pat
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use scryrs_types::{EvidenceSourceKind, GraphNode};
+    use scryrs_types::{
+        EvidenceSourceKind, GraphNode, KnowledgeGraphDocument, ProposalReviewDecision,
+        ProposalTargetType, ProposedContent, ReviewOutcome, SemanticGraphGrouping,
+    };
+
+    fn write_hotspots_json(
+        repo_root: &std::path::Path,
+        entries: serde_json::Value,
+    ) -> std::path::PathBuf {
+        let scryrs_dir = repo_root.join(".scryrs");
+        std::fs::create_dir_all(&scryrs_dir).expect("create .scryrs");
+        let path = scryrs_dir.join("hotspots.json");
+        std::fs::write(
+            &path,
+            serde_json::to_string(&serde_json::json!({ "entries": entries }))
+                .expect("serialize hotspots"),
+        )
+        .expect("write hotspots");
+        path
+    }
+
+    fn write_review_artifact(
+        repo_root: &std::path::Path,
+        state_dir: &str,
+        file_name: &str,
+        decision: &ProposalReviewDecision,
+    ) {
+        let dir = repo_root.join(format!(".scryrs/{state_dir}"));
+        std::fs::create_dir_all(&dir).expect("create review dir");
+        std::fs::write(
+            dir.join(file_name),
+            serde_json::to_string(decision).expect("serialize decision"),
+        )
+        .expect("write decision");
+    }
+
+    fn accepted_grouping_decision(
+        proposal_id: &str,
+        source_node_ids: Vec<&str>,
+        target_group_node_id: &str,
+        target_group_label: &str,
+    ) -> ProposalReviewDecision {
+        ProposalReviewDecision {
+            schema_version: scryrs_types::REVIEW_DECISION_SCHEMA_VERSION.into(),
+            proposal_id: proposal_id.into(),
+            reviewer: "reviewer".into(),
+            decided_at: "2026-01-02T00:00:00Z".into(),
+            rationale: "group nodes".into(),
+            source_evidence: vec![EvidenceLink {
+                source_kind: EvidenceSourceKind::LocalTraceRow,
+                subject: proposal_id.into(),
+                row_ids: vec![11, 12],
+                doc_ref: None,
+                description: None,
+                score: None,
+                metadata: None,
+            }],
+            outcome: ReviewOutcome::Accepted,
+            target_type: Some(ProposalTargetType::SemanticGraphGrouping),
+            accepted_content: Some(ProposedContent::SemanticGraphGrouping(
+                SemanticGraphGrouping {
+                    source_node_ids: source_node_ids.into_iter().map(Into::into).collect(),
+                    target_group_node_id: target_group_node_id.into(),
+                    target_group_label: target_group_label.into(),
+                },
+            )),
+        }
+    }
+
+    fn run_graph_build_raw(repo_root: &std::path::Path) -> (i32, Vec<u8>, Vec<u8>) {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let exit_code = write_graph_json(&mut out, &mut err, repo_root.to_str().unwrap());
+        (exit_code, out, err)
+    }
+
+    fn run_graph_build(
+        repo_root: &std::path::Path,
+    ) -> (i32, Vec<u8>, Vec<u8>, KnowledgeGraphDocument) {
+        let (exit_code, out, err) = run_graph_build_raw(repo_root);
+        let document = serde_json::from_slice(&out).expect("valid graph document");
+        (exit_code, out, err, document)
+    }
 
     #[test]
     fn node_id_derivation_from_hotspot_entry() {
@@ -563,6 +840,523 @@ mod tests {
         let doc = kg.to_document(None).expect("valid graph");
         assert_eq!(doc.nodes[0].id, "file:aaa.rs");
         assert_eq!(doc.nodes[1].id, "file:zzz.rs");
+    }
+
+    #[test]
+    fn accepted_semantic_grouping_creates_group_node_and_contains_edges() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let scryrs_dir = tmp.path().join(".scryrs");
+        std::fs::create_dir(&scryrs_dir).expect("create .scryrs");
+
+        let hotspots = serde_json::json!({
+            "entries": [
+                {
+                    "rank": 1,
+                    "subjectKind": "file",
+                    "subject": "auth",
+                    "score": 10,
+                    "counts": {"eventType": {}, "outcome": {}},
+                    "sessionCount": 1,
+                    "firstSeen": "2026-01-01T00:00:00Z",
+                    "lastSeen": "2026-01-01T00:00:00Z",
+                    "evidence": {"rowIds": [1]}
+                },
+                {
+                    "rank": 2,
+                    "subjectKind": "search",
+                    "subject": "auth",
+                    "score": 7,
+                    "counts": {"eventType": {}, "outcome": {}},
+                    "sessionCount": 1,
+                    "firstSeen": "2026-01-01T00:00:00Z",
+                    "lastSeen": "2026-01-01T00:00:00Z",
+                    "evidence": {"rowIds": [2]}
+                }
+            ]
+        });
+        std::fs::write(
+            scryrs_dir.join("hotspots.json"),
+            serde_json::to_string(&hotspots).expect("serialize hotspots"),
+        )
+        .expect("write hotspots");
+
+        let accepted_dir = scryrs_dir.join("accepted");
+        std::fs::create_dir(&accepted_dir).expect("create accepted dir");
+        let decision = ProposalReviewDecision {
+            schema_version: scryrs_types::REVIEW_DECISION_SCHEMA_VERSION.into(),
+            proposal_id: "proposal-auth-group".into(),
+            reviewer: "reviewer".into(),
+            decided_at: "2026-01-02T00:00:00Z".into(),
+            rationale: "group auth nodes".into(),
+            source_evidence: vec![EvidenceLink {
+                source_kind: EvidenceSourceKind::LocalTraceRow,
+                subject: "auth".into(),
+                row_ids: vec![11, 12],
+                doc_ref: None,
+                description: None,
+                score: None,
+                metadata: None,
+            }],
+            outcome: ReviewOutcome::Accepted,
+            target_type: Some(ProposalTargetType::SemanticGraphGrouping),
+            accepted_content: Some(ProposedContent::SemanticGraphGrouping(
+                SemanticGraphGrouping {
+                    source_node_ids: vec!["file:auth".into(), "search:auth".into()],
+                    target_group_node_id: "domain_term:auth".into(),
+                    target_group_label: "Auth".into(),
+                },
+            )),
+        };
+        std::fs::write(
+            accepted_dir.join("z-group.json"),
+            serde_json::to_string(&decision).expect("serialize decision"),
+        )
+        .expect("write decision");
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        assert_eq!(
+            write_graph_json(&mut out, &mut err, tmp.path().to_str().unwrap()),
+            0
+        );
+
+        let stdout = String::from_utf8_lossy(&out);
+        let document: scryrs_types::KnowledgeGraphDocument =
+            serde_json::from_str(stdout.trim()).expect("valid graph document");
+
+        let group = document
+            .nodes
+            .iter()
+            .find(|node| node.id == "domain_term:auth")
+            .expect("group node exists");
+        assert_eq!(group.label, "Auth");
+        assert_eq!(group.kind, "domain_term");
+        assert!(group.evidence_links.iter().any(|link| {
+            link.source_kind == EvidenceSourceKind::RecordedEvidence
+                && link.subject == "proposal-auth-group"
+        }));
+
+        let file_edge = document
+            .edges
+            .iter()
+            .find(|edge| edge.id == "domain_term:auth_contains_file:auth")
+            .expect("file contains edge exists");
+        assert_eq!(file_edge.relationship, "contains");
+        assert_eq!(file_edge.evidence_links, decision.source_evidence);
+
+        let search_edge = document
+            .edges
+            .iter()
+            .find(|edge| edge.id == "domain_term:auth_contains_search:auth")
+            .expect("search contains edge exists");
+        assert_eq!(search_edge.relationship, "contains");
+        assert_eq!(search_edge.evidence_links, decision.source_evidence);
+    }
+
+    #[test]
+    fn accepted_non_semantic_decision_is_skipped_with_warning() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let scryrs_dir = tmp.path().join(".scryrs");
+        std::fs::create_dir(&scryrs_dir).expect("create .scryrs");
+
+        let hotspots = serde_json::json!({
+            "entries": [{
+                "rank": 1,
+                "subjectKind": "file",
+                "subject": "auth",
+                "score": 10,
+                "counts": {"eventType": {}, "outcome": {}},
+                "sessionCount": 1,
+                "firstSeen": "2026-01-01T00:00:00Z",
+                "lastSeen": "2026-01-01T00:00:00Z",
+                "evidence": {"rowIds": [1]}
+            }]
+        });
+        std::fs::write(
+            scryrs_dir.join("hotspots.json"),
+            serde_json::to_string(&hotspots).expect("serialize hotspots"),
+        )
+        .expect("write hotspots");
+
+        let accepted_dir = scryrs_dir.join("accepted");
+        std::fs::create_dir(&accepted_dir).expect("create accepted dir");
+        let decision = ProposalReviewDecision {
+            schema_version: scryrs_types::REVIEW_DECISION_SCHEMA_VERSION.into(),
+            proposal_id: "proposal-memory-patch".into(),
+            reviewer: "reviewer".into(),
+            decided_at: "2026-01-02T00:00:00Z".into(),
+            rationale: "patch memory".into(),
+            source_evidence: vec![EvidenceLink {
+                source_kind: EvidenceSourceKind::LocalTraceRow,
+                subject: "auth".into(),
+                row_ids: vec![7],
+                doc_ref: None,
+                description: None,
+                score: None,
+                metadata: None,
+            }],
+            outcome: ReviewOutcome::Accepted,
+            target_type: Some(ProposalTargetType::MemoryPatch),
+            accepted_content: Some(ProposedContent::MemoryPatch(serde_json::json!({
+                "memory": "auth"
+            }))),
+        };
+        std::fs::write(
+            accepted_dir.join("memory.json"),
+            serde_json::to_string(&decision).expect("serialize decision"),
+        )
+        .expect("write decision");
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        assert_eq!(
+            write_graph_json(&mut out, &mut err, tmp.path().to_str().unwrap()),
+            0
+        );
+
+        let stdout = String::from_utf8_lossy(&out);
+        let document: scryrs_types::KnowledgeGraphDocument =
+            serde_json::from_str(stdout.trim()).expect("valid graph document");
+        assert_eq!(document.nodes.len(), 1, "only hotspot node should remain");
+        assert!(
+            document.edges.is_empty(),
+            "no grouping edges should be added"
+        );
+
+        let stderr = String::from_utf8_lossy(&err);
+        assert!(stderr.contains("warning: skipping accepted targetType 'memory_patch'"));
+    }
+
+    #[test]
+    fn malformed_accepted_artifact_fails_without_writing_graph_artifact() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        write_hotspots_json(tmp.path(), serde_json::json!([]));
+        let accepted_dir = tmp.path().join(".scryrs/accepted");
+        std::fs::create_dir_all(&accepted_dir).expect("create accepted dir");
+        std::fs::write(accepted_dir.join("bad.json"), "not-json").expect("write bad decision");
+
+        let (exit_code, out, err) = run_graph_build_raw(tmp.path());
+        assert_ne!(exit_code, 0);
+        assert!(
+            out.is_empty(),
+            "failing build should not emit stdout graph JSON"
+        );
+        assert!(
+            String::from_utf8_lossy(&err).contains("invalid accepted artifact"),
+            "stderr should identify the accepted artifact as invalid"
+        );
+        assert!(
+            !tmp.path().join(".scryrs/graph.json").exists(),
+            "graph artifact should not be written on failure"
+        );
+    }
+
+    #[test]
+    fn missing_accepted_source_node_fails_loudly() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        write_hotspots_json(
+            tmp.path(),
+            serde_json::json!([{
+                "rank": 1,
+                "subjectKind": "file",
+                "subject": "auth",
+                "score": 10,
+                "counts": {"eventType": {}, "outcome": {}},
+                "sessionCount": 1,
+                "firstSeen": "2026-01-01T00:00:00Z",
+                "lastSeen": "2026-01-01T00:00:00Z",
+                "evidence": {"rowIds": [1]}
+            }]),
+        );
+        write_review_artifact(
+            tmp.path(),
+            "accepted",
+            "group.json",
+            &accepted_grouping_decision(
+                "proposal-auth-group",
+                vec!["file:missing.rs"],
+                "domain_term:auth",
+                "Auth",
+            ),
+        );
+
+        let (exit_code, _, err) = run_graph_build_raw(tmp.path());
+        assert_ne!(exit_code, 0);
+        let stderr = String::from_utf8_lossy(&err);
+        assert!(stderr.contains("proposal-auth-group"));
+        assert!(stderr.contains("file:missing.rs"));
+    }
+
+    #[test]
+    fn accepted_target_group_without_kind_prefix_fails_loudly() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        write_hotspots_json(
+            tmp.path(),
+            serde_json::json!([{
+                "rank": 1,
+                "subjectKind": "file",
+                "subject": "auth",
+                "score": 10,
+                "counts": {"eventType": {}, "outcome": {}},
+                "sessionCount": 1,
+                "firstSeen": "2026-01-01T00:00:00Z",
+                "lastSeen": "2026-01-01T00:00:00Z",
+                "evidence": {"rowIds": [1]}
+            }]),
+        );
+        write_review_artifact(
+            tmp.path(),
+            "accepted",
+            "group.json",
+            &accepted_grouping_decision("proposal-auth-group", vec!["file:auth"], "auth", "Auth"),
+        );
+
+        let (exit_code, _, err) = run_graph_build_raw(tmp.path());
+        assert_ne!(exit_code, 0);
+        let stderr = String::from_utf8_lossy(&err);
+        assert!(stderr.contains("cannot derive node kind"));
+        assert!(stderr.contains("auth"));
+    }
+
+    #[test]
+    fn duplicate_target_group_conflict_fails_loudly() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        write_hotspots_json(
+            tmp.path(),
+            serde_json::json!([{
+                "rank": 1,
+                "subjectKind": "file",
+                "subject": "auth",
+                "score": 10,
+                "counts": {"eventType": {}, "outcome": {}},
+                "sessionCount": 1,
+                "firstSeen": "2026-01-01T00:00:00Z",
+                "lastSeen": "2026-01-01T00:00:00Z",
+                "evidence": {"rowIds": [1]}
+            }]),
+        );
+        write_review_artifact(
+            tmp.path(),
+            "accepted",
+            "a.json",
+            &accepted_grouping_decision(
+                "proposal-auth-group-a",
+                vec!["file:auth"],
+                "domain_term:auth",
+                "Auth",
+            ),
+        );
+        write_review_artifact(
+            tmp.path(),
+            "accepted",
+            "b.json",
+            &accepted_grouping_decision(
+                "proposal-auth-group-b",
+                vec!["file:auth"],
+                "domain_term:auth",
+                "Auth Duplicate",
+            ),
+        );
+
+        let (exit_code, _, err) = run_graph_build_raw(tmp.path());
+        assert_ne!(exit_code, 0);
+        let stderr = String::from_utf8_lossy(&err);
+        assert!(stderr.contains("conflicting accepted grouping"));
+        assert!(stderr.contains("domain_term:auth"));
+    }
+
+    #[test]
+    fn duplicate_grouped_source_node_conflict_fails_loudly() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        write_hotspots_json(
+            tmp.path(),
+            serde_json::json!([{
+                "rank": 1,
+                "subjectKind": "file",
+                "subject": "auth",
+                "score": 10,
+                "counts": {"eventType": {}, "outcome": {}},
+                "sessionCount": 1,
+                "firstSeen": "2026-01-01T00:00:00Z",
+                "lastSeen": "2026-01-01T00:00:00Z",
+                "evidence": {"rowIds": [1]}
+            }]),
+        );
+        write_review_artifact(
+            tmp.path(),
+            "accepted",
+            "a.json",
+            &accepted_grouping_decision(
+                "proposal-auth-domain",
+                vec!["file:auth"],
+                "domain_term:auth",
+                "Auth",
+            ),
+        );
+        write_review_artifact(
+            tmp.path(),
+            "accepted",
+            "b.json",
+            &accepted_grouping_decision(
+                "proposal-auth-concept",
+                vec!["file:auth"],
+                "concept:auth",
+                "Auth Concept",
+            ),
+        );
+
+        let (exit_code, _, err) = run_graph_build_raw(tmp.path());
+        assert_ne!(exit_code, 0);
+        let stderr = String::from_utf8_lossy(&err);
+        assert!(stderr.contains("conflicting accepted grouping for source node ID"));
+        assert!(stderr.contains("file:auth"));
+    }
+
+    #[test]
+    fn accepted_target_group_id_collision_with_existing_node_fails_loudly() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        write_hotspots_json(
+            tmp.path(),
+            serde_json::json!([{
+                "rank": 1,
+                "subjectKind": "file",
+                "subject": "auth",
+                "score": 10,
+                "counts": {"eventType": {}, "outcome": {}},
+                "sessionCount": 1,
+                "firstSeen": "2026-01-01T00:00:00Z",
+                "lastSeen": "2026-01-01T00:00:00Z",
+                "evidence": {"rowIds": [1]}
+            }]),
+        );
+        write_review_artifact(
+            tmp.path(),
+            "accepted",
+            "group.json",
+            &accepted_grouping_decision(
+                "proposal-auth-group",
+                vec!["file:auth"],
+                "file:auth",
+                "Auth",
+            ),
+        );
+
+        let (exit_code, _, err) = run_graph_build_raw(tmp.path());
+        assert_ne!(exit_code, 0);
+        let stderr = String::from_utf8_lossy(&err);
+        assert!(stderr.contains("collides with existing graph node ID"));
+        assert!(stderr.contains("file:auth"));
+    }
+
+    #[test]
+    fn pending_proposals_and_rejected_decisions_do_not_affect_graph() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        write_hotspots_json(
+            tmp.path(),
+            serde_json::json!([{
+                "rank": 1,
+                "subjectKind": "file",
+                "subject": "auth",
+                "score": 10,
+                "counts": {"eventType": {}, "outcome": {}},
+                "sessionCount": 1,
+                "firstSeen": "2026-01-01T00:00:00Z",
+                "lastSeen": "2026-01-01T00:00:00Z",
+                "evidence": {"rowIds": [1]}
+            }]),
+        );
+        let proposals_dir = tmp.path().join(".scryrs/proposals");
+        std::fs::create_dir_all(&proposals_dir).expect("create proposals dir");
+        std::fs::write(proposals_dir.join("pending.json"), "{ definitely-bad }")
+            .expect("write pending proposal");
+        let rejected = ProposalReviewDecision {
+            schema_version: scryrs_types::REVIEW_DECISION_SCHEMA_VERSION.into(),
+            proposal_id: "proposal-auth-group".into(),
+            reviewer: "reviewer".into(),
+            decided_at: "2026-01-02T00:00:00Z".into(),
+            rationale: "reject".into(),
+            source_evidence: vec![EvidenceLink {
+                source_kind: EvidenceSourceKind::LocalTraceRow,
+                subject: "auth".into(),
+                row_ids: vec![1],
+                doc_ref: None,
+                description: None,
+                score: None,
+                metadata: None,
+            }],
+            outcome: ReviewOutcome::Rejected,
+            target_type: None,
+            accepted_content: None,
+        };
+        write_review_artifact(
+            tmp.path(),
+            "rejected",
+            "proposal-auth-group.json",
+            &rejected,
+        );
+
+        let (exit_code, _, _, document) = run_graph_build(tmp.path());
+        assert_eq!(exit_code, 0);
+        assert_eq!(document.nodes.len(), 1, "only hotspot node should remain");
+        assert!(document.edges.is_empty());
+    }
+
+    #[test]
+    fn accepted_artifacts_are_processed_deterministically() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        write_hotspots_json(
+            tmp.path(),
+            serde_json::json!([
+                {
+                    "rank": 1,
+                    "subjectKind": "file",
+                    "subject": "auth",
+                    "score": 10,
+                    "counts": {"eventType": {}, "outcome": {}},
+                    "sessionCount": 1,
+                    "firstSeen": "2026-01-01T00:00:00Z",
+                    "lastSeen": "2026-01-01T00:00:00Z",
+                    "evidence": {"rowIds": [1]}
+                },
+                {
+                    "rank": 2,
+                    "subjectKind": "file",
+                    "subject": "billing",
+                    "score": 9,
+                    "counts": {"eventType": {}, "outcome": {}},
+                    "sessionCount": 1,
+                    "firstSeen": "2026-01-01T00:00:00Z",
+                    "lastSeen": "2026-01-01T00:00:00Z",
+                    "evidence": {"rowIds": [2]}
+                }
+            ]),
+        );
+        write_review_artifact(
+            tmp.path(),
+            "accepted",
+            "z-billing.json",
+            &accepted_grouping_decision(
+                "proposal-billing-group",
+                vec!["file:billing"],
+                "domain_term:billing",
+                "Billing",
+            ),
+        );
+        write_review_artifact(
+            tmp.path(),
+            "accepted",
+            "a-auth.json",
+            &accepted_grouping_decision(
+                "proposal-auth-group",
+                vec!["file:auth"],
+                "domain_term:auth",
+                "Auth",
+            ),
+        );
+
+        let (_, out1, _, _) = run_graph_build(tmp.path());
+        let (_, out2, _, _) = run_graph_build(tmp.path());
+        assert_eq!(out1, out2, "repeated runs must be byte-identical");
     }
 
     #[test]

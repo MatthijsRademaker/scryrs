@@ -65,26 +65,16 @@ Each graph node SHALL produce exactly one `RouteEntry`. Distinct `(subjectKind, 
 
 ### Requirement: Grouping is derived only from explicit contains edges
 
-Route entries SHALL carry an optional `grouping` field ONLY when the source graph node is the target of a `contains` edge from a parent group node. `grouping` SHALL include `groupId` (the parent node's `id`) and `groupLabel` (the parent node's `label`). No other relationship kind or inferred grouping SHALL be applied.
+Route entries SHALL carry an optional `grouping` field ONLY when the source graph node is the target of a `contains` edge from a parent group node. That includes parent group nodes materialized from accepted `semantic_graph_grouping` review decisions during graph build. `grouping` SHALL include `groupId` (the parent node's `id`) and `groupLabel` (the parent node's `label`). Route generation SHALL continue to consume `.scryrs/graph.json` only and SHALL NOT read `.scryrs/accepted/`, `.scryrs/rejected/`, or `.scryrs/proposals/` directly.
 
-#### Scenario: Doc page with parent group carries grouping
+#### Scenario: Accepted semantic grouping appears through normal graph consumption
 
-- **GIVEN** the graph contains a node `doc_page:graph` and a `contains` edge from node `technical` (label `"Technical"`) to `doc_page:graph`
-- **WHEN** the route generator emits the entry for `doc_page:graph`
-- **THEN** the entry includes `grouping` with `groupId = "technical"` and `groupLabel = "Technical"`
-
-#### Scenario: Doc page without parent group has no grouping
-
-- **GIVEN** the graph contains a node `doc_page:orphan` with no incoming `contains` edges
-- **WHEN** the route generator emits the entry for `doc_page:orphan`
-- **THEN** the entry does NOT include a `grouping` field
-
-#### Scenario: Hotspot nodes remain ungrouped in v1
-
-- **GIVEN** the graph contains a hotspot node `file:src/main.rs`
-- **AND** v1 graph build does not emit cross-domain edges between hotspot and doc nodes
-- **WHEN** the route generator emits the entry for `file:src/main.rs`
-- **THEN** the entry does NOT include a `grouping` field
+- **GIVEN** `.scryrs/graph.json` contains a node `domain_term:auth`
+- **AND** `.scryrs/graph.json` contains a `contains` edge from `domain_term:auth` to `file:auth`
+- **WHEN** `scryrs route <PATH>` runs
+- **THEN** the route entry for `file:auth` includes `grouping.groupId = "domain_term:auth"`
+- **AND** `grouping.groupLabel` equals the parent node label
+- **AND** route generation does not inspect proposal or review-artifact directories
 
 ### Requirement: Route manifest output is deterministic
 
