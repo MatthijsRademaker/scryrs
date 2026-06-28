@@ -130,15 +130,85 @@ Proposal inbox files and review decision artifacts live in separate paths so pro
     <proposal-id>.json
 ```
 
-| Zone | Path | Purpose | Mutated by proposal generation? |
+| Zone | Path | Purpose | Mutated by which command? |
 | --- | --- | --- | --- |
-| Proposal inbox | `.scryrs/proposals/{proposalId}.json` | Review-only candidate knowledge | Yes — `scryrs propose` writes here |
-| Accepted evidence | `.scryrs/accepted/{proposalId}.json` | Durable accepted review outcome with reviewed content | No — requires explicit review workflow (future) |
-| Rejected decisions | `.scryrs/rejected/{proposalId}.json` | Explicit rejection record | No — requires explicit review workflow (future) |
+| Proposal inbox | `.scryrs/proposals/{proposalId}.json` | Review-only candidate knowledge | `scryrs propose` writes here |
+| Accepted evidence | `.scryrs/accepted/{proposalId}.json` | Durable accepted review outcome with reviewed content | `scryrs proposals accept` |
+| Rejected decisions | `.scryrs/rejected/{proposalId}.json` | Explicit rejection record | `scryrs proposals reject` |
 
 Accepted and rejected review decisions are recorded as separate `ProposalReviewDecision` artifacts rather than by mutating the original proposal inbox files. The original `.scryrs/proposals/{proposalId}.json` remains a review-only record regardless of acceptance or rejection.
 
 `ProposalReviewDecision` is a versioned contract (`REVIEW_DECISION_SCHEMA_VERSION = "1.0.0"`) that reuses the existing `EvidenceLink`, `ProposalTargetType`, `ProposedContent`, and `SemanticGraphGrouping` types. Accepted decisions carry `targetType` plus `acceptedContent`; rejected decisions carry no accepted-content payload.
+
+## Review CLI
+
+Proposal review is now exposed as a grouped plural command surface:
+
+```text
+scryrs proposals list <PATH> [--state pending|accepted|rejected|all]
+scryrs proposals accept <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>
+scryrs proposals reject <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>
+```
+
+The naming split is intentional:
+
+- `scryrs propose` **generates** inbox proposals
+- `scryrs proposals ...` **reviews** existing inbox proposals
+
+### `proposals list`
+
+`list` reads `.scryrs/proposals/`, `.scryrs/accepted/`, and `.scryrs/rejected/` and emits a deterministic JSON array sorted by `proposalId` ascending.
+
+Each row contains:
+
+- `proposalId`
+- `title`
+- `targetType`
+- `createdAt`
+- `state` (`pending`, `accepted`, or `rejected`)
+
+The optional `--state` filter accepts only `pending`, `accepted`, `rejected`, or `all`. Invalid filters exit `2`. Listing validates both proposal inbox documents and any encountered review-decision artifacts before emitting output; malformed JSON, schema-version mismatch, semantic validation failure, conflicting accepted+rejected states, or tampered review artifacts all fail loudly with exit `2` and no partial stdout.
+
+### `proposals accept` and `proposals reject`
+
+Both terminal review commands require explicit provenance metadata:
+
+- `--reviewer <NAME>`
+- `--rationale <TEXT>`
+- `--decided-at <RFC3339>`
+
+There are no defaults, and `decidedAt` is never derived from wall-clock time. Before either command writes a decision, the source inbox file must exist at `.scryrs/proposals/{proposalId}.json`, deserialize as `ProposalDocument`, match its deterministic content-derived `proposalId`, and pass `ProposalDocument::validate()`.
+
+Accepted decisions copy:
+
+- `targetType` from the proposal
+- `proposedContent` into `acceptedContent`
+- proposal `evidence` into `sourceEvidence`
+
+Rejected decisions copy only `sourceEvidence` and set `outcome = rejected`; they omit `targetType` and `acceptedContent`.
+
+### Determinism and conflicts
+
+The review CLI is deterministic and overwrite-averse:
+
+- rerunning `accept` or `reject` with byte-identical output succeeds as a no-op
+- rerunning the same outcome with different bytes fails with exit `2`
+- attempting `accept` when a rejected artifact already exists fails with exit `2`
+- attempting `reject` when an accepted artifact already exists fails with exit `2`
+- simultaneous accepted and rejected artifacts for one proposal ID are a conflicting terminal state; `proposals list` fails with exit `2`
+
+### Review boundary and exit codes
+
+Review commands preserve the existing trust boundary:
+
+- `.scryrs/proposals/{proposalId}.json` is never mutated by review
+- `.devagent/docs/`, `.scryrs/graph.json`, and `.scryrs/routes.json` are never created, modified, or deleted by review commands
+
+Exit-code contract:
+
+- `0` — success
+- `1` — serialization or filesystem write failure
+- `2` — usage or input error (invalid filter, invalid proposal/review artifact, unknown proposal ID, conflicting terminal state)
 
 ## Optional Model-Assisted Curation
 

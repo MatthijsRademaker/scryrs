@@ -13,6 +13,7 @@ mod help_json;
 mod help_text;
 mod hook;
 mod hotspots;
+mod proposals;
 mod propose;
 mod record;
 #[cfg(feature = "core")]
@@ -25,7 +26,8 @@ pub(crate) mod store_override;
 
 pub use dispatch::{run, run_with_io, run_with_writers};
 
-pub mod test_support;
+#[cfg(test)]
+mod test_support;
 
 #[cfg(test)]
 mod dispatch_tests;
@@ -35,6 +37,8 @@ mod hook_tests;
 mod hotspot_integration_tests;
 #[cfg(test)]
 mod init_tests;
+#[cfg(test)]
+mod proposals_tests;
 #[cfg(all(test, feature = "core"))]
 mod record_tests;
 #[cfg(test)]
