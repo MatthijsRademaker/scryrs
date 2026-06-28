@@ -912,6 +912,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "scryrs-curator-llm"
+version = "0.1.0"
+dependencies = [
+ "scryrs-llm",
+ "scryrs-types",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "scryrs-dashboard"
 version = "0.1.0"
 dependencies = [
