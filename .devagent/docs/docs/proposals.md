@@ -143,8 +143,9 @@ Accepted and rejected review decisions are recorded as separate `ProposalReviewD
 Trust boundary:
 
 - `.scryrs/proposals/` remains non-authoritative inbox state only
-- `.scryrs/accepted/` can become graph-build input when the accepted decision targets `semantic_graph_grouping`
-- `.scryrs/rejected/` records explicit rejections but is ignored by graph and route generation
+- `.scryrs/accepted/` is the only review artifact set that generic Markdown publishing consumes; the Markdown adapter reads `.scryrs/accepted/*.json` and never publishes directly from proposal inbox files
+- `.scryrs/accepted/` can also become graph-build input when the accepted decision targets `semantic_graph_grouping`
+- `.scryrs/rejected/` records explicit rejections but is ignored by graph, route generation, and Markdown publishing
 
 ## Review CLI
 
@@ -246,7 +247,7 @@ Model output is proposal input only.
 - Proposal inbox artifacts are still not consumed automatically by graph build, route generation, or adapters.
 - Accepted review decisions can affect graph build only through `.scryrs/accepted/`, and only accepted `semantic_graph_grouping` targets project into graph structure today.
 - Route generation still consumes `.scryrs/graph.json` only; it never reads proposal or review-artifact directories directly.
-- Publishing approved proposals into Markdown or Rspress remains adapter-phase work.
+- Generic Markdown publishing now consumes reviewed `.scryrs/accepted/*.json` artifacts only and writes plain Markdown to a caller-chosen output root; Rspress-specific publishing remains a later, separate adapter surface.
 
 ## Related Pages
 

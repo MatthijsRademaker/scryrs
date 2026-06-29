@@ -7,7 +7,11 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+serde_json.workspace = true
 scryrs-types.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
 
 [lib]
 path = "src/lib.rs"
