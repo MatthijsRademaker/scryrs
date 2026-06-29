@@ -55,6 +55,9 @@ jobs:
       - name: Tests
         run: cargo test --workspace --all-targets --all-features --locked
 
+      - name: Docs publish verification
+        run: scripts/verify-docs-publish
+
       - name: Install dependency policy tools
         run: |
           cargo install --locked cargo-deny

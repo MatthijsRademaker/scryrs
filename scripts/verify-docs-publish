@@ -1,0 +1,259 @@
+#!/usr/bin/env bash
+# Verify that the Rspress publishing adapter produces correct output and that
+# published knowledge surfaces in the built docs llms files.
+#
+# Creates temporary fixtures, runs the adapter via its verification example,
+# triggers a full docs build, and asserts that published proposal IDs appear
+# in the generated llms.txt surfaces with valid links.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$SCRIPT_DIR/lib/docker-verification.sh"
+
+ADAPTER_CRATE_DIR="$ROOT/crates/scryrs-adapter-rspress"
+DOCS_DIR="$ROOT/.devagent/docs"
+DOCS_DOCS_DIR="$DOCS_DIR/docs"
+DOCS_BUILD_DIR="$DOCS_DIR/doc_build"
+
+# --- Pre-flight: bun/node must be available ---
+
+check_bun_or_node() {
+  local node_cmd=""
+  if command -v bun &>/dev/null; then
+    node_cmd="bun"
+  elif command -v node &>/dev/null; then
+    node_cmd="node"
+  else
+    echo "ERROR: neither bun nor node found on PATH. Install bun (https://bun.sh) or node (https://nodejs.org)." >&2
+    exit 1
+  fi
+  echo "$node_cmd"
+}
+
+step "verifying rspress publishing adapter"
+
+NODE_CMD="$(check_bun_or_node)"
+echo "[verify-docs-publish] using runtime: $NODE_CMD" >&2
+
+# --- Create test fixtures ---
+
+step "creating test fixtures"
+
+# Fixtures must live under ROOT so Docker's run_rust can access them
+# (the container mounts ROOT at /workspace).
+FIXTURE_DIR="$ROOT/target/verify-docs-fixtures"
+rm -rf "$FIXTURE_DIR"
+trap 'rm -rf "$FIXTURE_DIR"' EXIT
+
+REPO_ROOT="$FIXTURE_DIR/repo"
+DOCS_ROOT="$FIXTURE_DIR/docs"
+
+mkdir -p "$REPO_ROOT/.scryrs/accepted"
+mkdir -p "$DOCS_ROOT"
+
+# Write two accepted decision fixtures as JSON files.
+# proposalId values are chosen to be unique and grep-able in llms output.
+cat >"$REPO_ROOT/.scryrs/accepted/verify-docs-note-0001.json" <<'ENDJSON'
+{
+  "schemaVersion": "1.0.0",
+  "proposalId": "verify-docs-note-0001",
+  "reviewer": "verify-script",
+  "decidedAt": "2026-06-29T18:00:00Z",
+  "rationale": "Verification fixture for docs note publishing",
+  "sourceEvidence": [
+    {
+      "sourceKind": "local_trace_row",
+      "subject": "verify-fixture",
+      "rowIds": [1],
+      "docRef": ".devagent/docs/docs/proposals.md",
+      "description": "verification fixture evidence"
+    }
+  ],
+  "outcome": "accepted",
+  "targetType": "docs_note",
+  "acceptedContent": "## Verification Docs Note\n\nThis page was published by the Rspress adapter verification script. It proves that accepted docs_note artifacts flow through to the live docs site.\n"
+}
+ENDJSON
+
+cat >"$REPO_ROOT/.scryrs/accepted/verify-adr-0002.json" <<'ENDJSON'
+{
+  "schemaVersion": "1.0.0",
+  "proposalId": "verify-adr-0002",
+  "reviewer": "verify-script",
+  "decidedAt": "2026-06-29T18:00:00Z",
+  "rationale": "Verification fixture for ADR publishing",
+  "sourceEvidence": [
+    {
+      "sourceKind": "local_trace_row",
+      "subject": "verify-fixture-adr",
+      "rowIds": [2],
+      "docRef": ".devagent/docs/docs/proposals.md",
+      "description": "verification ADR fixture evidence"
+    }
+  ],
+  "outcome": "accepted",
+  "targetType": "adr",
+  "acceptedContent": "## Verification ADR\n\nThis ADR was published by the Rspress adapter verification script. It proves that the full pipeline works end-to-end.\n"
+}
+ENDJSON
+
+# --- Run the adapter ---
+
+step "running rspress adapter"
+
+# Paths inside the Docker container (ROOT is mounted at /workspace).
+CONTAINER_REPO="/workspace/target/verify-docs-fixtures/repo"
+CONTAINER_DOCS="/workspace/target/verify-docs-fixtures/docs"
+run_rust cargo run --package scryrs-adapter-rspress --example verify-publish -- "$CONTAINER_REPO" "$CONTAINER_DOCS"
+
+# --- Verify adapter output ---
+
+step "verifying adapter output"
+
+# Check that pages were written.
+PAGE1="$DOCS_ROOT/accepted-knowledge/docs_note/verify-docs-note-0001.md"
+PAGE2="$DOCS_ROOT/accepted-knowledge/adr/verify-adr-0002.md"
+
+if [[ ! -f "$PAGE1" ]]; then
+  echo "ERROR: expected page not found: $PAGE1" >&2
+  exit 1
+fi
+if [[ ! -f "$PAGE2" ]]; then
+  echo "ERROR: expected page not found: $PAGE2" >&2
+  exit 1
+fi
+
+# Check that pages carry Rspress frontmatter.
+grep -q '^---$' "$PAGE1" || { echo "ERROR: $PAGE1 missing frontmatter" >&2; exit 1; }
+grep -q '^title: docs_note verify-docs-note-0001$' "$PAGE1" || { echo "ERROR: $PAGE1 missing title" >&2; exit 1; }
+
+# Check _nav.json was written.
+NAV="$DOCS_ROOT/_nav.json"
+if [[ ! -f "$NAV" ]]; then
+  echo "ERROR: _nav.json not written" >&2
+  exit 1
+fi
+grep -q 'Accepted Knowledge' "$NAV" || { echo "ERROR: _nav.json missing Accepted Knowledge" >&2; exit 1; }
+
+# --- Copy adapter output into the real docs source tree ---
+
+step "copying adapter output into docs source"
+
+# Backup the real docs state.
+REAL_NAV="$DOCS_DOCS_DIR/_nav.json"
+REAL_AK="$DOCS_DOCS_DIR/accepted-knowledge"
+
+NAV_BACKUP="$FIXTURE_DIR/_nav.json.bak"
+AK_BACKUP="$FIXTURE_DIR/accepted-knowledge.bak"
+
+if [[ -f "$REAL_NAV" ]]; then
+  cp "$REAL_NAV" "$NAV_BACKUP"
+fi
+if [[ -d "$REAL_AK" ]]; then
+  cp -r "$REAL_AK" "$AK_BACKUP" 2>/dev/null || true
+fi
+
+# Restore function for cleanup.
+restore_docs() {
+  if [[ -f "$NAV_BACKUP" ]]; then
+    cp "$NAV_BACKUP" "$REAL_NAV"
+  fi
+  if [[ -d "$AK_BACKUP" ]]; then
+    rm -rf "$REAL_AK" 2>/dev/null || true
+    cp -r "$AK_BACKUP" "$REAL_AK"
+  elif [[ -d "$REAL_AK" ]]; then
+    rm -rf "$REAL_AK"
+  fi
+}
+
+# Copy _nav.json from adapter output.
+cp "$NAV" "$REAL_NAV"
+
+# Copy accepted-knowledge subtree.
+if [[ -d "$DOCS_ROOT/accepted-knowledge" ]]; then
+  rm -rf "$REAL_AK" 2>/dev/null || true
+  cp -r "$DOCS_ROOT/accepted-knowledge" "$REAL_AK"
+fi
+
+# --- Build docs ---
+
+step "building docs with bun"
+
+pushd "$DOCS_DIR" >/dev/null
+"$NODE_CMD" install --frozen-lockfile
+
+# graphviz (dot) is required by the likec4 codegen step in the build.
+# If it's missing, try to install it; if that fails, skip codegen.
+if ! command -v dot &>/dev/null; then
+  if command -v apt-get &>/dev/null; then
+    echo "[verify-docs-publish] installing graphviz for likec4 codegen" >&2
+    apt-get update -qq && apt-get install -y -qq graphviz 2>/dev/null || true
+  fi
+  if command -v dot &>/dev/null; then
+    "$NODE_CMD" run build
+  else
+    echo "[verify-docs-publish] graphviz not available; running rspress build without codegen" >&2
+    npx rspress build
+  fi
+else
+  "$NODE_CMD" run build
+fi
+popd >/dev/null
+
+# --- Verify llms output ---
+
+step "verifying llms output"
+
+LLMS_TXT="$DOCS_BUILD_DIR/llms.txt"
+LLMS_FULL_TXT="$DOCS_BUILD_DIR/llms-full.txt"
+
+if [[ ! -f "$LLMS_TXT" ]]; then
+  echo "ERROR: $LLMS_TXT not found after build" >&2
+  restore_docs
+  exit 1
+fi
+if [[ ! -f "$LLMS_FULL_TXT" ]]; then
+  echo "ERROR: $LLMS_FULL_TXT not found after build" >&2
+  restore_docs
+  exit 1
+fi
+
+# Assert proposal IDs appear in llms output.
+for id in verify-docs-note-0001 verify-adr-0002; do
+  if ! grep -qF "$id" "$LLMS_TXT"; then
+    echo "ERROR: llms.txt does not contain proposal id '$id'" >&2
+    restore_docs
+    exit 1
+  fi
+  if ! grep -qF "$id" "$LLMS_FULL_TXT"; then
+    echo "ERROR: llms-full.txt does not contain proposal id '$id'" >&2
+    restore_docs
+    exit 1
+  fi
+done
+
+# Assert that links in llms files resolve to valid pages within the build output.
+# The accepted-knowledge pages should be rendered as HTML.
+check_link_in_build() {
+  local html_relative="$1"
+  local html_path="$DOCS_BUILD_DIR/$html_relative"
+  if [[ ! -f "$html_path" ]]; then
+    echo "ERROR: expected build output not found: $html_path" >&2
+    return 1
+  fi
+}
+
+check_link_in_build "accepted-knowledge/docs_note/verify-docs-note-0001.html"
+check_link_in_build "accepted-knowledge/adr/verify-adr-0002.html"
+
+# --- Cleanup ---
+
+step "cleaning up"
+
+restore_docs
+
+# Remove generated build artifacts.
+rm -rf "$DOCS_BUILD_DIR" 2>/dev/null || true
+
+echo "[verify-docs-publish] PASSED" >&2

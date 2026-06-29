@@ -1209,7 +1209,10 @@ dependencies = [
 name = "scryrs-adapter-rspress"
 version = "0.1.0"
 dependencies = [
+ "scryrs-adapter-markdown",
  "scryrs-types",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

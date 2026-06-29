@@ -7,7 +7,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+scryrs-adapter-markdown.workspace = true
 scryrs-types.workspace = true
+serde_json.workspace = true
+tempfile = "3"
 
 [lib]
 path = "src/lib.rs"

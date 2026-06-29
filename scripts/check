@@ -21,3 +21,6 @@ run_rust cargo check --workspace --all-targets --all-features --locked
 
 step "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings"
 run_rust cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+step "verify-docs-publish"
+"$SCRIPT_DIR/verify-docs-publish"
