@@ -1,25 +1,28 @@
 [
   {
+    "text": "Vision & Strategy",
     "items": [
-      {
-        "items": [
-          {
-            "link": "/project-docs/accepted-knowledge/adr/verify-adr-0002",
-            "text": "adr:verify-a"
-          }
-        ],
-        "text": "ADRs"
-      },
-      {
-        "items": [
-          {
-            "link": "/project-docs/accepted-knowledge/docs_note/verify-docs-note-0001",
-            "text": "docs_note:verify-d"
-          }
-        ],
-        "text": "Docs Notes"
-      }
-    ],
-    "text": "Accepted Knowledge"
+      { "text": "Vision & Goals", "link": "/vision" },
+      { "text": "Product Roadmap", "link": "/roadmap" },
+      { "text": "Production Suite Plan", "link": "/production-suite" }
+    ]
+  },
+  {
+    "text": "Documentation",
+    "items": [
+      { "text": "Architecture", "link": "/architecture" }
+    ]
+  },
+  {
+    "text": "Technical",
+    "items": [
+      { "text": "CLI Reference", "link": "/cli-v0-contract" },
+      { "text": "Trace Hook Contract", "link": "/trace-hook-contract" },
+      { "text": "Hotspots", "link": "/hotspots" },
+      { "text": "Graph", "link": "/graph" },
+      { "text": "Route Manifests", "link": "/route-manifests" },
+      { "text": "Proposals", "link": "/proposals" },
+      { "text": "Live Hotspots", "link": "/live-hotspots" }
+    ]
   }
 ]

@@ -276,7 +276,7 @@ fn validate_nav_json(docs_root: &Path) -> Result<(), PublishError> {
 /// - If `published_entries` is empty, the "Accepted Knowledge" section is
 ///   removed entirely.
 /// - Reruns with identical input produce byte-identical `_nav.json`.
-pub fn update_nav_json(
+fn update_nav_json(
     docs_root: impl AsRef<Path>,
     published_entries: &[PublishEntry],
 ) -> Result<(), PublishError> {
@@ -338,6 +338,15 @@ pub fn update_nav_json(
     Ok(())
 }
 
+/// Build a fresh "Accepted Knowledge" nav section from published entries.
+///
+/// Groups entries by `target_type` into per-type sub-sections. Display names
+/// are derived from the target type slug:
+///   `adr` → "ADRs"
+///   `docs_note` → "Docs Notes"
+///   `skill` → "Skills"
+///   `debugging_playbook` → "Debugging Playbooks"
+/// Unrecognized types use the raw slug as the display name.
 fn build_nav_section(entries: &[PublishEntry]) -> serde_json::Value {
     // Group entries by target_type (use BTreeMap for deterministic ordering).
     let mut type_map: BTreeMap<&str, Vec<&PublishEntry>> = BTreeMap::new();
