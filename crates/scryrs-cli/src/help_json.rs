@@ -4,7 +4,7 @@ use serde_json::json;
 
 /// Version of the `--help-json` surface document format, independent of
 /// `SCHEMA_VERSION` which governs command output envelopes.
-const SURFACE_VERSION: &str = "0.10.0";
+const SURFACE_VERSION: &str = "0.11.0";
 
 pub(crate) fn cli_surface_doc() -> String {
     let doc = json!({
@@ -152,6 +152,28 @@ pub(crate) fn cli_surface_doc() -> String {
                 "output": {
                     "mimeType": "text/plain",
                     "description": "Post-install next-step instructions on stdout. Errors on stderr."
+                }
+            },
+            {
+                "name": "doctor",
+                "description": "Run the installation and readiness diagnostic command",
+                "flags": [
+                    {
+                        "name": "json",
+                        "long": "--json",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Emit machine-readable JSON using the same diagnostic categories as the default human-readable output"
+                    }
+                ],
+                "output": {
+                    "mimeType": "text/plain or application/json",
+                    "description": "Human-readable summary by default, or JSON with binary version, command surface / feature availability, resolved mode, local store status, hook status, live server reachability when configured, and docs links when --json is used."
+                },
+                "exitCodes": {
+                    "0": "Success with only ok/warn findings",
+                    "1": "Output write failure",
+                    "2": "One or more structural error findings"
                 }
             },
             {
@@ -393,9 +415,9 @@ pub(crate) fn cli_surface_doc() -> String {
         ],
         "rootBehavior": {"action": "help", "exitCode": 0},
         "exitCodes": {
-            "0": "Success (hotspots: JSON written, including empty entries; record local: all events accepted; record remote: no rejections or failures; init: hook installed; propose/proposals: artifacts written or listed successfully; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)",
-            "1": "Hotspots: storage error. Record: one or more events rejected (local or server), or I/O error writing output. Init: I/O error. Proposals: serialization or filesystem write failure. Dashboard: port in use or artifact read error. Server: port in use or store error.",
-            "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, self-install refusal, invalid mode, or missing/invalid live-mode configuration; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; dashboard: invalid flags or partial live-mode configuration; server: invalid flags or bind failure."
+            "0": "Success (hotspots: JSON written, including empty entries; record local: all events accepted; record remote: no rejections or failures; init: hook installed; doctor: only ok/warn findings; propose/proposals: artifacts written or listed successfully; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)",
+            "1": "Hotspots: storage error. Record: one or more events rejected (local or server), or I/O error writing output. Init: I/O error. Doctor: output write failure. Proposals: serialization or filesystem write failure. Dashboard: port in use or artifact read error. Server: port in use or store error.",
+            "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, self-install refusal, invalid mode, or missing/invalid live-mode configuration; doctor: one or more structural error findings; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; dashboard: invalid flags or partial live-mode configuration; server: invalid flags or bind failure."
         }
     });
     serde_json::to_string(&doc).unwrap_or_else(|_| "{}".into())

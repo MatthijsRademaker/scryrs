@@ -1,205 +1,187 @@
 # scryrs Verification Suites
 
-This directory contains end-to-end verification fixtures for two independent
-operator workflows:
+This directory defines the runnable verification lanes for production hardening. The installed-user diagnostic entrypoint is `scryrs doctor`; the authoritative release gate is `scripts/verify-production-suite`.
 
-- **Hook capture verification** proves the native `scryrs hook <harness>`
-  integration feeds real scryrs persistence without changing agent-visible
-  behavior.
-- **Live hotspot verification** proves the shipped `scryrs` binary can run the
-  real multi-agent live workflow headlessly: `scryrs server`, remote
-  `scryrs record --file`, cumulative hotspot queries, duplicate replay, and SSE
-  replay/resume.
+## Operator entrypoints
+
+| Entrypoint | Purpose | Posture |
+| --- | --- | --- |
+| `scryrs doctor` | Diagnose the current workspace install and readiness state | Installed-user / operator command |
+| `scripts/verify-production-suite` | Run the full headless production-readiness suite | Explicit heavy maintainer lane |
+| `scripts/precommit-run` | Default lighter PR-gate wrapper (`scripts/check` + `scripts/test`) | Default development lane |
+| `scripts/precommit-run --production` | Explicit wrapper for the full production suite | Heavy maintainer lane |
+
+The production suite is intentionally **not** the default PR gate in this change. Run it explicitly before release hardening decisions.
+
+## What lives here
+
+This directory contains end-to-end fixtures and documentation for four automated verification workflows:
+
+- **Hook capture verification** — prove the native `scryrs hook <harness>` integrations feed real scryrs persistence without changing agent-visible behavior.
+- **Live hotspot verification** — prove the shipped `scryrs` binary can drive the real multi-agent live ingest workflow headlessly.
+- **Core artifact-loop verification** — prove the deterministic local artifact loop `record -> hotspots -> graph -> route -> propose -> proposals accept` produces the documented artifacts through the real binary.
+- **Privacy defaults verification** — prove compiled telemetry/privacy defaults stay in their safe release posture.
 
 For hook capture:
 
-- **Claude Code** pipes the `PreToolUse` event JSON to `scryrs hook claude-code`
-  on stdin. There is no `.mjs` hook file and no node hook process.
-- **Pi** loads a thin in-process `index.ts` shim that forwards the raw event to
-  `scryrs hook pi --file <PATH>` (Pi's `exec()` opens stdin as `/dev/null`).
+- **Claude Code** pipes the `PreToolUse` event JSON to `scryrs hook claude-code` on stdin. There is no `.mjs` hook file and no node hook process.
+- **Pi** loads a thin in-process `index.ts` shim that forwards the raw event to `scryrs hook pi --file <PATH>` (Pi's `exec()` opens stdin as `/dev/null`).
 
-All tool→`TraceEvent` translation lives once, in the Rust
-`scryrs-adapter-harness` crate. The fixtures exercise the shipped `scryrs`
-binary, never repository hook-translation source.
+All tool→`TraceEvent` translation lives once, in the Rust `scryrs-adapter-harness` crate. The fixtures exercise the shipped `scryrs` binary, never repository hook-translation source.
 
 ## Architecture
 
-```
+```text
 scripts/verification/
-├── README.md                  # This file
+├── README.md                    # This file
 ├── lib/
-│   ├── assert.mjs             # pass/fail/assert helpers + summary
-│   ├── db.mjs                 # readEventsDb, assertEventShape (SQLite)
-│   └── pi-shim-driver.mjs     # loads hooks/pi/index.ts via tsx with a mock Pi
-├── claude-code-e2e.mjs        # native `scryrs hook claude-code` (cross-harness)
-├── pi-hook-e2e.mjs            # native `scryrs hook pi` + transport shim
-├── installed-hook-e2e.mjs     # `scryrs init` create/merge + native commands
-└── live-hotspots-e2e.mjs      # real `scryrs server` + remote ingest + SSE replay
+│   ├── assert.mjs               # pass/fail/assert helpers + summary
+│   ├── db.mjs                   # readEventsDb, assertEventShape (SQLite)
+│   └── pi-shim-driver.mjs       # loads hooks/pi/index.ts via tsx with a mock Pi
+├── claude-code-e2e.mjs          # native `scryrs hook claude-code`
+├── pi-hook-e2e.mjs              # native `scryrs hook pi` + transport shim
+├── installed-hook-e2e.mjs       # `scryrs init` create/merge + native commands
+├── live-hotspots-e2e.mjs        # real `scryrs server` + remote ingest + SSE replay
+└── core-artifact-loop-e2e.sh    # real `scryrs` binary through the deterministic local loop
 ```
 
-### Entrypoints
+## Automated lanes
 
-#### `scripts/verify-trace-capture`
+### `scripts/verify-production-suite`
+
+Authoritative headless production-readiness gate. It runs these required lanes, in order, and stops on the first failure:
+
+1. `scripts/check`
+2. `scripts/test --full`
+3. `scripts/security`
+4. `scripts/verify-install`
+5. `scripts/verify-trace-capture`
+6. `scripts/verify-live-hotspots`
+7. `scripts/verify-core-artifact-loop`
+8. `scripts/verify-privacy-defaults`
+9. `scripts/verify-docs-publish`
+
+**Expected posture:** explicit maintainer invocation, Docker or DinD available, headless execution, non-zero exit on the first failing required lane.
+
+**Failure interpretation:** the lane header printed immediately before the failure is the proving path that broke. Re-run that lane directly to debug instead of re-running the full suite blindly.
+
+### `scripts/verify-trace-capture`
 
 Authoritative hook-capture verification entrypoint. It:
 
-1. Builds the real `scryrs` binary via `cargo build --release` in a Rust
-   Docker container.
+1. Builds the real `scryrs` binary via `cargo build --release` in a Rust Docker container.
 2. Installs fixture deps (`better-sqlite3`, `tsx`) in a Node.js Docker container.
 3. Runs the Claude Code fixture against the binary.
 4. Runs the Pi fixture (native command + transport shim) against the binary.
 5. Runs the installed-hook fixture to validate `scryrs init` output.
 
-#### `scripts/verify-live-hotspots`
+### `scripts/verify-live-hotspots`
 
 Authoritative live-workflow verification entrypoint. It:
 
-1. Builds the real `scryrs` binary via `cargo build --release` in a Rust
-   Docker container.
+1. Builds the real `scryrs` binary via `cargo build --release` in a Rust Docker container.
 2. Copies the binary into `.docker-fixtures/scryrs`.
-3. Runs `live-hotspots-e2e.mjs` in a Debian/glibc `node:22` container.
-4. Fails non-zero on server startup failure, transport failure, malformed JSON,
-   assertion failure, or timeout.
+3. Runs `live-hotspots-e2e.mjs` in a Debian/glibc Node container.
+4. Fails non-zero on server startup failure, transport failure, malformed JSON, assertion failure, or timeout.
 
-No host Node.js is required — all execution happens inside Docker containers.
+### `scripts/verify-core-artifact-loop`
 
-### Fixtures
+Authoritative deterministic local artifact-loop entrypoint. It:
 
-#### `claude-code-e2e.mjs`
+1. Builds the real `scryrs` binary via `cargo build --release` in a Rust Docker container.
+2. Copies the binary into `.docker-fixtures/scryrs`.
+3. Runs `core-artifact-loop-e2e.sh` against a temporary fixture repository.
+4. Executes `record -> hotspots -> graph -> route -> propose -> proposals accept` through the shipped binary.
+5. Asserts `.scryrs/scryrs.db`, `.scryrs/hotspots.json`, `.scryrs/graph.json`, `.scryrs/routes.json`, `.scryrs/proposals/`, and `.scryrs/accepted/` are produced in their documented locations.
+
+### `scripts/verify-privacy-defaults`
+
+Runnable compiled privacy assertion lane. It runs `cargo test -p scryrs-telemetry --locked` in the Rust Docker container and fails if telemetry opt-in defaults, redaction defaults, or remote prompt-storage defaults drift.
+
+## Fixtures
+
+### `claude-code-e2e.mjs`
 
 Pipes real `PreToolUse` payloads to `scryrs hook claude-code` on stdin.
 
 **What it proves:**
 
-- **Mapping**: Each tracked PascalCase tool (`Read`, `Grep`, `Glob`,
-  `WebSearch`, `Edit`, `Write`, `NotebookEdit`, `WebFetch`) maps to the correct
-  canonical `TraceEvent` family, with `outcome = Success` (PreToolUse is
-  pre-execution) and `session_id` taken from the payload.
-- **Store location**: Events persist under the payload `cwd`, not the spawned
-  process's working directory.
+- **Mapping**: Each tracked PascalCase tool (`Read`, `Grep`, `Glob`, `WebSearch`, `Edit`, `Write`, `NotebookEdit`, `WebFetch`) maps to the correct canonical `TraceEvent` family, with `outcome = Success` (PreToolUse is pre-execution) and `session_id` taken from the payload.
+- **Store location**: Events persist under the payload `cwd`, not the spawned process's working directory.
 - **Pass-through**: Untracked tools (e.g. `TodoWrite`) produce no event.
-- **Bash debug-gating**: `Bash` is dropped unless `SCRYRS_DEBUG` is non-empty,
-  in which case it maps to `CommandExecuted`.
-- **Fail-open**: Malformed stdin and an unwritable store each exit 0 with empty
-  stdout and append a line to `.scryrs/hooks/claude-code-warnings.log`.
+- **Bash debug-gating**: `Bash` is dropped unless `SCRYRS_DEBUG` is non-empty, in which case it maps to `CommandExecuted`.
+- **Fail-open**: Malformed stdin and an unwritable store each exit 0 with empty stdout and append a line to `.scryrs/hooks/claude-code-warnings.log`.
 
-#### `pi-hook-e2e.mjs`
+### `pi-hook-e2e.mjs`
 
-Two layers: (A) drives `scryrs hook pi --file <tmp>` with crafted raw Pi events,
-and (B) loads `hooks/pi/index.ts` via `tsx` with a mock Pi runtime.
+Two layers: (A) drives `scryrs hook pi --file <tmp>` with crafted raw Pi events, and (B) loads `hooks/pi/index.ts` via `tsx` with a mock Pi runtime.
 
 **What it proves:**
 
-- **Mapping**: `read`→`FileOpened`, `ast_grep_search`→`SearchRun`,
-  `edit`/`write`→`EditMade`, `lsp_navigation`→`SymbolInspected` (success) or
-  `FailedLookup` (`isError`). `outcome` reflects `isError` (post-execution).
+- **Mapping**: `read`→`FileOpened`, `ast_grep_search`→`SearchRun`, `edit`/`write`→`EditMade`, `lsp_navigation`→`SymbolInspected` (success) or `FailedLookup` (`isError`). `outcome` reflects `isError` (post-execution).
 - **Pass-through** and **Bash debug-gating**, as for Claude Code.
-- **Shim delegation**: The slimmed `index.ts` forwards the raw event (with an
-  injected `session_id`) to `scryrs hook pi --file <tmp>` and persists.
-- **Fail-open**: A non-zero `scryrs hook pi` invocation does not throw or alter
-  the agent-visible tool result.
-- **No translation in TypeScript**: `index.ts` contains no `scryrs record`
-  call, no `TRACKED_TOOLS` whitelist, and no event-type mapping.
+- **Shim delegation**: The slimmed `index.ts` forwards the raw event (with an injected `session_id`) to `scryrs hook pi --file <tmp>` and persists.
+- **Fail-open**: A non-zero `scryrs hook pi` invocation does not throw or alter the agent-visible tool result.
+- **No translation in TypeScript**: `index.ts` contains no `scryrs record` call, no `TRACKED_TOOLS` whitelist, and no event-type mapping.
 
-#### `installed-hook-e2e.mjs`
+### `installed-hook-e2e.mjs`
 
-Runs `scryrs init --agent claude-code` and `scryrs init --agent pi` in temporary
-consumer directories and proves the installed artifacts capture events.
+Runs `scryrs init --agent claude-code` and `scryrs init --agent pi` in temporary consumer directories and proves the installed artifacts capture events.
 
-**What it proves:**
+### `live-hotspots-e2e.mjs`
 
-- **Claude Code**: `init` create-or-merges `.claude/settings.json` with the
-  native `scryrs hook claude-code` command hook (no `.mjs`, no `.claude/hooks`).
-  Piping a `PreToolUse` payload to the native command persists an event,
-  confirmed via `scryrs hotspots .` (`analyzedEventCount >= 1`). Next-step text
-  references the native command and never a `.mjs` file.
-- **Pi**: `init` installs the slimmed `index.ts` at
-  `.pi/extensions/pi-trace/index.ts`. The fixture transpiles it via `tsx`,
-  exercises it with a simulated `tool_result`, proves it invokes
-  `scryrs hook pi --file`, and confirms persistence via `scryrs hotspots .`.
+Starts a fresh `scryrs server`, waits for readiness through the live hotspot query API, submits deterministic remote `scryrs record --file` batches from two agent identities, then verifies cumulative hotspot state, duplicate replay, and signal replay/resume through the shipped binary.
 
-#### `live-hotspots-e2e.mjs`
+### `core-artifact-loop-e2e.sh`
 
-Starts a fresh `scryrs server`, waits for readiness through the live hotspot
-query API, submits deterministic remote `scryrs record --file` batches from two
-agent identities, then verifies cumulative hotspot state, duplicate replay, and
-signal replay/resume through the shipped binary.
-
-**What it proves:**
-
-- **Multi-agent cumulative ingest**: two explicit agents contribute to one
-  overlapping `EditMade` hotspot on the shared server-owned SQLite store.
-- **Threshold crossing**: the shared hotspot crosses the default threshold of
-  `10` without changing server flags.
-- **Duplicate idempotency**: re-submitting the same producer file is
-  acknowledged as duplicate/idempotent and does not change cumulative hotspot
-  score, counts, session count, evidence row IDs, or persisted signal history.
-- **SSE replay/resume**: `GET /v1/repositories/{repository_id}/signals?after=0`
-  replays persisted signals in ascending ID order, and reconnecting with
-  `after=<last_seen_id>` does not replay already-seen signal IDs.
-- **Loud failure behavior**: startup, transport, parsing, assertion, and timeout
-  failures all surface as non-zero verification failures.
-
-### Libraries
-
-#### `lib/assert.mjs`
-
-| Function | Description |
-|---|---|
-| `pass(name)` | Record a passing assertion |
-| `fail(name, reason?)` | Record a failing assertion |
-| `assert(condition, name)` | Condition-based assertion |
-| `assertDeepEqual(actual, expected, name)` | Deep-equal JSON comparison |
-| `summary()` | Print pass/fail counts and exit non-zero on failures |
-| `counts()` | Return `{ passed, failed }` for aggregation |
-| `reset()` | Reset pass/fail counters |
-
-#### `lib/db.mjs`
-
-| Function | Description |
-|---|---|
-| `readEventsDb(path)` | Read all events from a `.scryrs/scryrs.db` SQLite datastore |
-| `assertEventShape(event, type, toolName?)` | Validate canonical `TraceEvent` envelope |
-
-#### `lib/pi-shim-driver.mjs`
-
-Run under `tsx`. Loads a Pi `index.ts` shim, exercises it with a mock Pi runtime
-(`on` + `exec`), and prints captured `exec` calls as JSON. Used by the Pi
-fixtures to verify delegation and fail-open without a real Pi runtime.
+Creates a temporary repository, records deterministic local trace events, materializes hotspots/graph/routes/proposals, accepts one proposal, and asserts the expected artifact directories and files exist.
 
 ## Usage
 
-### Run hook-capture verification
+### Run the authoritative production suite
+
+```bash
+scripts/verify-production-suite
+```
+
+### Run the heavy wrapper from the precommit entrypoint
+
+```bash
+scripts/precommit-run --production
+```
+
+### Run individual lanes
 
 ```bash
 scripts/verify-trace-capture
+scripts/verify-live-hotspots
+scripts/verify-core-artifact-loop
+scripts/verify-privacy-defaults
+scripts/verify-docs-publish
+scripts/security
+scripts/verify-install
 ```
 
 ### Run a specific hook harness
 
 ```bash
-scripts/verify-trace-capture --claude-only   # Claude Code fixture only
-scripts/verify-trace-capture --pi-only       # Pi fixture + installed-hook (pi)
-scripts/verify-trace-capture --init-only     # Installed-hook fixture only
+scripts/verify-trace-capture --claude-only
+scripts/verify-trace-capture --pi-only
+scripts/verify-trace-capture --init-only
 ```
 
-### Run live hotspot verification
+### Run the diagnostic command directly
 
 ```bash
-scripts/verify-live-hotspots
+scryrs doctor
+scryrs doctor --json
 ```
 
-This suite is intended to start as a standalone/nightly verification path, not
-as a default PR-gate lane.
+## Live dashboard manual smoke boundary
 
-### Live dashboard smoke path
+Automated production gating intentionally stops at the live server contract. **Live dashboard browser verification is still manual in this change.** After `scripts/verify-live-hotspots` passes, smoke-test the dashboard separately:
 
-After `scripts/verify-live-hotspots` passes, you can smoke-test the live
-dashboard against the same server contract:
-
-1. Start `scryrs server` and ingest a deterministic fixture (the
-   `live-hotspots-e2e.mjs` script is the reference fixture for producing replayable
-   hotspot signals).
+1. Start `scryrs server` and ingest the deterministic fixture used by `live-hotspots-e2e.mjs`.
 2. Start the dashboard in live mode:
 
 ```bash
@@ -213,10 +195,6 @@ curl http://127.0.0.1:8080/api/meta
 curl http://127.0.0.1:8080/api/hotspots
 ```
 
-   `GET /api/meta` must report `"mode":"live"` and the configured
-   `repositoryId`; `GET /api/hotspots` must return the live server ranking
-   payload rather than local `.scryrs/hotspots.json` wording.
-
 1. Verify signal replay and resume through the dashboard-owned SSE proxy:
 
 ```bash
@@ -224,55 +202,89 @@ curl -N http://127.0.0.1:8080/api/signals?after=0
 curl -N http://127.0.0.1:8080/api/signals?after=<last_seen_signal_id>
 ```
 
-   The first connection should replay persisted signals in ascending `id` order.
-   Reconnecting with `after=<last_seen_signal_id>` must skip already-seen ids and
-   continue with only newer signals. In the browser UI, the Signals route should
-   surface connecting / connected / reconnecting / error state explicitly.
+`GET /api/meta` must report `"mode":"live"` and the configured `repositoryId`; `GET /api/hotspots` must return the live server ranking payload; reconnecting to `/api/signals` with `after=<last_seen_signal_id>` must skip already-seen ids.
 
-### Run a single fixture directly (for debugging)
+## Privacy proving map
+
+| Boundary | Proving lane |
+| --- | --- |
+| Telemetry opt-in default | `scripts/verify-privacy-defaults` (`scryrs-telemetry` compiled tests) |
+| Prompt/source/path redaction defaults | `scripts/verify-privacy-defaults` |
+| Remote prompt-storage default off | `scripts/verify-privacy-defaults` |
+| Debug-gated Bash capture | `scripts/test --full` and `scripts/verify-trace-capture` |
+| Fail-open hook behavior | `scripts/verify-trace-capture` |
+| Remote mode no dual-write / no local fallback | `scripts/test --full` plus `scripts/verify-live-hotspots` |
+| Dependency policy | `scripts/security` |
+
+## Runtime prerequisites and posture
+
+- **Docker or DinD is required** for every automated lane here.
+- **No host Rust or Node.js is required** for the automated wrappers; they run through Docker-backed scripts.
+- **The production suite is intentionally slower than the default PR gate.** Use it explicitly for release hardening, not every edit loop.
+- **Live verification is automated only at the server/API layer.** Browser/dashboard verification remains manual.
+
+## Linux vs macOS verification posture
+
+### Automated posture
+
+Current automated verification runs in Linux Docker or DinD environments. That proves the Linux build, Linux install path, and Linux containerized verification behavior only.
+
+### Exact macOS manual maintainer commands
+
+Run these on a real macOS machine when you need **native Darwin** confidence for the installed binary:
 
 ```bash
-# Build scryrs first, then install hook-fixture deps when needed.
-cargo build --release
-npm install better-sqlite3 tsx
+scripts/install --bin-dir "$HOME/.local/bin"
+SCRYRS_BIN="$HOME/.local/bin/scryrs"
+MACOS_FIXTURE_ROOT="$(mktemp -d)"
+REPO_ROOT="$MACOS_FIXTURE_ROOT/repo"
+mkdir -p "$REPO_ROOT"
+cd "$REPO_ROOT"
 
-SCRYRS_BIN="$PWD/target/release/scryrs" node scripts/verification/claude-code-e2e.mjs
-SCRYRS_BIN="$PWD/target/release/scryrs" node scripts/verification/pi-hook-e2e.mjs
-SCRYRS_BIN="$PWD/target/release/scryrs" node scripts/verification/installed-hook-e2e.mjs
-SCRYRS_BIN="$PWD/target/release/scryrs" node scripts/verification/live-hotspots-e2e.mjs
+"$SCRYRS_BIN" --version
+"$SCRYRS_BIN" init --agent claude-code
+"$SCRYRS_BIN" doctor --json
+
+cat > events.jsonl <<'JSONL'
+{"schema_version":"0.1.0","timestamp":"2026-06-29T12:00:00Z","session_id":"macos-manual-1","event_type":"FileOpened","tool_name":"read","payload":{"type":"FileOpened","path":"src/auth.ts"},"outcome":{"result":"Success"}}
+{"schema_version":"0.1.0","timestamp":"2026-06-29T12:00:01Z","session_id":"macos-manual-1","event_type":"SearchRun","tool_name":"grep","payload":{"type":"SearchRun","query":"auth"},"outcome":{"result":"Success"}}
+JSONL
+
+"$SCRYRS_BIN" record --file events.jsonl
+"$SCRYRS_BIN" hotspots .
+"$SCRYRS_BIN" graph .
+"$SCRYRS_BIN" route .
+"$SCRYRS_BIN" propose .
+proposal_path="$(printf '%s\n' .scryrs/proposals/*.json | sort | head -n 1)"
+proposal_id="$(basename "$proposal_path" .json)"
+"$SCRYRS_BIN" proposals accept . "$proposal_id" --reviewer macos-manual --rationale "manual verification" --decided-at "2026-06-29T12:00:00Z"
+test -f ".scryrs/accepted/$proposal_id.json"
 ```
+
+If you also want the existing **Docker-backed** server-contract checks while on macOS, run them separately:
+
+```bash
+scripts/verify-trace-capture --claude-only
+scripts/verify-live-hotspots
+```
+
+Those commands still prove the Linux-container verification lanes, not the native Darwin packaging path. For the manual live dashboard smoke on macOS, use the commands from the "Live dashboard manual smoke boundary" section above with the installed binary.
+
+**Limitation:** the current Linux Docker automation does **not** prove native Darwin behavior. Do not claim automated macOS coverage unless a real macOS runner is added.
 
 ## Debug mode notes
 
-`SCRYRS_DEBUG` is opt-in and intended for development only. When set to a
-non-empty value it enables `Bash`/`bash` capture and bounded `[scryrs-hook]`
-and `[scryrs]` breadcrumbs on stderr. Keep it off in normal runs.
+`SCRYRS_DEBUG` is opt-in and intended for development only. When set to a non-empty value it enables `Bash`/`bash` capture and bounded `[scryrs-hook]` and `[scryrs]` breadcrumbs on stderr. Keep it off in normal runs.
 
-## Docker Image Compatibility
+## Docker image compatibility
 
-The verification entrypoint uses `node:22` (Debian-based, glibc) for running
-fixtures because the `scryrs` binary is compiled on `rust:1.85.0` (also glibc).
-Alpine-based Node images (musl libc) cannot run glibc-compiled binaries.
+- The hook and live-workflow fixtures use `node:22` (Debian/glibc) because the `scryrs` binary is compiled on `rust:1.85.0` (also glibc).
+- Alpine-based Node images (musl libc) cannot run the glibc-compiled binary.
+- Override the fixture image when needed with `FIXTURE_NODE_IMAGE=node:24 scripts/verify-trace-capture` or `FIXTURE_NODE_IMAGE=node:24 scripts/verify-live-hotspots`.
 
-Override the fixture image with:
+## Relationship to other tests
 
-```bash
-FIXTURE_NODE_IMAGE=node:24 scripts/verify-trace-capture
-FIXTURE_NODE_IMAGE=node:24 scripts/verify-live-hotspots
-```
-
-## Relationship to Other Tests
-
-- `cargo test` (unit + `hook_tests.rs`) — fast, in-process coverage of the
-  adapters and the `scryrs hook` command, including fail-open, plus live-server
-  unit/integration coverage for ingest, accumulators, idempotency, and SSE.
-  No Docker needed.
-- `scripts/verify-trace-capture` — authoritative end-to-end proof that the
-  native `scryrs hook` integration feeds real scryrs persistence. May be wired
-  into `scripts/precommit-run` via `--with-trace-verify`.
-- `scripts/verify-live-hotspots` — authoritative end-to-end proof of the real
-  multi-agent live workflow through the shipped binary. It proves live ingest,
-  duplicate replay, and SSE replay/resume; pair it with the documented live
-  dashboard smoke path above when you need to validate `/api/hotspots` and
-  `/api/signals` through `scryrs dashboard --server-url ... --repository-id ...`.
-  Initial CI posture is standalone/nightly rather than PR-gated by default.
+- `cargo test` (via `scripts/test`) — fast unit and integration coverage.
+- `scripts/check` — format, frontend check, workspace check, clippy, and docs publish verification.
+- `scripts/test --full` — Rust tests plus the lighter Claude-only `scripts/hook-test` wrapper lane.
+- `scripts/verify-production-suite` — authoritative composed release gate.

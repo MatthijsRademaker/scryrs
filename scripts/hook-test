@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Claude Code-only hook capture verification wrapper.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+"$ROOT/scripts/verify-trace-capture" --claude-only

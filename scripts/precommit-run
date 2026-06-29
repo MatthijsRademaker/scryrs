@@ -4,11 +4,13 @@
 # Works on swarm worker agents via DinD.
 #
 # Usage:
-#   scripts/precommit-run                     # standard checks (lint + test)
-#   scripts/precommit-run --with-trace-verify # also run cross-harness trace verification
+#   scripts/precommit-run                      # standard checks (lint + test)
+#   scripts/precommit-run --with-trace-verify  # also run cross-harness trace verification
+#   scripts/precommit-run --production         # run the full production verification suite
 set -euo pipefail
 
 WITH_TRACE=false
+PRODUCTION=false
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -16,15 +18,28 @@ while [[ $# -gt 0 ]]; do
 			WITH_TRACE=true
 			shift
 			;;
+		--production)
+			PRODUCTION=true
+			shift
+			;;
 		*)
 			echo "ERROR: unknown flag: $1" >&2
-			echo "Usage: scripts/precommit-run [--with-trace-verify]" >&2
+			echo "Usage: scripts/precommit-run [--with-trace-verify|--production]" >&2
 			exit 2
 			;;
 	esac
 done
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+if $PRODUCTION; then
+	if $WITH_TRACE; then
+		echo "ERROR: --production cannot be combined with --with-trace-verify" >&2
+		exit 2
+	fi
+	"$ROOT/scripts/verify-production-suite"
+	exit 0
+fi
 
 # Standard checks (lint + test)
 "$ROOT/scripts/check"

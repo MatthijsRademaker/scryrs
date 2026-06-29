@@ -3,6 +3,7 @@ use std::io::{self, Read, Write};
 use clap::{Arg, ArgAction, Command};
 
 use crate::dashboard::{execute_dashboard, write_dashboard_help};
+use crate::doctor::execute_doctor_cli;
 use crate::graph::write_graph_json;
 use crate::help_json::write_cli_surface;
 use crate::help_text::write_help;
@@ -65,6 +66,10 @@ where
         return execute_proposals_cli(&mut out, &mut err, &args[1..]);
     }
 
+    if !args.is_empty() && args[0] == "doctor" {
+        return execute_doctor_cli(&mut out, &mut err, &args[1..]);
+    }
+
     if args.len() >= 2 && args[0] == "route" && args[1] == "explain" {
         return crate::route_explain::execute_route_explain(&mut out, &mut err, &args[2..]);
     }
@@ -80,6 +85,7 @@ where
             && first != "init"
             && first != "dashboard"
             && first != "server"
+            && first != "doctor"
             && first != "graph"
             && first != "route"
             && first != "propose"
@@ -107,6 +113,7 @@ where
             || args[0] == "init"
             || args[0] == "dashboard"
             || args[0] == "server"
+            || args[0] == "doctor"
             || args[0] == "graph"
             || args[0] == "route"
             || args[0] == "propose")

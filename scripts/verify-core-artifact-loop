@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Deterministic end-to-end verification for the local artifact loop:
+# record -> hotspots -> graph -> route -> propose -> proposals accept.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/lib/docker-verification.sh"
+
+step "Building scryrs binary (cargo build --release)"
+run_rust bash -c 'cargo build --release && mkdir -p /workspace/.docker-fixtures && cp /workspace/target/release/scryrs /workspace/.docker-fixtures/scryrs'
+
+SCRYRS_BIN="$ROOT/.docker-fixtures/scryrs"
+if [[ ! -x "$SCRYRS_BIN" ]]; then
+	echo "ERROR: scryrs binary not found at $SCRYRS_BIN after build" >&2
+	exit 1
+fi
+
+step "Running deterministic core artifact loop fixture"
+run_rust bash /workspace/scripts/verification/core-artifact-loop-e2e.sh /workspace/.docker-fixtures/scryrs
+
+echo "[verify-core-artifact-loop] PASSED" >&2

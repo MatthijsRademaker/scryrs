@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Authoritative headless production-readiness verification suite.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+run_lane() {
+	local lane_name="$1"
+	shift
+	echo ""
+	echo "============================================"
+	echo "Production lane: $lane_name"
+	echo "============================================"
+	"$@"
+}
+
+run_lane "scripts/check" "$ROOT/scripts/check"
+run_lane "scripts/test --full" "$ROOT/scripts/test" --full
+run_lane "scripts/security" "$ROOT/scripts/security"
+run_lane "scripts/verify-install" "$ROOT/scripts/verify-install"
+run_lane "scripts/verify-trace-capture" "$ROOT/scripts/verify-trace-capture"
+run_lane "scripts/verify-live-hotspots" "$ROOT/scripts/verify-live-hotspots"
+run_lane "scripts/verify-core-artifact-loop" "$ROOT/scripts/verify-core-artifact-loop"
+run_lane "scripts/verify-privacy-defaults" "$ROOT/scripts/verify-privacy-defaults"
+run_lane "scripts/verify-docs-publish" "$ROOT/scripts/verify-docs-publish"
+
+echo ""
+echo "============================================"
+echo "Production suite completed"
+echo "============================================"

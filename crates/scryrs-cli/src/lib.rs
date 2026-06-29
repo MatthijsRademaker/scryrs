@@ -2,6 +2,7 @@
 //! `scryrs init --agent <NAME>`, and `scryrs dashboard`.
 
 mod dashboard;
+mod doctor;
 mod init;
 mod server;
 

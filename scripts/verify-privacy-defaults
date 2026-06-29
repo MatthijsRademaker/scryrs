@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Runnable privacy assertion lane for compiled telemetry/privacy defaults.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/lib/docker-verification.sh"
+
+step "cargo test -p scryrs-telemetry --locked"
+run_rust cargo test -p scryrs-telemetry --locked
+
+echo "[verify-privacy-defaults] PASSED" >&2

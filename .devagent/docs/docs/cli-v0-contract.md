@@ -12,7 +12,7 @@ For hotspot interpretation and scoring rationale, see [Hotspots](./hotspots.md).
 
 ---
 
-The current public CLI surface provides ten implemented root commands: `hotspots`, `record`, `hook`, `init`, `graph`, `route`, `propose`, `proposals`, `dashboard`, and `server`. This document serves agent integrators and follow-up feature developers.
+The current public CLI surface provides eleven implemented root commands: `hotspots`, `record`, `hook`, `init`, `doctor`, `graph`, `route`, `propose`, `proposals`, `dashboard`, and `server`. This document serves agent integrators and follow-up feature developers.
 
 ## Binary
 
@@ -386,7 +386,7 @@ Reviews inbox proposal artifacts without mutating the inbox file itself.
 - `accept` copies proposal `targetType`, `proposedContent`, and `evidence` into the accepted `ProposalReviewDecision`.
 - `reject` copies only proposal `evidence`; rejected decisions omit `targetType` and `acceptedContent`.
 - Review commands never mutate `.scryrs/proposals/{proposalId}.json`, `.devagent/docs/`, `.scryrs/graph.json`, or `.scryrs/routes.json`.
-- `--help-json` represents `proposals` as a grouped command with nested `list`, `accept`, and `reject` subcommands. `surfaceVersion` is now `0.9.0`.
+- `--help-json` represents `proposals` as a grouped command with nested `list`, `accept`, and `reject` subcommands. `surfaceVersion` is now `0.11.0`.
 
 ### `scryrs init --agent <NAME>`
 
@@ -410,6 +410,71 @@ Install the scryrs trace hook for a supported agent harness into the current wor
 **Collision behavior:** For `claude-code`, the installer merges into an existing `.claude/settings.json` — preserving unrelated keys and existing hooks, idempotent on re-run (the hook appears exactly once). For `pi`, if the target file already exists the installer exits 2 with remediation instructions rather than overwriting.
 
 **Self-install guard:** The installer refuses to run inside the scryrs source repository (detected via dual-marker heuristic).
+
+### `scryrs doctor [--json]`
+
+Diagnose the current installation and readiness state for the working directory. The command uses the same local-vs-live resolution logic as `scryrs record`, never silently falls back from live to local, and reports findings with three severities: `ok`, `warn`, and `error`.
+
+| Field | Value |
+|-------|-------|
+| Input | No required arguments. Optional `--json` flag for machine-readable output. |
+| Output | Human-readable summary on stdout by default, or versioned JSON on stdout when `--json` is used. |
+| Exit 0 | All findings are `ok` or `warn` |
+| Exit 1 | Output write or serialization failure |
+| Exit 2 | One or more structural `error` findings were reported |
+
+**Minimum diagnostic categories:**
+
+- binary version
+- shipped command surface / feature availability
+- resolved mode (`local` or `live`)
+- local store status
+- Claude Code hook status
+- Pi hook status
+- live server reachability when live mode is configured
+- docs links
+
+**Severity policy:**
+
+- `ok` — the checked surface is usable as configured
+- `warn` — advisory condition only (for example: no initialized local store yet, or an optional hook is absent)
+- `error` — structural problem that makes the diagnosed setup non-operational (for example: malformed `scryrs.json`, unreadable local store, incomplete live identity, or unreachable configured live server)
+
+**JSON output shape:**
+
+```json
+{
+  "schemaVersion": "1.0.0",
+  "command": "doctor",
+  "version": "0.1.0",
+  "mode": "local",
+  "overallStatus": "warn",
+  "commandSurface": {
+    "commands": ["hotspots", "record", "hook", "init", "doctor", "graph", "route", "propose", "proposals", "dashboard", "server"],
+    "features": ["core", "dashboard", "graph", "curator", "markdown", "runtime", "guardrails", "server"]
+  },
+  "findings": [
+    {
+      "category": "local_store",
+      "status": "warn",
+      "summary": "local store is not initialized at /repo/.scryrs/scryrs.db; run `scryrs init --agent <NAME>` or capture events first"
+    }
+  ],
+  "docsLinks": [
+    {
+      "label": "CLI Reference",
+      "path": ".devagent/docs/docs/cli-v0-contract.md"
+    }
+  ]
+}
+```
+
+**Behavior notes:**
+
+- Missing or empty local state is advisory in local mode and does not fail the command.
+- Live mode with missing `repository_id`, `workspace_id`, or `agent_id` is a structural error and exits 2.
+- Live mode probes `GET /v1/repositories/{repository_id}/hotspots?window=cumulative` against the configured ingest server to verify reachability.
+- The default human-readable output and `--json` mode cover the same diagnostic categories.
 
 ### `scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]`
 
@@ -619,9 +684,9 @@ Agents should check `surfaceVersion` before parsing to detect format changes. Th
 
 | Code | Meaning |
 |------|---------|
-| 0 | Hotspots, graph, route, and route-explain artifacts written successfully (route explain includes zero-match results); proposals written successfully; record local accepted all events; record remote accepted all events (duplicates non-fatal); init installed hook; dashboard/server shut down cleanly; hook always fail-open; help/version/surface display. |
-| 1 | Hotspots/graph/route stdout or artifact write failure; record rejected one or more events or hit output I/O error; propose validation, directory creation, serialization, or file write failure; init I/O error; dashboard/server startup or runtime I/O failure. |
-| 2 | Usage error. Also: hotspots missing/corrupt store; graph missing/malformed hotspots input; route missing/malformed/schema-mismatched graph input; route explain missing PATH, missing --query, or missing/malformed/schema-mismatched routes.json; propose missing/malformed hotspot or graph input; record local fatal I/O error; record remote identity/transport failure; init unsupported harness or collision; dashboard invalid flags, invalid bind address, or partial live-mode configuration; server invalid port/bind/store or feature not compiled. |
+| 0 | Hotspots, graph, route, and route-explain artifacts written successfully (route explain includes zero-match results); proposals written successfully; record local accepted all events; record remote accepted all events (duplicates non-fatal); init installed hook; doctor reported only `ok`/`warn` findings; dashboard/server shut down cleanly; hook always fail-open; help/version/surface display. |
+| 1 | Hotspots/graph/route stdout or artifact write failure; record rejected one or more events or hit output I/O error; propose validation, directory creation, serialization, or file write failure; init I/O error; doctor output write or serialization failure; dashboard/server startup or runtime I/O failure. |
+| 2 | Usage error. Also: hotspots missing/corrupt store; graph missing/malformed hotspots input; route missing/malformed/schema-mismatched graph input; route explain missing PATH, missing --query, or missing/malformed/schema-mismatched routes.json; propose missing/malformed hotspot or graph input; record local fatal I/O error; record remote identity/transport failure; init unsupported harness or collision; doctor structural error findings (malformed config, unreadable store, unusable configured live mode, unreachable live server); dashboard invalid flags, invalid bind address, or partial live-mode configuration; server invalid port/bind/store or feature not compiled. |
 
 All error messages and human-facing diagnostics are written to stderr.
 
@@ -720,6 +785,25 @@ All error messages and human-facing diagnostics are written to stderr.
 - Exit 1: Serialization or filesystem write failure.
 - Exit 2: Invalid filter, invalid proposal/review artifact, unknown proposal ID, conflicting opposite-outcome artifact, or same-outcome rerun with different bytes.
 
+### Doctor command
+
+**When to call:** An agent or maintainer should call `scryrs doctor` when they need one installed-user diagnosis path for the current workspace: what binary is running, which commands/features are shipped, whether the workspace resolves to local or live mode, whether local state is usable, whether harness hooks are installed, whether the configured live server is reachable, and where the relevant operator docs live.
+
+**Input:** No required arguments. Optional `--json` flag for machine-readable output.
+
+**Output:**
+
+- Default: human-readable summary on stdout.
+- `--json`: machine-readable report with `schemaVersion`, `command`, `version`, `mode`, `overallStatus`, `commandSurface`, `findings`, and `docsLinks`.
+
+**Exit codes:**
+
+- Exit 0: all findings are `ok` or `warn`.
+- Exit 1: serialization or stdout write failure.
+- Exit 2: one or more structural `error` findings.
+
+**Structural error examples:** malformed `scryrs.json`, unreadable or unsupported `.scryrs/scryrs.db`, incomplete live-mode identity, or unreachable configured live ingest server.
+
 ### Dashboard command
 
 **When to call:** An agent should call `scryrs dashboard` when it needs a same-origin browser surface over either local `.scryrs/` artifacts or live hotspot state from `scryrs server`. The command starts the dashboard HTTP server and opens the SPA in the default browser.
@@ -806,7 +890,7 @@ All error messages and human-facing diagnostics are written to stderr.
 
 ## Out of scope for v0
 
-Any command other than the ten implemented root commands (`hotspots`, `record`, `hook`, `init`, `graph`, `route`, `propose`, `proposals`, `dashboard`, `server`) is unrecognized and exits 2 with a usage error.
+Any command other than the eleven implemented root commands (`hotspots`, `record`, `hook`, `init`, `doctor`, `graph`, `route`, `propose`, `proposals`, `dashboard`, `server`) is unrecognized and exits 2 with a usage error.
 
 ## Local Development Testing
 

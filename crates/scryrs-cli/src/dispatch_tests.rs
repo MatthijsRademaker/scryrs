@@ -368,6 +368,36 @@ fn help_json_output_does_not_contain_placeholder_wording() {
     );
 }
 
+#[test]
+fn doctor_appears_in_help_and_help_json_output() {
+    let mut help_out = Vec::new();
+    let mut json_out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(run_with_writers(["--help"], &mut help_out, &mut err), 0);
+    assert!(err.is_empty());
+    let help = String::from_utf8_lossy(&help_out);
+    assert!(
+        help.contains("scryrs doctor"),
+        "--help must list doctor command, got:\n{help}"
+    );
+    assert!(
+        help.contains("installation and readiness diagnostic command"),
+        "--help must describe doctor as installation/readiness diagnostic, got:\n{help}"
+    );
+
+    assert_eq!(
+        run_with_writers(["--help-json"], &mut json_out, &mut err),
+        0
+    );
+    assert!(err.is_empty());
+    let help_json = String::from_utf8_lossy(&json_out);
+    assert!(
+        help_json.contains("\"name\":\"doctor\""),
+        "--help-json must list doctor command, got:\n{help_json}"
+    );
+}
+
 // --- Dashboard command tests ---
 
 #[test]
@@ -1346,8 +1376,8 @@ fn help_json_contains_grouped_proposals_surface_and_bumped_version() {
     assert!(err.is_empty());
     let json_str = String::from_utf8_lossy(&out);
     assert!(
-        json_str.contains("\"surfaceVersion\":\"0.10.0\""),
-        "--help-json must bump surfaceVersion to 0.10.0, got:\n{json_str}"
+        json_str.contains("\"surfaceVersion\":\"0.11.0\""),
+        "--help-json must bump surfaceVersion to 0.11.0, got:\n{json_str}"
     );
     assert!(
         json_str.contains("\"name\":\"proposals\""),
