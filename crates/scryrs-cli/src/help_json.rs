@@ -244,16 +244,18 @@ pub(crate) fn cli_surface_doc() -> String {
             },
             {
                 "name": "dashboard",
-                "description": "Start local dashboard server and open the browser dashboard",
+                "description": "Start dashboard server and open the browser dashboard",
                 "flags": [
                     {"name": "port", "short": "-p", "long": "--port", "type": "number", "default": 8080, "description": "TCP port to bind"},
                     {"name": "bind", "short": "-b", "long": "--bind", "type": "string", "default": "127.0.0.1", "description": "Bind address"},
+                    {"name": "server-url", "long": "--server-url", "type": "string", "description": "Live-mode scryrs server base URL (requires --repository-id)"},
+                    {"name": "repository-id", "long": "--repository-id", "type": "string", "description": "Live-mode repository identity (requires --server-url)"},
                     {"name": "no-open", "long": "--no-open", "type": "boolean", "default": false, "description": "Do not open browser automatically"},
                     {"name": "dev", "long": "--dev", "type": "boolean", "default": false, "description": "Serve from filesystem instead of embedded assets"}
                 ],
                 "output": {
                     "mimeType": "text/html",
-                    "description": "Vue.js SPA served over HTTP. REST API at GET /api/hotspots, GET /api/sessions, GET /api/sessions/:sessionId, GET /api/events."
+                    "description": "Vue.js SPA served over HTTP. REST API at GET /api/meta, GET /api/hotspots, GET /api/signals (live mode only), GET /api/sessions (local mode only), GET /api/sessions/:sessionId (local mode only), GET /api/events (local mode only)."
                 }
             },
             {
@@ -393,7 +395,7 @@ pub(crate) fn cli_surface_doc() -> String {
         "exitCodes": {
             "0": "Success (hotspots: JSON written, including empty entries; record local: all events accepted; record remote: no rejections or failures; init: hook installed; propose/proposals: artifacts written or listed successfully; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)",
             "1": "Hotspots: storage error. Record: one or more events rejected (local or server), or I/O error writing output. Init: I/O error. Proposals: serialization or filesystem write failure. Dashboard: port in use or artifact read error. Server: port in use or store error.",
-            "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, self-install refusal, invalid mode, or missing/invalid live-mode configuration; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; dashboard: invalid flags; server: invalid flags or bind failure."
+            "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, self-install refusal, invalid mode, or missing/invalid live-mode configuration; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; dashboard: invalid flags or partial live-mode configuration; server: invalid flags or bind failure."
         }
     });
     serde_json::to_string(&doc).unwrap_or_else(|_| "{}".into())

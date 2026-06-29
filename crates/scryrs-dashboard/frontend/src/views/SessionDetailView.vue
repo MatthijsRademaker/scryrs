@@ -2,6 +2,7 @@
 import { computed, onMounted } from "vue";
 import { useRoute } from "vue-router";
 import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, ConstellationGraph, EmptyState, EventSparkline } from "@/shared/ui";
+import { routeUnavailableMessage } from "@/shared/lib/dashboard-mode";
 import { useSessionStore } from "@/stores/sessions";
 import { useMetaStore } from "@/stores/meta";
 import { colorForKey } from "@/shared/lib/viz";
@@ -17,6 +18,7 @@ function subjectDisplay(event: TraceEventItem) {
 }
 const sessionId = computed(() => String(route.params.sessionId));
 const shortId = computed(() => (sessionId.value.length > 18 ? `${sessionId.value.slice(0, 18)}…` : sessionId.value));
+const unavailableMessage = computed(() => routeUnavailableMessage("session-detail", meta.mode));
 
 const eventTypeCounts = computed(() => {
   const counts: Record<string, number> = {};
@@ -29,7 +31,6 @@ const constellationNodes = computed(() =>
   Object.entries(eventTypeCounts.value).map(([type, count]) => ({ id: type, label: type, weight: count })),
 );
 
-// Real activity series: bucket event timestamps across the session's span.
 const sparkValues = computed(() => {
   const times = (store.detail?.events ?? [])
     .map((event) => Date.parse(event.timestamp))
@@ -47,7 +48,12 @@ const sparkValues = computed(() => {
   return out;
 });
 
-onMounted(() => { void store.loadSession(sessionId.value); void meta.ensureLoaded(); });
+onMounted(async () => {
+  await meta.ensureLoaded();
+  if (!meta.isLiveMode) {
+    void store.loadSession(sessionId.value);
+  }
+});
 function payloadPreview(payload: unknown) { return JSON.stringify(payload)?.slice(0, 200) ?? "null"; }
 </script>
 <template>
@@ -57,12 +63,15 @@ function payloadPreview(payload: unknown) { return JSON.stringify(payload)?.slic
       <p class="text-sm text-muted-foreground">Event timeline and payload preview.</p>
     </header>
 
-    <Card v-if="store.error">
+    <Card v-if="unavailableMessage">
+      <CardContent class="p-6"><EmptyState title="Unavailable in live mode" :description="unavailableMessage" /></CardContent>
+    </Card>
+
+    <Card v-else-if="store.error">
       <CardContent class="p-6"><EmptyState title="Session unavailable" :description="store.error" /></CardContent>
     </Card>
 
     <template v-else-if="store.detail">
-      <!-- Glass stat tiles -->
       <section class="grid gap-4 md:grid-cols-3">
         <div class="glass-surface rounded-xl p-4">
           <div class="text-sm text-muted-foreground">Started</div>
@@ -86,7 +95,6 @@ function payloadPreview(payload: unknown) { return JSON.stringify(payload)?.slic
         </div>
       </section>
 
-      <!-- Constellation of related event types -->
       <Card v-if="constellationNodes.length">
         <CardHeader><CardTitle>Event Constellation</CardTitle><CardDescription>Event types captured in this session; node glow scales with volume.</CardDescription></CardHeader>
         <CardContent>

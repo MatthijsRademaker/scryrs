@@ -7,7 +7,12 @@ fn help_flag_prints_help_and_exits_0() {
 
     assert_eq!(run_with_writers(["--help"], &mut out, &mut err), 0);
     assert!(err.is_empty());
-    insta::assert_snapshot!(String::from_utf8_lossy(&out));
+    let help = String::from_utf8_lossy(&out);
+    assert!(
+        help.contains("partial live-mode configuration"),
+        "--help must document dashboard partial live-mode configuration exit 2, got:\n{help}"
+    );
+    insta::assert_snapshot!(help);
 }
 
 #[test]
@@ -376,11 +381,34 @@ fn dashboard_help_exits_0_and_lists_flags() {
     );
     assert!(err.is_empty());
     let help = String::from_utf8_lossy(&out);
-    assert!(help.contains("start local dashboard server"));
+    assert!(help.contains("start dashboard server"));
     assert!(help.contains("--port <PORT>"));
     assert!(help.contains("--bind <ADDR>"));
+    assert!(help.contains("--server-url <URL>"));
+    assert!(help.contains("--repository-id <ID>"));
     assert!(help.contains("--no-open"));
     assert!(help.contains("--dev"));
+}
+
+#[test]
+fn dashboard_partial_live_configuration_exits_2() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(
+            ["dashboard", "--server-url", "http://localhost:8081"],
+            &mut out,
+            &mut err,
+        ),
+        2
+    );
+    assert!(out.is_empty());
+    let err_str = String::from_utf8_lossy(&err);
+    assert!(
+        err_str.contains("both --server-url and --repository-id are required for live mode"),
+        "dashboard partial live config must fail loudly, got: {err_str}"
+    );
 }
 
 #[test]

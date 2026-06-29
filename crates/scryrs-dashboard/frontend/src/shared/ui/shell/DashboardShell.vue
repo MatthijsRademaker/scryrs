@@ -1,27 +1,45 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import { IconActivity, IconFlame, IconInfo, IconListTree } from "@/shared/ui";
-
-const navItems = [
-  { to: "/", label: "Hotspots", icon: IconFlame, match: ["hotspots", "subject-detail"] },
-  { to: "/sessions", label: "Sessions", icon: IconListTree, match: ["sessions", "session-detail"] },
-  { to: "/events", label: "Events", icon: IconActivity, match: ["events"] },
-  { to: "/about", label: "About", icon: IconInfo, match: ["about"] },
-];
+import { navigationForMode } from "@/shared/lib/dashboard-mode";
+import { useMetaStore } from "@/stores/meta";
 
 const route = useRoute();
+const meta = useMetaStore();
+const navItems = computed(() => navigationForMode(meta.mode));
 const isActive = (match: string[]) => match.includes(String(route.name));
 
-// Graceful degradation: if the brand asset is missing/fails, fall back to a wordmark.
 const logoFailed = ref(false);
 const logoSrc = "/brand/logo.png";
-const activeLabel = computed(() => navItems.find((item) => isActive(item.match))?.label ?? "");
+const activeLabel = computed(() => navItems.value.find((item) => isActive(item.match))?.label ?? "");
+const footerCopy = computed(() => {
+  if (meta.mode === "live") {
+    return `Live dashboard proxy${meta.repositoryId ? ` for ${meta.repositoryId}` : ""}.`;
+  }
+  return "Local dashboard viewer for .scryrs artifacts.";
+});
+
+function iconFor(name: "flame" | "activity" | "tree" | "info") {
+  switch (name) {
+    case "flame":
+      return IconFlame;
+    case "activity":
+      return IconActivity;
+    case "tree":
+      return IconListTree;
+    case "info":
+      return IconInfo;
+  }
+}
+
+onMounted(() => {
+  void meta.ensureLoaded();
+});
 </script>
 
 <template>
   <div class="relative min-h-screen bg-background text-foreground">
-    <!-- Single ambient aurora/lens glow behind all content -->
     <div class="pointer-events-none fixed inset-0 -z-10 aurora"></div>
 
     <aside class="glass-surface fixed inset-y-0 left-0 z-20 hidden w-64 flex-col rounded-none border-y-0 border-l-0 text-sidebar-foreground md:flex">
@@ -40,7 +58,7 @@ const activeLabel = computed(() => navItems.find((item) => isActive(item.match))
           </div>
         </RouterLink>
         <p class="mt-3 text-center text-[0.7rem] font-medium uppercase tracking-[0.25em] text-muted-foreground">
-          Trace Dashboard
+          {{ meta.mode === "live" ? "Live Dashboard" : "Trace Dashboard" }}
         </p>
       </div>
 
@@ -61,7 +79,7 @@ const activeLabel = computed(() => navItems.find((item) => isActive(item.match))
             class="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-primary shadow-[0_0_10px_2px_var(--glow-accent)]"
           ></span>
           <component
-            :is="item.icon"
+            :is="iconFor(item.icon)"
             class="size-4 shrink-0"
             :class="isActive(item.match) ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground'"
           />
@@ -70,7 +88,7 @@ const activeLabel = computed(() => navItems.find((item) => isActive(item.match))
       </nav>
 
       <div class="border-t border-border p-4 text-xs text-muted-foreground">
-        Local-only viewer for .scryrs artifacts.
+        {{ footerCopy }}
       </div>
     </aside>
 

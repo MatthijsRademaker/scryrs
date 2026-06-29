@@ -192,6 +192,43 @@ scripts/verify-live-hotspots
 This suite is intended to start as a standalone/nightly verification path, not
 as a default PR-gate lane.
 
+### Live dashboard smoke path
+
+After `scripts/verify-live-hotspots` passes, you can smoke-test the live
+dashboard against the same server contract:
+
+1. Start `scryrs server` and ingest a deterministic fixture (the
+   `live-hotspots-e2e.mjs` script is the reference fixture for producing replayable
+   hotspot signals).
+2. Start the dashboard in live mode:
+
+```bash
+scryrs dashboard --server-url http://127.0.0.1:8081 --repository-id repo-a --no-open
+```
+
+1. Verify rankings proxying:
+
+```bash
+curl http://127.0.0.1:8080/api/meta
+curl http://127.0.0.1:8080/api/hotspots
+```
+
+   `GET /api/meta` must report `"mode":"live"` and the configured
+   `repositoryId`; `GET /api/hotspots` must return the live server ranking
+   payload rather than local `.scryrs/hotspots.json` wording.
+
+1. Verify signal replay and resume through the dashboard-owned SSE proxy:
+
+```bash
+curl -N http://127.0.0.1:8080/api/signals?after=0
+curl -N http://127.0.0.1:8080/api/signals?after=<last_seen_signal_id>
+```
+
+   The first connection should replay persisted signals in ascending `id` order.
+   Reconnecting with `after=<last_seen_signal_id>` must skip already-seen ids and
+   continue with only newer signals. In the browser UI, the Signals route should
+   surface connecting / connected / reconnecting / error state explicitly.
+
 ### Run a single fixture directly (for debugging)
 
 ```bash
@@ -235,6 +272,7 @@ FIXTURE_NODE_IMAGE=node:24 scripts/verify-live-hotspots
   into `scripts/precommit-run` via `--with-trace-verify`.
 - `scripts/verify-live-hotspots` — authoritative end-to-end proof of the real
   multi-agent live workflow through the shipped binary. It proves live ingest,
-  duplicate replay, and SSE replay/resume. It does not verify a live dashboard
-  mode; current dashboard smoke remains out of scope for this task. Initial CI
-  posture is standalone/nightly rather than PR-gated by default.
+  duplicate replay, and SSE replay/resume; pair it with the documented live
+  dashboard smoke path above when you need to validate `/api/hotspots` and
+  `/api/signals` through `scryrs dashboard --server-url ... --repository-id ...`.
+  Initial CI posture is standalone/nightly rather than PR-gated by default.

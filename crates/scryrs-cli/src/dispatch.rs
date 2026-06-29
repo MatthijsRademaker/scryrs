@@ -236,7 +236,7 @@ where
         )
         .subcommand(
             Command::new("dashboard")
-                .about("Start local dashboard server")
+                .about("Start dashboard server")
                 .disable_help_flag(true)
                 .disable_version_flag(true)
                 .arg(
@@ -256,6 +256,22 @@ where
                         .num_args(1)
                         .action(ArgAction::Set)
                         .help("Bind address (default 127.0.0.1)"),
+                )
+                .arg(
+                    Arg::new("server-url")
+                        .long("server-url")
+                        .value_name("URL")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Live-mode scryrs server base URL (requires --repository-id)"),
+                )
+                .arg(
+                    Arg::new("repository-id")
+                        .long("repository-id")
+                        .value_name("ID")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Live-mode repository identity (requires --server-url)"),
                 )
                 .arg(
                     Arg::new("no-open")
@@ -493,7 +509,7 @@ where
                 }
                 Some("dashboard") => {
                     if writeln!(err, "scryrs dashboard: missing required argument").is_err()
-                        || writeln!(err, "Usage: scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]").is_err()
+                        || writeln!(err, "Usage: scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--server-url <URL> --repository-id <ID>] [--no-open] [--dev]").is_err()
                         || writeln!(err, "See `scryrs --help`").is_err()
                     {
                         1
@@ -567,7 +583,7 @@ where
                     }
                     Some("dashboard") => {
                         if writeln!(err, "scryrs dashboard: unexpected argument").is_err()
-                            || writeln!(err, "Usage: scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]").is_err()
+                            || writeln!(err, "Usage: scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--server-url <URL> --repository-id <ID>] [--no-open] [--dev]").is_err()
                             || writeln!(err, "See `scryrs --help`").is_err()
                         {
                             1

@@ -134,6 +134,32 @@ This starts the long-lived HTTP server with all three REST endpoints. The startu
 
 To configure hooks for remote mode, all nine event families and the `TraceEvent` schema remain identical to local mode. Hooks continue to emit the same `TraceEvent` records, and `scryrs record` handles the transport wrapper automatically when remote ingest is configured. See the [CLI v0 Contract](./cli-v0-contract.md) for the complete endpoint surface and the [Trace Hook Contract](./trace-hook-contract.md) appendix for remote ingestion identity field semantics and the `ServerIngestEnvelope` transport contract.
 
+## Live Dashboard Mode
+
+The dashboard now has a matching **live read path**. Start it with both live flags:
+
+```bash
+scryrs dashboard --server-url http://127.0.0.1:8081 --repository-id repo-a
+```
+
+Live dashboard mode keeps the browser on same-origin `/api/*` calls and lets the dashboard backend proxy the live server contract:
+
+- `GET /api/meta` reports `mode: "live"` and the configured `repositoryId`.
+- `GET /api/hotspots` proxies `GET /v1/repositories/{repository_id}/hotspots?window=cumulative` and preserves the upstream `cursor`.
+- `GET /api/signals?after=<id>` proxies the server SSE endpoint and streams replayed plus live `HotspotSignal` events without buffering the full upstream response.
+
+The browser owns reconnect behavior for the current page lifecycle. On first open, the Signals view connects to `/api/signals?after=0`. After a disconnect it reconnects with the last seen SSE id, for example `/api/signals?after=57`, and ignores replay duplicates that the server legitimately re-sends on resume. A full page refresh starts over from `after=0`.
+
+Local and live dashboard modes stay deliberately separate:
+
+| Concern | Local dashboard | Live dashboard |
+| --- | --- | --- |
+| Hotspot source | `.scryrs/hotspots.json` | `scryrs server` cumulative query |
+| Session/Event views | Available | Hidden from navigation; direct URLs show an unavailable explanation |
+| Signals view | Unavailable | Available with explicit connection-state UI |
+| Subject rendering | Repo-relative file shortening when possible | Raw server subject strings, no implied local artifact path |
+| Fallback behavior | Reads local artifacts only | No local fallback or local/live merge |
+
 ## Related Pages
 
 - [Hotspots](./hotspots.md) — domain-oriented explanation of local batch hotspots, scoring, and interpretation

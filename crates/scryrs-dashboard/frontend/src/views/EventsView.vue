@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { Alert, Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, EmptyState, EventTypeBar, SelectInput } from "@/shared/ui";
+import { routeUnavailableMessage } from "@/shared/lib/dashboard-mode";
 import { useEventStore } from "@/stores/events";
 import { useSessionStore } from "@/stores/sessions";
 import { useMetaStore } from "@/stores/meta";
@@ -17,8 +18,7 @@ function subjectDisplay(event: TraceEventItem) {
 }
 const selectedSession = ref("");
 const options = computed(() => [{ label: "All sessions", value: "" }, ...sessions.sessions.map((session) => ({ label: session.sessionId, value: session.sessionId }))]);
-
-// Items appended via "Load more" are treated as newly arriving → cyan scry glow.
+const unavailableMessage = computed(() => routeUnavailableMessage("events", meta.mode));
 const glowStart = ref(Number.POSITIVE_INFINITY);
 
 function payloadPreview(payload: unknown) {
@@ -29,8 +29,15 @@ function loadMore() {
   void events.load({ sessionId: selectedSession.value || null, cursor: events.nextCursor });
 }
 
-onMounted(() => { void sessions.loadSessions(); void events.load(); void meta.ensureLoaded(); });
+onMounted(async () => {
+  await meta.ensureLoaded();
+  if (!meta.isLiveMode) {
+    void sessions.loadSessions();
+    void events.load();
+  }
+});
 watch(selectedSession, (sessionId) => {
+  if (meta.isLiveMode) return;
   glowStart.value = Number.POSITIVE_INFINITY;
   void events.load({ sessionId: sessionId || null });
 });
@@ -42,7 +49,11 @@ watch(selectedSession, (sessionId) => {
       <p class="text-sm text-muted-foreground">Live scrying feed — trace events color-coded by type.</p>
     </header>
 
-    <Card>
+    <Card v-if="unavailableMessage">
+      <CardContent class="p-6"><EmptyState title="Unavailable in live mode" :description="unavailableMessage" /></CardContent>
+    </Card>
+
+    <Card v-else>
       <CardHeader class="gap-3">
         <div class="flex flex-col gap-1">
           <CardTitle>Feed</CardTitle>

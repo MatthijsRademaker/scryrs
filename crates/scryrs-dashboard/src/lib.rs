@@ -1,9 +1,71 @@
-//! Local dashboard server for scryrs trace artifacts.
+//! Dashboard server for scryrs local artifacts and live server data.
 
 use std::net::IpAddr;
 use std::path::PathBuf;
 
 pub mod server;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LiveSourceConfig {
+    pub server_url: String,
+    pub repository_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SourceMode {
+    Local,
+    Live(LiveSourceConfig),
+}
+
+impl SourceMode {
+    pub fn from_dashboard_args(
+        server_url: Option<&str>,
+        repository_id: Option<&str>,
+    ) -> Result<Self, DashboardError> {
+        match (server_url, repository_id) {
+            (None, None) => Ok(Self::Local),
+            (Some(_), None) | (None, Some(_)) => Err(DashboardError::InvalidConfig(
+                "both --server-url and --repository-id are required for live mode".into(),
+            )),
+            (Some(server_url), Some(repository_id)) => Self::live(server_url, repository_id),
+        }
+    }
+
+    pub fn live(server_url: &str, repository_id: &str) -> Result<Self, DashboardError> {
+        let server_url = server_url.trim();
+        let repository_id = repository_id.trim();
+        if server_url.is_empty() {
+            return Err(DashboardError::InvalidConfig(
+                "--server-url must not be empty".into(),
+            ));
+        }
+        if repository_id.is_empty() {
+            return Err(DashboardError::InvalidConfig(
+                "--repository-id must not be empty".into(),
+            ));
+        }
+        Ok(Self::Live(LiveSourceConfig {
+            server_url: server_url.to_string(),
+            repository_id: repository_id.to_string(),
+        }))
+    }
+
+    #[must_use]
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Live(_) => "live",
+        }
+    }
+
+    #[must_use]
+    pub fn live_config(&self) -> Option<&LiveSourceConfig> {
+        match self {
+            Self::Local => None,
+            Self::Live(config) => Some(config),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
@@ -12,6 +74,7 @@ pub struct Config {
     pub no_open: bool,
     pub dev_mode: bool,
     pub repo_root: PathBuf,
+    pub source_mode: SourceMode,
 }
 
 impl Config {
@@ -22,6 +85,7 @@ impl Config {
             no_open: false,
             dev_mode: false,
             repo_root,
+            source_mode: SourceMode::Local,
         }
     }
 
@@ -31,6 +95,7 @@ impl Config {
         no_open: bool,
         dev_mode: bool,
         repo_root: PathBuf,
+        source_mode: SourceMode,
     ) -> Result<Self, DashboardError> {
         if port == 0 {
             return Err(DashboardError::InvalidConfig(
@@ -48,6 +113,7 @@ impl Config {
             no_open,
             dev_mode,
             repo_root,
+            source_mode,
         })
     }
 
@@ -109,6 +175,7 @@ mod tests {
         assert!(!cfg.no_open);
         assert!(!cfg.dev_mode);
         assert_eq!(cfg.repo_root, PathBuf::from("/repo"));
+        assert_eq!(cfg.source_mode, SourceMode::Local);
     }
 
     #[test]
@@ -119,10 +186,37 @@ mod tests {
             true,
             false,
             PathBuf::from("/repo"),
+            SourceMode::Local,
         )
         .err()
         .unwrap_or_else(|| panic!("zero port must fail"));
 
         assert!(err.to_string().contains("port must be between"));
+    }
+
+    #[test]
+    fn source_mode_requires_both_live_flags() {
+        let err = SourceMode::from_dashboard_args(Some("http://localhost:8081"), None)
+            .err()
+            .unwrap_or_else(|| panic!("partial live mode must fail"));
+
+        assert!(
+            err.to_string()
+                .contains("both --server-url and --repository-id are required for live mode")
+        );
+    }
+
+    #[test]
+    fn source_mode_accepts_full_live_configuration() {
+        let mode = SourceMode::from_dashboard_args(Some("http://localhost:8081"), Some("repo-a"))
+            .unwrap_or_else(|err| panic!("full live mode: {err}"));
+
+        assert_eq!(
+            mode,
+            SourceMode::Live(LiveSourceConfig {
+                server_url: "http://localhost:8081".into(),
+                repository_id: "repo-a".into(),
+            })
+        );
     }
 }

@@ -18,14 +18,17 @@ import {
 } from "@/shared/ui";
 import { useHotspotStore } from "@/stores/hotspots";
 import { useMetaStore } from "@/stores/meta";
-import { formatSubject } from "@/shared/lib/subject";
+import { hotspotSubjectDisplay } from "@/shared/lib/dashboard-mode";
 import type { HotspotEntry } from "@/shared/api/client";
 
 const store = useHotspotStore();
 const meta = useMetaStore();
 
 function subjectDisplay(entry: HotspotEntry) {
-  return formatSubject(entry.subject, meta.repositoryPath, entry.subjectKind);
+  return hotspotSubjectDisplay(entry, {
+    mode: meta.mode,
+    repositoryPath: meta.repositoryPath,
+  });
 }
 const sortKey = ref<keyof HotspotEntry>("rank");
 const sortAsc = ref(true);
@@ -43,6 +46,12 @@ const sortedEntries = computed(() => [...store.entries].sort((a, b) => {
   const result = typeof left === "number" && typeof right === "number" ? left - right : String(left).localeCompare(String(right));
   return sortAsc.value ? result : -result;
 }));
+const headerDescription = computed(() => meta.isLiveMode
+  ? "Current server-ranked subjects. Flame intensity tracks relative cumulative heat."
+  : "Ranked subjects from .scryrs/hotspots.json — flame intensity tracks relative heat.");
+const emptyDescription = computed(() => meta.isLiveMode
+  ? "No live hotspots are available for this repository yet."
+  : "Run scryrs hotspots . to materialize .scryrs/hotspots.json.");
 
 function sortBy(key: keyof HotspotEntry) {
   if (sortKey.value === key) sortAsc.value = !sortAsc.value;
@@ -52,7 +61,6 @@ function sortBy(key: keyof HotspotEntry) {
   }
 }
 
-// Heat leaderboard: top-ranked subjects, flame intensity relative to peak score.
 const maxScore = computed(() => Math.max(1, ...store.entries.map((entry) => entry.score)));
 const topEntries = computed(() => [...store.entries].sort((a, b) => a.rank - b.rank).slice(0, 3));
 function totalEvents(entry: HotspotEntry) {
@@ -66,7 +74,7 @@ onMounted(() => { void store.load(); void meta.ensureLoaded(); });
   <div class="flex flex-col gap-6">
     <header class="flex flex-col gap-1">
       <h1 class="text-2xl font-semibold tracking-tight">Hotspots</h1>
-      <p class="text-sm text-muted-foreground">Ranked subjects from <code class="text-foreground/80">.scryrs/hotspots.json</code> — flame intensity tracks relative heat.</p>
+      <p class="text-sm text-muted-foreground">{{ headerDescription }}</p>
     </header>
 
     <Alert v-if="store.error" variant="destructive">
@@ -76,10 +84,9 @@ onMounted(() => { void store.load(); void meta.ensureLoaded(); });
       </div>
     </Alert>
 
-    <EmptyState v-else-if="!store.loading && store.entries.length === 0" title="No hotspot data" description="Run scryrs hotspots . to materialize .scryrs/hotspots.json." />
+    <EmptyState v-else-if="!store.loading && store.entries.length === 0" title="No hotspot data" :description="emptyDescription" />
 
     <template v-else>
-      <!-- Heat leaderboard hero -->
       <section v-if="topEntries.length" class="grid gap-4 md:grid-cols-3">
         <Card
           v-for="(entry, index) in topEntries"
@@ -112,11 +119,10 @@ onMounted(() => { void store.load(); void meta.ensureLoaded(); });
         </Card>
       </section>
 
-      <!-- Detail table (sorting & links preserved) -->
       <Card>
         <CardHeader>
           <CardTitle>All subjects</CardTitle>
-          <CardDescription>Full ranked breakdown. Click a column to sort.</CardDescription>
+          <CardDescription>{{ meta.isLiveMode ? 'Server-ranked cumulative hotspots. Click a column to sort.' : 'Full ranked breakdown. Click a column to sort.' }}</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>

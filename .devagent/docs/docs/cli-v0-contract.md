@@ -537,31 +537,39 @@ Starts a long-lived HTTP server for central trace event ingest and live hotspot 
 - `threshold`: The signal threshold in effect at creation time.
 - The SSE stream is infinite (replay phase then live broadcast). Clients should disconnect when no longer needed; reconnection with `?after=<last_seen_id>` resumes without gaps.
 
-### `scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]`
+### `scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--server-url <URL> --repository-id <ID>] [--no-open] [--dev]`
 
-Starts a local HTTP server and serves an embedded Vue.js SPA dashboard for visual browsing of `.scryrs/` hotspot, session, and event data. Reads `.scryrs/hotspots.json` and `.scryrs/scryrs.db` from the current working directory.
+Starts the embedded Vue.js dashboard HTTP server in one of two explicit modes:
+
+- **Local mode (default):** reads `.scryrs/hotspots.json` and `.scryrs/scryrs.db` from the current working directory.
+- **Live mode:** proxies live hotspot rankings and hotspot-signal SSE from `scryrs server` when both `--server-url` and `--repository-id` are provided.
 
 | Field | Value |
 |-------|-------|
-| Input | No required arguments. Optional flags: `--port` (default `8080`), `-p <PORT>`, `--bind` (default `127.0.0.1`), `-b <ADDR>`, `--no-open` (flag, no value), `--dev` (flag, no value) |
-| Output | HTTP server with REST API at `GET /api/hotspots`, `GET /api/sessions`, `GET /api/sessions/:sessionId`, `GET /api/events`, `GET /api/meta`. SPA served at `GET /` and `GET /assets/*`. Non-API, non-asset paths fall through to `index.html` for Vue Router push-state. |
+| Input | No required arguments. Optional flags: `--port` (default `8080`), `-p <PORT>`, `--bind` (default `127.0.0.1`), `-b <ADDR>`, `--server-url <URL>`, `--repository-id <ID>`, `--no-open` (flag, no value), `--dev` (flag, no value) |
+| Output | HTTP server with same-origin REST/SSE proxy endpoints. SPA served at `GET /` and `GET /assets/*`. Non-API, non-asset paths fall through to `index.html` for Vue Router push-state. |
 | Exit 0 | Server shut down cleanly (SIGINT/SIGTERM) |
 | Exit 1 | Port already in use or server startup I/O failure |
-| Exit 2 | Usage error (invalid `--port` or `--bind`) |
+| Exit 2 | Usage error (invalid `--port`, invalid `--bind`, or partial live configuration) |
 
-**Startup behavior:** Prints "Dashboard available at <http://127.0.0.1:8080>" to stderr (adjusting for `--port` and `--bind` flags). Opens the default browser unless `--no-open` is set. In `--dev` mode, appends "(dev mode)" to the startup message and serves from the filesystem `crates/scryrs-dashboard/frontend/dist/` directory.
+**Mode activation:** Omitting both live flags keeps local mode. Providing only one of `--server-url` or `--repository-id` exits 2 with a clear configuration error; the dashboard never guesses or silently falls back between local and live data sources.
 
-**REST API contract:**
+**Startup behavior:** Prints `Dashboard available at <http://127.0.0.1:8080>` to stderr (adjusting for `--port` and `--bind`). Opens the default browser unless `--no-open` is set. In `--dev` mode, appends `(dev mode)` to the startup message and serves from the filesystem `crates/scryrs-dashboard/frontend/dist/` directory.
 
-| Endpoint | Method | Response |
-|----------|--------|----------|
-| `GET /api/meta` | GET | `200 OK` with `{ "repositoryPath": "<absolute path>" }`. Available while the dashboard is running. |
-| `GET /api/hotspots` | GET | `200 OK` with `.scryrs/hotspots.json` content as JSON. `404 Not Found` if no hotspot report exists. |
-| `GET /api/sessions` | GET | `200 OK` with JSON array of session objects (`sessionId`, `startedAt`, `endedAt`, `eventCount`, `source`), ordered by `startedAt DESC`, default limit 50. `404 Not Found` if no `.scryrs/scryrs.db`. `502 Bad Gateway` if store is corrupt. |
-| `GET /api/sessions/:sessionId` | GET | `200 OK` with `{ "session": { ... }, "events": [ ... ] }` — full session detail including all events. `404 Not Found` if session does not exist. `502 Bad Gateway` if store is corrupt. |
-| `GET /api/events` | GET | `200 OK` with JSON object `{ events: [...], nextCursor: string|null }`, cursor-based pagination via`?limit=N&cursor=<token>&session_id=<id>`. Each event has`eventId`,`sessionId`,`eventType`,`timestamp`,`subjectKind`,`subject`,`payload`.`404 Not Found` if no store. `502 Bad Gateway` if corrupt. |
+**REST/SSE API contract:**
 
-**SPA contract:** The SPA is a Vue 3 application built with Vite, Bun, Tailwind CSS v4, and shadcn-vue, then embedded in the binary via `rust-embed`. Views: `/` (hotspot table, landing page), `/subjects/:subjectKind/:subject` (subject detail), `/sessions` (session list), `/sessions/:sessionId` (session detail), `/events` (event distribution visualization), `/about` (version info). Unknown routes display a 404 page with a link back to the landing page.
+| Endpoint | Mode | Response |
+|----------|------|----------|
+| `GET /api/meta` | local + live | `200 OK` with `{ "mode": "local"|"live", "repositoryPath": "<absolute path>", "repositoryId": string|null }`. |
+| `GET /api/hotspots` | local | `200 OK` with `.scryrs/hotspots.json` content as JSON. `404 Not Found` if no hotspot report exists. |
+| `GET /api/hotspots` | live | `200 OK` with the normalized live rankings payload from `GET /v1/repositories/{repository_id}/hotspots?window=cumulative`, preserving upstream `cursor`. `502 Bad Gateway` when the configured server is unreachable or returns a non-success response. |
+| `GET /api/signals?after=<id>` | live | `200 OK` with `text/event-stream`, proxied from `GET /v1/repositories/{repository_id}/signals?after=<id>`. The dashboard streams replayed and live events through without buffering the full upstream response. |
+| `GET /api/sessions` | local | `200 OK` with JSON array of session objects (`sessionId`, `startedAt`, `endedAt`, `eventCount`, `source`), ordered by `startedAt DESC`, default limit 50. `404 Not Found` if no `.scryrs/scryrs.db`. `502 Bad Gateway` if store is corrupt. |
+| `GET /api/sessions/:sessionId` | local | `200 OK` with `{ "session": { ... }, "events": [ ... ] }` — full session detail including all events. `404 Not Found` if session does not exist. `502 Bad Gateway` if store is corrupt. |
+| `GET /api/events` | local | `200 OK` with `{ events: [...], nextCursor: string|null }`, cursor-based pagination via`?limit=N&cursor=<token>&session_id=<id>`. |
+| `GET /api/sessions`, `GET /api/sessions/:sessionId`, `GET /api/events` | live | `404 Not Found` with an explanation that the route is unavailable in live mode. |
+
+**SPA contract:** The SPA is a Vue 3 application built with Vite, Bun, Tailwind CSS v4, and shadcn-vue, then embedded in the binary via `rust-embed`. Local mode shows Hotspots, Sessions, Events, and About. Live mode shows Hotspots, Signals, and About, hides Sessions/Events from navigation, and renders readable unavailable views on direct navigation to local-only routes. The Signals view owns reconnect behavior in the browser: it starts at `/api/signals?after=0`, tracks the last seen SSE id in memory, reconnects with `?after=<last_seen_id>`, and ignores replay duplicates on resume.
 
 ## Global flags
 
@@ -613,7 +621,7 @@ Agents should check `surfaceVersion` before parsing to detect format changes. Th
 |------|---------|
 | 0 | Hotspots, graph, route, and route-explain artifacts written successfully (route explain includes zero-match results); proposals written successfully; record local accepted all events; record remote accepted all events (duplicates non-fatal); init installed hook; dashboard/server shut down cleanly; hook always fail-open; help/version/surface display. |
 | 1 | Hotspots/graph/route stdout or artifact write failure; record rejected one or more events or hit output I/O error; propose validation, directory creation, serialization, or file write failure; init I/O error; dashboard/server startup or runtime I/O failure. |
-| 2 | Usage error. Also: hotspots missing/corrupt store; graph missing/malformed hotspots input; route missing/malformed/schema-mismatched graph input; route explain missing PATH, missing --query, or missing/malformed/schema-mismatched routes.json; propose missing/malformed hotspot or graph input; record local fatal I/O error; record remote identity/transport failure; init unsupported harness or collision; dashboard invalid flags or bind address; server invalid port/bind/store or feature not compiled. |
+| 2 | Usage error. Also: hotspots missing/corrupt store; graph missing/malformed hotspots input; route missing/malformed/schema-mismatched graph input; route explain missing PATH, missing --query, or missing/malformed/schema-mismatched routes.json; propose missing/malformed hotspot or graph input; record local fatal I/O error; record remote identity/transport failure; init unsupported harness or collision; dashboard invalid flags, invalid bind address, or partial live-mode configuration; server invalid port/bind/store or feature not compiled. |
 
 All error messages and human-facing diagnostics are written to stderr.
 
@@ -714,17 +722,17 @@ All error messages and human-facing diagnostics are written to stderr.
 
 ### Dashboard command
 
-**When to call:** An agent should call `scryrs dashboard` when it needs to visually browse hotspot, session, and event data from a local `.scryrs/` store. The command starts a local HTTP server and opens the dashboard SPA in the default browser.
+**When to call:** An agent should call `scryrs dashboard` when it needs a same-origin browser surface over either local `.scryrs/` artifacts or live hotspot state from `scryrs server`. The command starts the dashboard HTTP server and opens the SPA in the default browser.
 
-**Input:** No required positional arguments. Optional flags: `--port <PORT>` (default `8080`), `-p <PORT>`, `--bind <ADDR>` (default `127.0.0.1`), `-b <ADDR>`, `--no-open` (flag, no value), `--dev` (flag, no value).
+**Input:** No required positional arguments. Optional flags: `--port <PORT>` (default `8080`), `-p <PORT>`, `--bind <ADDR>` (default `127.0.0.1`), `-b <ADDR>`, `--server-url <URL>`, `--repository-id <ID>`, `--no-open` (flag, no value), `--dev` (flag, no value).
 
-**Output:** SPA and REST API served over HTTP. Server lifecycle messages written to stderr.
+**Output:** SPA plus same-origin API endpoints. `GET /api/meta` always reports the active mode; live mode additionally exposes `GET /api/signals?after=<id>` and routes `GET /api/hotspots` through the configured server.
 
 **Exit codes:**
 
 - Exit 0: Server shut down cleanly.
 - Exit 1: Port already in use or server startup I/O failure.
-- Exit 2: Invalid flags or bind address.
+- Exit 2: Invalid flags, invalid bind address, or partial live-mode configuration.
 
 ### Record command
 
