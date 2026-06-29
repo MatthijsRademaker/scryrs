@@ -12,7 +12,7 @@ scryrs is no longer a trace-capture scaffold. The production target is a closed 
 | Graph | `scryrs graph <PATH>` builds structural graph from hotspots plus docs navigation | Cross-domain edges and accepted evidence ingestion missing |
 | Route manifests | `scryrs route <PATH>` emits `.scryrs/routes.json` from graph nodes | Runtime explanation and context loading decisions missing |
 | Proposals | `ProposalDocument`, inbox layout, deterministic `scryrs propose <PATH>`, `scryrs proposals list|accept|reject`, accepted/rejected review artifacts, safety checks shipped | Dashboard review UX and broader accepted-evidence consumers still missing |
-| Adapters | Generic Markdown publisher consumes reviewed `.scryrs/accepted/*.json` into deterministic plain Markdown files | Rspress and llms-specific publishing surfaces still missing |
+| Adapters | Generic Markdown publisher consumes reviewed `.scryrs/accepted/*.json` into deterministic plain Markdown files | Rspress and llms-specific publishing surfaces now connect accepted knowledge through to the live docs site |
 | LLM assist | Bounded `scryrs-curator-llm` library shipped | Product integration must wait for acceptance lifecycle |
 
 ## Production Loop
@@ -67,6 +67,8 @@ Required boundary:
 .scryrs/routes.json            deterministic projection from graph
 ```
 
+**Docs subtree ownership:** The `.devagent/docs/docs/accepted-knowledge/` directory is owned exclusively by the Rspress publishing adapter (`scryrs-adapter-rspress`). It is cleared and regenerated on every publish run. Do not add hand-authored pages under this subtree — they will be removed without warning on the next adapter run. Hand-authored docs live in `.devagent/docs/docs/` at the top level.
+
 Review decision artifacts are versioned `ProposalReviewDecision` documents (`REVIEW_DECISION_SCHEMA_VERSION = "1.0.0"`) that record explicit accepted or rejected outcomes with mandatory provenance. In this phase, generic Markdown publishing consumes accepted review decisions, while graph build, route generation, and memory mutation still do not. Accepted-evidence ingestion into graph remains deferred to a follow-up change.
 
 ### LLM interpretation path
@@ -81,7 +83,7 @@ Model output may draft, summarize, rank, or suggest. It must not decide policy, 
 | P2. Accepted evidence graph | Reviewed groupings and docs notes influence graph deterministically | Graph consumes accepted evidence; route manifests update from graph; provenance preserved |
 | P3. Live dashboard | Multi-agent hotspots become visible product, not just API | Dashboard live mode, server API client, signal timeline, reconnect behavior |
 | P4. Runtime explain | Agents can ask what to read and why | Route hint schema, `scryrs route explain`, deterministic evidence-backed reasons |
-| P5. Publishing adapters | Reviewed knowledge leaves `.scryrs/` through generic Markdown first | Markdown adapter consumes accepted review decisions, then Rspress / llms surfaces layer on later deterministic outputs |
+| P5. Publishing adapters | Reviewed knowledge leaves `.scryrs/` through generic Markdown first | Markdown adapter (`scryrs-adapter-markdown`) publishes accepted review decisions. Rspress adapter (`scryrs-adapter-rspress`) layers on top to write pages with Rspress frontmatter into `.devagent/docs/docs/accepted-knowledge/` and update `_nav.json`. Build verification script (`scripts/verify-docs-publish`) proves published knowledge reaches doc_build/llms.txt. |
 | P6. LLM assist UX | Models improve proposal quality without owning truth | Opt-in draft/group commands or UI action, bounded EvidencePack, citation validation, no auto-accept |
 | P7. Production hardening | Suite can ship reliably | Release packaging, `scryrs doctor/status`, CI matrix, E2E live workflow, security and privacy checks |
 
