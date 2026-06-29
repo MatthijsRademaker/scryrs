@@ -25,6 +25,10 @@ COMMANDS\n\
       --mode live: remote ingest via scryrs server (writes project scryrs.json).\n\
         Live mode requires --ingest-url, --workspace-id, and --agent-id.\n\
         --repository-id is derived from Git remote origin when omitted.\n\
+  scryrs doctor [--json]\n\
+      Run the installation and readiness diagnostic command.\n\
+      Reports binary version, command surface, resolved mode, local store,\n\
+      hook status, live server reachability when configured, and docs links.\n\
   scryrs graph <PATH>\n\
       Build a repository knowledge graph from hotspot evidence and docs structure.\n\
       Emits a single-line KnowledgeGraphDocument JSON to stdout and .scryrs/graph.json.\n\
@@ -135,9 +139,9 @@ OPTIONS\n\
   -V, --version    Print version and exit\n\
   -hj, --help-json Print machine-readable CLI surface description and exit\n\n\
 EXIT CODES\n\
-  0    Success (hotspots: JSON written; record local: all events accepted; record remote: no rejections or failures; init: hook installed; propose/proposals: artifacts written or listed successfully; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)\n\
-  1    Hotspots: storage error. Record: rejected events or I/O error (local or server rejections). Init: I/O error. Proposals: serialization or filesystem write failure. Dashboard: port in use or artifact read error. Server: port in use or store error.\n\
-  2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, self-install refusal, invalid mode, or missing/invalid live-mode configuration; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; route explain: missing PATH, missing --query, missing/malformed/schema-mismatched routes.json; dashboard: invalid flags, bind failure, or partial live-mode configuration; server: invalid flags or bind failure",
+  0    Success (hotspots: JSON written; record local: all events accepted; record remote: no rejections or failures; init: hook installed; doctor: only ok/warn findings; propose/proposals: artifacts written or listed successfully; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)\n\
+  1    Hotspots: storage error. Record: rejected events or I/O error (local or server rejections). Init: I/O error. Doctor: output write failure. Proposals: serialization or filesystem write failure. Dashboard: port in use or artifact read error. Server: port in use or store error.\n\
+  2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, self-install refusal, invalid mode, or missing/invalid live-mode configuration; doctor: one or more structural error findings; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; route explain: missing PATH, missing --query, missing/malformed/schema-mismatched routes.json; dashboard: invalid flags, bind failure, or partial live-mode configuration; server: invalid flags or bind failure",
         SCHEMA_VERSION, SCHEMA_VERSION, HOTSPOT_SCHEMA_VERSION
     )
 }

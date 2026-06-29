@@ -2,6 +2,15 @@
 
 scryrs is no longer a trace-capture scaffold. The production target is a closed evidence loop: observe agent work, score repeated attention, share live signals, organize evidence into graph and route artifacts, review proposed knowledge, publish approved knowledge, and let future agents load better context with explainable reasons.
 
+## Operator entrypoints
+
+Production hardening now has two explicit operator entrypoints:
+
+- `scryrs doctor` — the installed-user diagnosis path for binary version, shipped command surface, resolved local-vs-live mode, local store status, harness hook status, live server reachability when configured, and docs links.
+- `scripts/verify-production-suite` — the authoritative headless production-readiness gate for maintainers.
+
+The heavy verification path is also exposed as `scripts/precommit-run --production`, but that wrapper does **not** replace the default lighter `scripts/precommit-run` posture in this change.
+
 ## Current State
 
 | Area | State | Production gap |
@@ -15,7 +24,7 @@ scryrs is no longer a trace-capture scaffold. The production target is a closed 
 | Adapters | Generic Markdown publisher consumes reviewed `.scryrs/accepted/*.json` into deterministic plain Markdown files | Rspress and llms-specific publishing surfaces now connect accepted knowledge through to the live docs site |
 | LLM assist | Bounded `scryrs-curator-llm` library shipped | Product integration must wait for acceptance lifecycle |
 
-## Production Loop
+## Production loop
 
 ```text
 Observe
@@ -37,9 +46,53 @@ Route
   explainable route hints for future agents
 ```
 
-The loop is production-ready only when every arrow is explicit, deterministic where it affects truth, and verified end-to-end.
+The loop is production-ready only when every arrow is explicit, deterministic where it affects truth, and verified end to end.
 
-## Critical Boundaries
+## Authoritative production suite
+
+`scripts/verify-production-suite` is the single headless release-verification command. It runs these required lanes and exits non-zero on the first failure:
+
+1. `scripts/check`
+2. `scripts/test --full`
+3. `scripts/security`
+4. `scripts/verify-install`
+5. `scripts/verify-trace-capture`
+6. `scripts/verify-live-hotspots`
+7. `scripts/verify-core-artifact-loop`
+8. `scripts/verify-privacy-defaults`
+9. `scripts/verify-docs-publish`
+
+### What each lane proves
+
+| Lane | Proof |
+| --- | --- |
+| `scripts/check` | formatting, frontend check/build, workspace `cargo check`, clippy, docs publish verification |
+| `scripts/test --full` | compiled Rust tests plus the lighter Claude-only `scripts/hook-test` wrapper lane |
+| `scripts/security` | dependency policy and advisory audit |
+| `scripts/verify-install` | Linux installer path and installed binary smoke |
+| `scripts/verify-trace-capture` | real Claude Code + Pi hook capture through the shipped binary |
+| `scripts/verify-live-hotspots` | remote ingest, idempotent replay, hotspot query, SSE replay/resume |
+| `scripts/verify-core-artifact-loop` | deterministic local artifact loop `record -> hotspots -> graph -> route -> propose -> proposals accept` |
+| `scripts/verify-privacy-defaults` | compiled telemetry/privacy defaults |
+| `scripts/verify-docs-publish` | accepted-knowledge publishing through to built docs surfaces |
+
+### Failure interpretation
+
+The suite prints a lane header before each command. When the suite fails, the last printed lane header is the proving path that broke. Debug the failing lane directly rather than rerunning the full suite blindly.
+
+## `scryrs doctor` contract in the production path
+
+`scryrs doctor` is the public diagnosis command that complements the production suite. Its contract is intentionally narrower than release verification:
+
+- default output is human-readable
+- `--json` exposes the same categories for automation
+- findings use `ok`, `warn`, and `error`
+- exit `0` means only `ok`/`warn` findings were emitted
+- exit `2` means at least one structural `error` was found
+
+Structural errors include malformed `scryrs.json`, unreadable or unsupported local store state, incomplete live-mode identity, and unreachable configured live server. Advisory conditions such as an uninitialized local store or missing optional hook remain warnings.
+
+## Critical boundaries
 
 ### Deterministic truth path
 
@@ -55,9 +108,7 @@ These paths must stay model-free:
 
 ### Review-first promotion path
 
-Proposal files are not truth. Accepted evidence is truth candidate. Production suite needs a separate acceptance artifact before proposals can influence graph, route, docs, or memory.
-
-Required boundary:
+Proposal files are not truth. Accepted evidence is truth candidate. Production verification keeps the boundary explicit:
 
 ```text
 .scryrs/proposals/*.json       review inbox only — immutable proposal documents
@@ -67,15 +118,32 @@ Required boundary:
 .scryrs/routes.json            deterministic projection from graph
 ```
 
-**Docs subtree ownership:** The `.devagent/docs/docs/accepted-knowledge/` directory is owned exclusively by the Rspress publishing adapter (`scryrs-adapter-rspress`). It is cleared and regenerated on every publish run. Do not add hand-authored pages under this subtree — they will be removed without warning on the next adapter run. Hand-authored docs live in `.devagent/docs/docs/` at the top level.
+**Docs subtree ownership:** `.devagent/docs/docs/accepted-knowledge/` is owned exclusively by the Rspress publishing adapter (`scryrs-adapter-rspress`). It is cleared and regenerated on every publish run.
 
-Review decision artifacts are versioned `ProposalReviewDecision` documents (`REVIEW_DECISION_SCHEMA_VERSION = "1.0.0"`) that record explicit accepted or rejected outcomes with mandatory provenance. In this phase, generic Markdown publishing consumes accepted review decisions, while graph build, route generation, and memory mutation still do not. Accepted-evidence ingestion into graph remains deferred to a follow-up change.
+### Privacy proving boundary
 
-### LLM interpretation path
+The suite now has one explicit runnable privacy lane (`scripts/verify-privacy-defaults`) for compiled telemetry/privacy defaults. The remaining privacy boundaries are proved elsewhere and must stay documented as such:
 
-Model output may draft, summarize, rank, or suggest. It must not decide policy, validate ingest, score hotspots, or mutate graph truth. LLM integration becomes product only after accepted-evidence workflow exists.
+| Boundary | Proving path |
+| --- | --- |
+| Telemetry opt-in default | `scripts/verify-privacy-defaults` |
+| Prompt/source/path redaction defaults | `scripts/verify-privacy-defaults` |
+| Remote prompt-storage default off | `scripts/verify-privacy-defaults` |
+| Debug-gated Bash capture | `scripts/test --full`, `scripts/verify-trace-capture` |
+| Fail-open hooks | `scripts/verify-trace-capture` |
+| Remote no-dual-write / no-local-fallback | `scripts/test --full`, `scripts/verify-live-hotspots` |
+| Dependency policy | `scripts/security` |
 
-## Production Milestones
+## Live dashboard and macOS scope boundaries
+
+Two boundaries remain explicit in this change:
+
+- **Live dashboard browser automation stays out of the automated production gate.** The production suite proves the live server contract only. Browser/dashboard smoke remains manual after `scripts/verify-live-hotspots` passes.
+- **Linux automation does not prove native macOS behavior.** `scripts/verify-install` remains Linux/Docker automation. Real Darwin confidence still requires manual maintainer commands on macOS.
+
+The exact manual commands and the explicit Linux-vs-macOS limitation are documented in `scripts/verification/README.md`.
+
+## Milestones
 
 | Milestone | Outcome | Must ship |
 | --- | --- | --- |
@@ -83,35 +151,13 @@ Model output may draft, summarize, rank, or suggest. It must not decide policy, 
 | P2. Accepted evidence graph | Reviewed groupings and docs notes influence graph deterministically | Graph consumes accepted evidence; route manifests update from graph; provenance preserved |
 | P3. Live dashboard | Multi-agent hotspots become visible product, not just API | Dashboard live mode, server API client, signal timeline, reconnect behavior |
 | P4. Runtime explain | Agents can ask what to read and why | Route hint schema, `scryrs route explain`, deterministic evidence-backed reasons |
-| P5. Publishing adapters | Reviewed knowledge leaves `.scryrs/` through generic Markdown first | Markdown adapter (`scryrs-adapter-markdown`) publishes accepted review decisions. Rspress adapter (`scryrs-adapter-rspress`) layers on top to write pages with Rspress frontmatter into `.devagent/docs/docs/accepted-knowledge/` and update `_nav.json`. Build verification script (`scripts/verify-docs-publish`) proves published knowledge reaches doc_build/llms.txt. |
+| P5. Publishing adapters | Reviewed knowledge leaves `.scryrs/` through generic Markdown first | Markdown adapter (`scryrs-adapter-markdown`) publishes accepted review decisions. Rspress adapter (`scryrs-adapter-rspress`) layers on top to write pages with Rspress frontmatter into `.devagent/docs/docs/accepted-knowledge/` and update `_nav.json`. Build verification script (`scripts/verify-docs-publish`) proves published knowledge reaches `doc_build/llms.txt`. |
 | P6. LLM assist UX | Models improve proposal quality without owning truth | Opt-in draft/group commands or UI action, bounded EvidencePack, citation validation, no auto-accept |
-| P7. Production hardening | Suite can ship reliably | Release packaging, `scryrs doctor/status`, CI matrix, E2E live workflow, security and privacy checks |
+| P7. Production hardening | Suite can ship reliably | Release packaging, `scryrs doctor`, authoritative production suite, CI matrix, E2E live workflow, security and privacy checks |
 
-## Near-Term Task Order
+## Related pages
 
-1. Define accepted proposal / accepted evidence contract.
-2. Implement accept/reject CLI workflow over `.scryrs/proposals/`.
-3. Feed accepted semantic groupings and docs evidence into graph build.
-4. Build live dashboard read-only mode against `scryrs server` APIs.
-5. Implement deterministic `scryrs route explain` over route manifests.
-6. Publish accepted reviewed Markdown artifacts from `.scryrs/accepted/` to generic Markdown output roots.
-7. Publish that reviewed Markdown into Rspress and regenerated llms surfaces.
-8. Add opt-in LLM drafting over proposal inbox.
-9. Harden release, diagnostics, and multi-agent E2E verification.
-
-## Board Alignment
-
-Backlog work should be ordered by missing loop closure, not by crate names alone:
-
-- **High priority:** acceptance ledger, accepted-evidence graph ingestion, live dashboard mode.
-- **Medium priority:** route explain, Markdown/Rspress publishing, LLM-assisted proposal drafting.
-- **Low priority:** hosted multi-tenant behavior, dashboard mutation UX, automatic optimizer/rewrite behavior.
-
-## Related Pages
-
-- [Product Roadmap](./roadmap.mdx) — phase order and scope guardrails
+- [CLI Reference](./cli-v0-contract.md) — public command contract, including `scryrs doctor`
+- [Trace Hook Contract](./trace-hook-contract.md) — harness integration guarantees and fail-open rules
 - [Architecture](./architecture.mdx) — crate boundaries and deterministic/model separation
-- [Graph](./graph.md) — graph identity and semantic grouping boundary
-- [Route Manifests](./route-manifests.md) — route projection contract
-- [Proposals](./proposals.md) — review-first proposal and LLM-assist boundaries
-- [Live Hotspots](./live-hotspots.md) — live ingest and signal APIs
+- `scripts/verification/README.md` — lane-by-lane verification details, manual dashboard smoke, and macOS commands

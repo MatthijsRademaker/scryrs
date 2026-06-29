@@ -140,4 +140,4 @@ fi
 
 echo ""
 echo "[scryrs-install] Done."
-echo "[scryrs-install] Next: run 'scryrs init --agent <NAME>' to install agent hooks."
+echo "[scryrs-install] Next: run 'scryrs init --agent <NAME>' to install agent hooks, then 'scryrs doctor' to verify the install."

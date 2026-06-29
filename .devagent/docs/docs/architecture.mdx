@@ -104,19 +104,19 @@ Adapters depend on shared contracts and suite outputs. Core detection should nev
 ### CI lanes
 
 - **Pull request**: `cargo test --workspace --all-targets --all-features --locked` (all Rust tests across workspace crates).
-- **Hook verification**: A separate CI job in `.github/workflows/ci.yml` runs `scripts/hook-test` on every PR, checking Claude Code hook JSON shaping, fail-open, and transparency. Runtime: &lt;5 seconds, Node-only.
+- **Hook verification**: A separate CI job in `.github/workflows/ci.yml` runs `scripts/hook-test` on every PR. That script is the Claude-only wrapper lane and delegates to the Docker-backed capture verification path for the native `scryrs hook claude-code` command.
 - **Cross-harness e2e** (`scripts/verify-trace-capture`): Docker-backed end-to-end verification exercising both Claude Code and Pi hook fixtures against a real `scryrs` binary. Measured runtime ~41 seconds (cached build). Assigned to **nightly lane** pending CI Docker-in-Docker support.
 
 ### Hook verification
 
-- `scripts/hook-test` — Node-only Claude Code hook contract checks (JSON shaping, fail-open, transparency), runs on every PR.
+- `scripts/hook-test` — Claude-only Docker-backed hook capture verification wrapper, runs on every PR.
 - `scripts/verify-trace-capture` — Docker-backed cross-harness e2e (Claude Code + Pi fixtures against real `scryrs` binary).
 - `scripts/verification/installed-hook-e2e.mjs` — End-to-end validation that `scryrs init --agent claude-code|pi` produces loadable, functional hook artifacts in a consumer project context.
 
 ### Local test lanes
 
 - `scripts/test` — Rust tests only (default lane).
-- `scripts/test --full` — Full suite: Rust tests followed by `scripts/hook-test`.
+- `scripts/test --full` — Full suite: Rust tests followed by the Claude-only `scripts/hook-test` wrapper.
 
 ### Unit test coverage by crate
 

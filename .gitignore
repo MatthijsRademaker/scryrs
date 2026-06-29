@@ -23,6 +23,9 @@ target
 # Docker-based cargo build cache (vendored crates, registry index)
 .cargo-docker/
 
+# Transient binaries staged by Docker-backed verification lanes
+.docker-fixtures/
+
 # Node.js dependencies (install via npm ci from package-lock.json)
 node_modules/
 *.tsbuildinfo

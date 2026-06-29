@@ -29,7 +29,7 @@ while [[ $# -gt 0 ]]; do
 			echo ""
 			echo "Options:"
 			echo "  --full    Run the full test suite: cargo test --workspace followed by"
-			echo "            scripts/hook-test (Node-only Claude Code hook contract checks)."
+			echo "            scripts/hook-test (Claude-only Docker-backed hook capture verification)."
 			echo "            Exits non-zero if either phase fails."
 			exit 0
 			;;
