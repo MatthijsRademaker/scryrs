@@ -855,6 +855,8 @@ name = "scryrs-adapter-markdown"
 version = "0.1.0"
 dependencies = [
  "scryrs-types",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

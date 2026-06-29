@@ -11,8 +11,8 @@ scryrs is no longer a trace-capture scaffold. The production target is a closed 
 | Live hotspots | Central ingest server, idempotency, accumulators, query API, SSE signals shipped | Dashboard live mode and multi-agent end-to-end product workflow missing |
 | Graph | `scryrs graph <PATH>` builds structural graph from hotspots plus docs navigation | Cross-domain edges and accepted evidence ingestion missing |
 | Route manifests | `scryrs route <PATH>` emits `.scryrs/routes.json` from graph nodes | Runtime explanation and context loading decisions missing |
-| Proposals | `ProposalDocument`, inbox layout, deterministic `scryrs propose <PATH>`, safety checks shipped | Acceptance/rejection lifecycle missing |
-| Adapters | Markdown renderer foundation exists | Publishing approved proposals to Markdown, Rspress, and llms surfaces missing |
+| Proposals | `ProposalDocument`, inbox layout, deterministic `scryrs propose <PATH>`, `scryrs proposals list|accept|reject`, accepted/rejected review artifacts, safety checks shipped | Dashboard review UX and broader accepted-evidence consumers still missing |
+| Adapters | Generic Markdown publisher consumes reviewed `.scryrs/accepted/*.json` into deterministic plain Markdown files | Rspress and llms-specific publishing surfaces still missing |
 | LLM assist | Bounded `scryrs-curator-llm` library shipped | Product integration must wait for acceptance lifecycle |
 
 ## Production Loop
@@ -31,7 +31,7 @@ Review
   proposal inbox + accept/reject ledger
     ↓
 Publish
-  Markdown / Rspress / llms surfaces
+  generic Markdown / then Rspress / llms surfaces
     ↓
 Route
   explainable route hints for future agents
@@ -67,7 +67,7 @@ Required boundary:
 .scryrs/routes.json            deterministic projection from graph
 ```
 
-Review decision artifacts are versioned `ProposalReviewDecision` documents (`REVIEW_DECISION_SCHEMA_VERSION = "1.0.0"`) that record explicit accepted or rejected outcomes with mandatory provenance. Graph build, route generation, docs publishing, and memory mutation do not consume review decision artifacts in this phase — accepted-evidence ingestion is deferred to a follow-up change.
+Review decision artifacts are versioned `ProposalReviewDecision` documents (`REVIEW_DECISION_SCHEMA_VERSION = "1.0.0"`) that record explicit accepted or rejected outcomes with mandatory provenance. In this phase, generic Markdown publishing consumes accepted review decisions, while graph build, route generation, and memory mutation still do not. Accepted-evidence ingestion into graph remains deferred to a follow-up change.
 
 ### LLM interpretation path
 
@@ -81,7 +81,7 @@ Model output may draft, summarize, rank, or suggest. It must not decide policy, 
 | P2. Accepted evidence graph | Reviewed groupings and docs notes influence graph deterministically | Graph consumes accepted evidence; route manifests update from graph; provenance preserved |
 | P3. Live dashboard | Multi-agent hotspots become visible product, not just API | Dashboard live mode, server API client, signal timeline, reconnect behavior |
 | P4. Runtime explain | Agents can ask what to read and why | Route hint schema, `scryrs route explain`, deterministic evidence-backed reasons |
-| P5. Publishing adapters | Reviewed knowledge leaves `.scryrs/` inbox | Markdown adapter, then Rspress / llms surfaces, deterministic outputs |
+| P5. Publishing adapters | Reviewed knowledge leaves `.scryrs/` through generic Markdown first | Markdown adapter consumes accepted review decisions, then Rspress / llms surfaces layer on later deterministic outputs |
 | P6. LLM assist UX | Models improve proposal quality without owning truth | Opt-in draft/group commands or UI action, bounded EvidencePack, citation validation, no auto-accept |
 | P7. Production hardening | Suite can ship reliably | Release packaging, `scryrs doctor/status`, CI matrix, E2E live workflow, security and privacy checks |
 
@@ -92,8 +92,8 @@ Model output may draft, summarize, rank, or suggest. It must not decide policy, 
 3. Feed accepted semantic groupings and docs evidence into graph build.
 4. Build live dashboard read-only mode against `scryrs server` APIs.
 5. Implement deterministic `scryrs route explain` over route manifests.
-6. Publish accepted docs notes to Markdown.
-7. Publish accepted docs notes to Rspress and regenerated llms surfaces.
+6. Publish accepted reviewed Markdown artifacts from `.scryrs/accepted/` to generic Markdown output roots.
+7. Publish that reviewed Markdown into Rspress and regenerated llms surfaces.
 8. Add opt-in LLM drafting over proposal inbox.
 9. Harden release, diagnostics, and multi-agent E2E verification.
 
