@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Live hotspot end-to-end verification entrypoint.
+#
+# Builds the real scryrs binary in Docker, copies it into .docker-fixtures/,
+# then runs the live-hotspots fixture in a Debian/glibc Node container.
+#
+# Usage:
+#   scripts/verify-live-hotspots
+#
+# Prerequisites:
+#   - Docker (host or DinD)
+#   - No host Rust or Node.js required
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DOCKER_LIB="$ROOT/scripts/lib/docker-verification.sh"
+
+if [[ ! -f "$DOCKER_LIB" ]]; then
+	echo "ERROR: docker-verification.sh not found at $DOCKER_LIB" >&2
+	exit 2
+fi
+
+# shellcheck source=scripts/lib/docker-verification.sh
+source "$DOCKER_LIB"
+
+step "Building scryrs binary (cargo build --release)"
+run_rust bash -c 'cargo build --release && mkdir -p /workspace/.docker-fixtures && cp /workspace/target/release/scryrs /workspace/.docker-fixtures/scryrs'
+
+SCRYRS_BIN="$ROOT/.docker-fixtures/scryrs"
+if [[ ! -x "$SCRYRS_BIN" ]]; then
+	echo "ERROR: scryrs binary not found at $SCRYRS_BIN after build" >&2
+	exit 1
+fi
+
+echo "  scryrs binary built at .docker-fixtures/scryrs"
+
+FIXTURE_NODE_IMAGE="${FIXTURE_NODE_IMAGE:-node:22}"
+FIXTURE_EXIT=0
+
+step "Running live hotspots E2E fixture"
+run_node --image "$FIXTURE_NODE_IMAGE" \
+	-e "PATH=/workspace/.docker-fixtures:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+	-e "SCRYRS_BIN=/workspace/.docker-fixtures/scryrs" \
+	-- \
+	node /workspace/scripts/verification/live-hotspots-e2e.mjs \
+	|| FIXTURE_EXIT=$?
+
+if [[ $FIXTURE_EXIT -eq 0 ]]; then
+	echo "  Live hotspots fixture: PASSED"
+else
+	echo "  Live hotspots fixture: FAILED (exit $FIXTURE_EXIT)" >&2
+fi
+
+echo ""
+echo "============================================"
+echo "Live hotspot verification summary"
+echo "============================================"
+if [[ $FIXTURE_EXIT -eq 0 ]]; then
+	echo "  Live hotspots: PASSED"
+else
+	echo "  Live hotspots: FAILED"
+fi
+echo "============================================"
+
+if [[ $FIXTURE_EXIT -ne 0 ]]; then
+	exit 1
+fi
+
+exit 0

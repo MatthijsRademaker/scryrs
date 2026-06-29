@@ -1,8 +1,17 @@
 # scryrs Verification Suites
 
-This directory contains end-to-end verification fixtures that prove the native
-`scryrs hook <harness>` integration feeds real scryrs persistence without
-changing agent-visible behavior.
+This directory contains end-to-end verification fixtures for two independent
+operator workflows:
+
+- **Hook capture verification** proves the native `scryrs hook <harness>`
+  integration feeds real scryrs persistence without changing agent-visible
+  behavior.
+- **Live hotspot verification** proves the shipped `scryrs` binary can run the
+  real multi-agent live workflow headlessly: `scryrs server`, remote
+  `scryrs record --file`, cumulative hotspot queries, duplicate replay, and SSE
+  replay/resume.
+
+For hook capture:
 
 - **Claude Code** pipes the `PreToolUse` event JSON to `scryrs hook claude-code`
   on stdin. There is no `.mjs` hook file and no node hook process.
@@ -24,12 +33,15 @@ scripts/verification/
 │   └── pi-shim-driver.mjs     # loads hooks/pi/index.ts via tsx with a mock Pi
 ├── claude-code-e2e.mjs        # native `scryrs hook claude-code` (cross-harness)
 ├── pi-hook-e2e.mjs            # native `scryrs hook pi` + transport shim
-└── installed-hook-e2e.mjs     # `scryrs init` create/merge + native commands
+├── installed-hook-e2e.mjs     # `scryrs init` create/merge + native commands
+└── live-hotspots-e2e.mjs      # real `scryrs server` + remote ingest + SSE replay
 ```
 
-### Entrypoint
+### Entrypoints
 
-`scripts/verify-trace-capture` — the single authoritative entrypoint. It:
+#### `scripts/verify-trace-capture`
+
+Authoritative hook-capture verification entrypoint. It:
 
 1. Builds the real `scryrs` binary via `cargo build --release` in a Rust
    Docker container.
@@ -37,6 +49,17 @@ scripts/verification/
 3. Runs the Claude Code fixture against the binary.
 4. Runs the Pi fixture (native command + transport shim) against the binary.
 5. Runs the installed-hook fixture to validate `scryrs init` output.
+
+#### `scripts/verify-live-hotspots`
+
+Authoritative live-workflow verification entrypoint. It:
+
+1. Builds the real `scryrs` binary via `cargo build --release` in a Rust
+   Docker container.
+2. Copies the binary into `.docker-fixtures/scryrs`.
+3. Runs `live-hotspots-e2e.mjs` in a Debian/glibc `node:22` container.
+4. Fails non-zero on server startup failure, transport failure, malformed JSON,
+   assertion failure, or timeout.
 
 No host Node.js is required — all execution happens inside Docker containers.
 
@@ -95,6 +118,28 @@ consumer directories and proves the installed artifacts capture events.
   exercises it with a simulated `tool_result`, proves it invokes
   `scryrs hook pi --file`, and confirms persistence via `scryrs hotspots .`.
 
+#### `live-hotspots-e2e.mjs`
+
+Starts a fresh `scryrs server`, waits for readiness through the live hotspot
+query API, submits deterministic remote `scryrs record --file` batches from two
+agent identities, then verifies cumulative hotspot state, duplicate replay, and
+signal replay/resume through the shipped binary.
+
+**What it proves:**
+
+- **Multi-agent cumulative ingest**: two explicit agents contribute to one
+  overlapping `EditMade` hotspot on the shared server-owned SQLite store.
+- **Threshold crossing**: the shared hotspot crosses the default threshold of
+  `10` without changing server flags.
+- **Duplicate idempotency**: re-submitting the same producer file is
+  acknowledged as duplicate/idempotent and does not change cumulative hotspot
+  score, counts, session count, evidence row IDs, or persisted signal history.
+- **SSE replay/resume**: `GET /v1/repositories/{repository_id}/signals?after=0`
+  replays persisted signals in ascending ID order, and reconnecting with
+  `after=<last_seen_id>` does not replay already-seen signal IDs.
+- **Loud failure behavior**: startup, transport, parsing, assertion, and timeout
+  failures all surface as non-zero verification failures.
+
 ### Libraries
 
 #### `lib/assert.mjs`
@@ -124,13 +169,13 @@ fixtures to verify delegation and fail-open without a real Pi runtime.
 
 ## Usage
 
-### Run all verifications
+### Run hook-capture verification
 
 ```bash
 scripts/verify-trace-capture
 ```
 
-### Run a specific harness
+### Run a specific hook harness
 
 ```bash
 scripts/verify-trace-capture --claude-only   # Claude Code fixture only
@@ -138,16 +183,26 @@ scripts/verify-trace-capture --pi-only       # Pi fixture + installed-hook (pi)
 scripts/verify-trace-capture --init-only     # Installed-hook fixture only
 ```
 
+### Run live hotspot verification
+
+```bash
+scripts/verify-live-hotspots
+```
+
+This suite is intended to start as a standalone/nightly verification path, not
+as a default PR-gate lane.
+
 ### Run a single fixture directly (for debugging)
 
 ```bash
-# Build scryrs first, then install fixture deps.
+# Build scryrs first, then install hook-fixture deps when needed.
 cargo build --release
 npm install better-sqlite3 tsx
 
 SCRYRS_BIN="$PWD/target/release/scryrs" node scripts/verification/claude-code-e2e.mjs
 SCRYRS_BIN="$PWD/target/release/scryrs" node scripts/verification/pi-hook-e2e.mjs
 SCRYRS_BIN="$PWD/target/release/scryrs" node scripts/verification/installed-hook-e2e.mjs
+SCRYRS_BIN="$PWD/target/release/scryrs" node scripts/verification/live-hotspots-e2e.mjs
 ```
 
 ## Debug mode notes
@@ -166,12 +221,20 @@ Override the fixture image with:
 
 ```bash
 FIXTURE_NODE_IMAGE=node:24 scripts/verify-trace-capture
+FIXTURE_NODE_IMAGE=node:24 scripts/verify-live-hotspots
 ```
 
 ## Relationship to Other Tests
 
 - `cargo test` (unit + `hook_tests.rs`) — fast, in-process coverage of the
-  adapters and the `scryrs hook` command, including fail-open. No Docker needed.
+  adapters and the `scryrs hook` command, including fail-open, plus live-server
+  unit/integration coverage for ingest, accumulators, idempotency, and SSE.
+  No Docker needed.
 - `scripts/verify-trace-capture` — authoritative end-to-end proof that the
   native `scryrs hook` integration feeds real scryrs persistence. May be wired
   into `scripts/precommit-run` via `--with-trace-verify`.
+- `scripts/verify-live-hotspots` — authoritative end-to-end proof of the real
+  multi-agent live workflow through the shipped binary. It proves live ingest,
+  duplicate replay, and SSE replay/resume. It does not verify a live dashboard
+  mode; current dashboard smoke remains out of scope for this task. Initial CI
+  posture is standalone/nightly rather than PR-gated by default.
