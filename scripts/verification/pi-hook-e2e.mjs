@@ -71,54 +71,91 @@ function runPiFile(dir, rawEvent, env = {}) {
 // A. Native `scryrs hook pi --file` mapping
 // -----------------------------------------------------------------------
 function testNativeMapping() {
-	console.log("\n\x1b[33m--- Pi: native `scryrs hook pi --file` mapping ---\x1b[0m");
+	console.log(
+		"\n\x1b[33m--- Pi: native `scryrs hook pi --file` mapping ---\x1b[0m",
+	);
 
 	const cases = [
 		{
 			name: "read",
-			raw: { session_id: "pi-1", toolName: "read", input: { path: "src/a.rs" }, isError: false },
+			raw: {
+				session_id: "pi-1",
+				toolName: "read",
+				input: { path: "src/a.rs" },
+				isError: false,
+			},
 			type: "FileOpened",
 			tool: "read",
 			outcome: "Success",
 		},
 		{
 			name: "ast_grep_search",
-			raw: { session_id: "pi-1", toolName: "ast_grep_search", input: { query: "fn main" }, isError: false },
+			raw: {
+				session_id: "pi-1",
+				toolName: "ast_grep_search",
+				input: { query: "fn main" },
+				isError: false,
+			},
 			type: "SearchRun",
 			tool: "ast_grep_search",
 			outcome: "Success",
 		},
 		{
 			name: "edit",
-			raw: { session_id: "pi-1", toolName: "edit", input: { path: "src/a.rs" }, isError: false },
+			raw: {
+				session_id: "pi-1",
+				toolName: "edit",
+				input: { path: "src/a.rs" },
+				isError: false,
+			},
 			type: "EditMade",
 			tool: "edit",
 			outcome: "Success",
 		},
 		{
 			name: "write",
-			raw: { session_id: "pi-1", toolName: "write", input: { path: "src/b.rs" }, isError: false },
+			raw: {
+				session_id: "pi-1",
+				toolName: "write",
+				input: { path: "src/b.rs" },
+				isError: false,
+			},
 			type: "EditMade",
 			tool: "write",
 			outcome: "Success",
 		},
 		{
 			name: "lsp_navigation success",
-			raw: { session_id: "pi-1", toolName: "lsp_navigation", input: { symbol: "Dispatcher" }, isError: false },
+			raw: {
+				session_id: "pi-1",
+				toolName: "lsp_navigation",
+				input: { symbol: "Dispatcher" },
+				isError: false,
+			},
 			type: "SymbolInspected",
 			tool: "lsp_navigation",
 			outcome: "Success",
 		},
 		{
 			name: "lsp_navigation error",
-			raw: { session_id: "pi-1", toolName: "lsp_navigation", input: { symbol: "Missing" }, isError: true },
+			raw: {
+				session_id: "pi-1",
+				toolName: "lsp_navigation",
+				input: { symbol: "Missing" },
+				isError: true,
+			},
 			type: "FailedLookup",
 			tool: "lsp_navigation",
 			outcome: "Failure",
 		},
 		{
 			name: "read isError",
-			raw: { session_id: "pi-1", toolName: "read", input: { path: "x.rs" }, isError: true },
+			raw: {
+				session_id: "pi-1",
+				toolName: "read",
+				input: { path: "x.rs" },
+				isError: true,
+			},
 			type: "FileOpened",
 			tool: "read",
 			outcome: "Failure",
@@ -137,7 +174,10 @@ function testNativeMapping() {
 		try {
 			const r = runPiFile(dir, c.raw);
 			if (r.status !== 0 || r.stdout !== "") {
-				fail(`${c.name}: exit 0 empty stdout`, `status=${r.status} stdout=${JSON.stringify(r.stdout)}`);
+				fail(
+					`${c.name}: exit 0 empty stdout`,
+					`status=${r.status} stdout=${JSON.stringify(r.stdout)}`,
+				);
 				continue;
 			}
 			const events = readEventsDb(storeFor(dir));
@@ -151,7 +191,10 @@ function testNativeMapping() {
 			if (events[0].outcome.result === c.outcome) {
 				pass(`${c.name}: outcome ${c.outcome}`);
 			} else {
-				fail(`${c.name}: outcome ${c.outcome}`, `got ${events[0].outcome.result}`);
+				fail(
+					`${c.name}: outcome ${c.outcome}`,
+					`got ${events[0].outcome.result}`,
+				);
 			}
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
@@ -163,9 +206,15 @@ function testUntracked() {
 	console.log("\n\x1b[33m--- Pi: untracked tool pass-through ---\x1b[0m");
 	const dir = freshDir("scryrs-pi-untracked-");
 	try {
-		const r = runPiFile(dir, { session_id: "pi-1", toolName: "todo", input: {}, isError: false });
+		const r = runPiFile(dir, {
+			session_id: "pi-1",
+			toolName: "todo",
+			input: {},
+			isError: false,
+		});
 		const count = readEventsDb(storeFor(dir)).length;
-		if (r.status === 0 && count === 0) pass("untracked Pi tool: exit 0, no event");
+		if (r.status === 0 && count === 0)
+			pass("untracked Pi tool: exit 0, no event");
 		else fail("untracked Pi tool", `status=${r.status} count=${count}`);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
@@ -176,7 +225,16 @@ function testBashGating() {
 	console.log("\n\x1b[33m--- Pi: Bash debug-gating ---\x1b[0m");
 	const off = freshDir("scryrs-pi-bash-off-");
 	try {
-		runPiFile(off, { session_id: "pi-1", toolName: "bash", input: { command: "ls" }, isError: false }, { SCRYRS_DEBUG: "" });
+		runPiFile(
+			off,
+			{
+				session_id: "pi-1",
+				toolName: "bash",
+				input: { command: "ls" },
+				isError: false,
+			},
+			{ SCRYRS_DEBUG: "" },
+		);
 		const count = readEventsDb(storeFor(off)).length;
 		if (count === 0) pass("Pi bash dropped when SCRYRS_DEBUG unset");
 		else fail("Pi bash gating (off)", `got ${count}`);
@@ -185,7 +243,16 @@ function testBashGating() {
 	}
 	const on = freshDir("scryrs-pi-bash-on-");
 	try {
-		runPiFile(on, { session_id: "pi-1", toolName: "bash", input: { command: "cargo test" }, isError: false }, { SCRYRS_DEBUG: "1" });
+		runPiFile(
+			on,
+			{
+				session_id: "pi-1",
+				toolName: "bash",
+				input: { command: "cargo test" },
+				isError: false,
+			},
+			{ SCRYRS_DEBUG: "1" },
+		);
 		const events = readEventsDb(storeFor(on));
 		if (events.length === 1 && events[0].event_type === "CommandExecuted") {
 			pass("Pi bash captured as CommandExecuted when SCRYRS_DEBUG set");
@@ -202,7 +269,7 @@ function testBashGating() {
 // -----------------------------------------------------------------------
 function runShimDriver(storeDir, { failOpen = false } = {}) {
 	const result = spawnSync(TSX, [SHIM_DRIVER], {
-		cwd: ROOT,
+		cwd: storeDir,
 		env: {
 			...process.env,
 			PI_HOOK_PATH: HOOK_TS,
@@ -258,7 +325,10 @@ function testShimDelegation() {
 		// Forwarded raw event carries the resolved session_id.
 		try {
 			const fwd = JSON.parse(toolCall.content);
-			if (fwd.session_id === "pi-shim-session" && fwd.input?.path === "README.md") {
+			if (
+				fwd.session_id === "pi-shim-session" &&
+				fwd.input?.path === "README.md"
+			) {
 				pass("shim forwards raw event with injected session_id");
 			} else {
 				fail("shim forwards raw event", JSON.stringify(fwd));
@@ -268,7 +338,11 @@ function testShimDelegation() {
 		}
 		// Real persistence through the delegated command.
 		const events = readEventsDb(storeFor(dir));
-		if (events.some((e) => e.event_type === "FileOpened" && e.tool_name === "read")) {
+		if (
+			events.some(
+				(e) => e.event_type === "FileOpened" && e.tool_name === "read",
+			)
+		) {
 			pass("shim delegation persists a FileOpened event");
 		} else {
 			fail("shim delegation persists event", JSON.stringify(events));
@@ -279,7 +353,9 @@ function testShimDelegation() {
 }
 
 function testShimFailOpen() {
-	console.log("\n\x1b[33m--- Pi: shim fails open on delegation failure ---\x1b[0m");
+	console.log(
+		"\n\x1b[33m--- Pi: shim fails open on delegation failure ---\x1b[0m",
+	);
 	if (!existsSync(TSX)) {
 		fail("tsx available", `not found at ${TSX} — run npm install`);
 		return;
@@ -292,7 +368,10 @@ function testShimFailOpen() {
 		if (status === 0 && parsed && parsed.threw === false) {
 			pass("shim does not throw when delegation returns non-zero");
 		} else {
-			fail("shim fail-open", `status=${status} parsed=${JSON.stringify(parsed)}`);
+			fail(
+				"shim fail-open",
+				`status=${status} parsed=${JSON.stringify(parsed)}`,
+			);
 		}
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
@@ -303,14 +382,25 @@ function testShimFailOpen() {
 // C. The shim contains no translation logic (single source of truth in Rust)
 // -----------------------------------------------------------------------
 function testShimHasNoMapping() {
-	console.log("\n\x1b[33m--- Pi: shim contains no tool→event mapping ---\x1b[0m");
+	console.log(
+		"\n\x1b[33m--- Pi: shim contains no tool→event mapping ---\x1b[0m",
+	);
 	const src = readFileSync(HOOK_TS, "utf-8");
 	const checks = [
 		[!src.includes("scryrs record"), "shim does not call `scryrs record`"],
-		[src.includes("hook"), "shim references the native `scryrs hook pi` command"],
+		[
+			src.includes("hook"),
+			"shim references the native `scryrs hook pi` command",
+		],
 		[!src.includes("TRACKED_TOOLS"), "shim has no TRACKED_TOOLS whitelist"],
-		[!src.includes("FileOpened"), "shim has no event-type mapping (no FileOpened)"],
-		[!src.includes("SymbolInspected"), "shim has no event-type mapping (no SymbolInspected)"],
+		[
+			!src.includes("FileOpened"),
+			"shim has no event-type mapping (no FileOpened)",
+		],
+		[
+			!src.includes("SymbolInspected"),
+			"shim has no event-type mapping (no SymbolInspected)",
+		],
 	];
 	for (const [ok, name] of checks) {
 		if (ok) pass(name);
