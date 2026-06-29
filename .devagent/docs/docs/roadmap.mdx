@@ -167,6 +167,7 @@ Required deliverables:
 - Incremental hotspot accumulator that applies the same deterministic weight table as batch `scryrs hotspots` and does not double-count duplicate producer events.
 - `HotspotSignal` records for threshold crossings, carrying subject kind, subject, score, delta, window, and evidence references.
 - Read/query APIs for current hotspots plus an SSE signal stream for live clients.
+- `scryrs dashboard --server-url <URL> --repository-id <ID>` live mode so operators can browse server-ranked hotspots and replay/resume hotspot signals through the dashboard's same-origin `/api/*` surface.
 - Artifact export remains available: `.scryrs/hotspots.json` can be produced from local or server state, but it is not the live source of truth.
 
 Accepted limitations:
@@ -294,7 +295,7 @@ If roadmap starts to sprawl, cut work using these rules:
 | M5 - Routing data beta | Export graph and route manifests for downstream consumers |
 | M6 - Proposal inbox beta | Generate reviewable docs, memory, ADR, skill, and grouping proposals from evidence |
 | M7 - Review loop beta | Accept or reject proposals and convert accepted output into recorded evidence |
-| M8 - Live dashboard beta | Browse multi-agent live hotspots and signal history from `scryrs dashboard` |
+| M8 - Live dashboard beta | Browse multi-agent live hotspots and replay/resume signal history from `scryrs dashboard --server-url <URL> --repository-id <ID>` |
 | M9 - Runtime explain beta | Ask `scryrs route explain` what context to read and inspect evidence-backed reasons |
 | M10 - Adapter suite beta | Publish approved knowledge into Markdown, Rspress, and llms surfaces |
 | M11 - LLM assist beta | Use bounded model drafting/grouping over proposal inbox without auto-acceptance |

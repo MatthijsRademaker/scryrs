@@ -57,8 +57,8 @@ COMMANDS\n\
       Accept a validated proposal without mutating the proposal inbox artifact.\n\
   scryrs proposals reject <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>\n\
       Reject a validated proposal without mutating the proposal inbox artifact.\n\
-  scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]\n\
-      Start local dashboard server and open the browser dashboard.\n\
+  scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--server-url <URL> --repository-id <ID>] [--no-open] [--dev]\n\
+      Start dashboard server and open the browser dashboard.\n\
   scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]\n\
       Start the central trace ingest server with live hotspot query
 \
@@ -137,7 +137,7 @@ OPTIONS\n\
 EXIT CODES\n\
   0    Success (hotspots: JSON written; record local: all events accepted; record remote: no rejections or failures; init: hook installed; propose/proposals: artifacts written or listed successfully; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)\n\
   1    Hotspots: storage error. Record: rejected events or I/O error (local or server rejections). Init: I/O error. Proposals: serialization or filesystem write failure. Dashboard: port in use or artifact read error. Server: port in use or store error.\n\
-  2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, self-install refusal, invalid mode, or missing/invalid live-mode configuration; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; route explain: missing PATH, missing --query, missing/malformed/schema-mismatched routes.json; dashboard: invalid flags or bind failure; server: invalid flags or bind failure",
+  2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, self-install refusal, invalid mode, or missing/invalid live-mode configuration; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; route explain: missing PATH, missing --query, missing/malformed/schema-mismatched routes.json; dashboard: invalid flags, bind failure, or partial live-mode configuration; server: invalid flags or bind failure",
         SCHEMA_VERSION, SCHEMA_VERSION, HOTSPOT_SCHEMA_VERSION
     )
 }

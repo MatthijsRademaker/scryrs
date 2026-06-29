@@ -15,7 +15,7 @@ use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{Config, DashboardError};
+use crate::{Config, DashboardError, SourceMode};
 
 #[derive(RustEmbed)]
 #[folder = "frontend/dist/"]
@@ -24,6 +24,7 @@ struct EmbeddedAssets;
 #[derive(Clone)]
 struct AppState {
     config: Config,
+    http_client: reqwest::Client,
 }
 
 #[derive(Serialize)]
@@ -79,10 +80,19 @@ struct EventQuery {
     session_id: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SignalQuery {
+    after: Option<String>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MetaResponse {
+    mode: &'static str,
     repository_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repository_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -122,12 +132,16 @@ pub struct SessionDetail {
 }
 
 pub fn router(config: Config) -> Router {
-    let state = Arc::new(AppState { config });
+    let state = Arc::new(AppState {
+        config,
+        http_client: reqwest::Client::new(),
+    });
     Router::new()
         .route("/", get(index))
         .route("/assets/*path", get(asset))
         .route("/api/meta", get(meta))
         .route("/api/hotspots", get(hotspots))
+        .route("/api/signals", get(signals))
         .route("/api/sessions", get(sessions))
         .route("/api/sessions/:session_id", get(session_detail))
         .route("/api/events", get(events))
@@ -178,11 +192,31 @@ fn open_browser(url: &str) {
 
 async fn meta(State(state): State<Arc<AppState>>) -> Json<MetaResponse> {
     Json(MetaResponse {
+        mode: state.config.source_mode.label(),
         repository_path: state.config.repo_root.to_string_lossy().into_owned(),
+        repository_id: state
+            .config
+            .source_mode
+            .live_config()
+            .map(|config| config.repository_id.clone()),
     })
 }
 
+async fn signals(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<SignalQuery>,
+) -> Result<Response<Body>, ApiError> {
+    match &state.config.source_mode {
+        SourceMode::Local => Err(ApiError::missing("signal stream unavailable in local mode")),
+        SourceMode::Live(live) => proxy_live_signals(&state.http_client, live, query.after).await,
+    }
+}
+
 async fn hotspots(State(state): State<Arc<AppState>>) -> Result<Response<Body>, ApiError> {
+    if let Some(live) = state.config.source_mode.live_config() {
+        return proxy_live_hotspots(&state.http_client, live).await;
+    }
+
     let path = state.config.repo_root.join(".scryrs").join("hotspots.json");
     let bytes = std::fs::read(&path).map_err(|err| {
         if err.kind() == std::io::ErrorKind::NotFound {
@@ -198,6 +232,10 @@ async fn sessions(
     State(state): State<Arc<AppState>>,
     Query(query): Query<LimitQuery>,
 ) -> Result<Json<Vec<SessionSummary>>, ApiError> {
+    if state.config.source_mode.live_config().is_some() {
+        return Err(ApiError::missing("/api/sessions unavailable in live mode"));
+    }
+
     let db_path = db_path(&state.config.repo_root);
     let limit = normalize_limit(query.limit, 50);
     let rows = run_blocking(move || query_sessions(db_path, limit)).await?;
@@ -208,6 +246,12 @@ async fn session_detail(
     State(state): State<Arc<AppState>>,
     AxumPath(session_id): AxumPath<String>,
 ) -> Result<Json<SessionDetail>, ApiError> {
+    if state.config.source_mode.live_config().is_some() {
+        return Err(ApiError::missing(
+            "/api/sessions/:session_id unavailable in live mode",
+        ));
+    }
+
     let db_path = db_path(&state.config.repo_root);
     let detail = run_blocking(move || query_session_detail(db_path, session_id)).await?;
     Ok(Json(detail))
@@ -217,6 +261,10 @@ async fn events(
     State(state): State<Arc<AppState>>,
     Query(query): Query<EventQuery>,
 ) -> Result<Json<EventsPage>, ApiError> {
+    if state.config.source_mode.live_config().is_some() {
+        return Err(ApiError::missing("/api/events unavailable in live mode"));
+    }
+
     let db_path = db_path(&state.config.repo_root);
     let limit = normalize_limit(query.limit, 50);
     let cursor = parse_cursor(query.cursor)?;
@@ -233,6 +281,91 @@ where
     tokio::task::spawn_blocking(f)
         .await
         .map_err(|err| ApiError::bad_gateway(format!("dashboard query task failed: {err}")))?
+}
+
+async fn proxy_live_hotspots(
+    client: &reqwest::Client,
+    live: &crate::LiveSourceConfig,
+) -> Result<Response<Body>, ApiError> {
+    let response = client
+        .get(live_api_url(
+            live,
+            &["v1", "repositories", &live.repository_id, "hotspots"],
+        )?)
+        .query(&[("window", "cumulative")])
+        .send()
+        .await
+        .map_err(|err| {
+            ApiError::bad_gateway(format!("live hotspots upstream request failed: {err}"))
+        })?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| String::from("upstream response body unavailable"));
+        return Err(ApiError::bad_gateway(format!(
+            "live hotspots upstream returned {status}: {body}"
+        )));
+    }
+
+    let bytes = response.bytes().await.map_err(|err| {
+        ApiError::bad_gateway(format!("live hotspots upstream body read failed: {err}"))
+    })?;
+    Ok(bytes_response(bytes.to_vec(), "application/json"))
+}
+
+async fn proxy_live_signals(
+    client: &reqwest::Client,
+    live: &crate::LiveSourceConfig,
+    after: Option<String>,
+) -> Result<Response<Body>, ApiError> {
+    let mut request = client.get(live_api_url(
+        live,
+        &["v1", "repositories", &live.repository_id, "signals"],
+    )?);
+    if let Some(after) = after.as_deref() {
+        request = request.query(&[("after", after)]);
+    }
+
+    let response = request.send().await.map_err(|err| {
+        ApiError::bad_gateway(format!("live signals upstream request failed: {err}"))
+    })?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| String::from("upstream response body unavailable"));
+        return Err(ApiError::bad_gateway(format!(
+            "live signals upstream returned {status}: {body}"
+        )));
+    }
+
+    let mut proxied = Response::new(Body::from_stream(response.bytes_stream()));
+    proxied
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
+    Ok(proxied)
+}
+
+fn live_api_url(
+    live: &crate::LiveSourceConfig,
+    path_segments: &[&str],
+) -> Result<reqwest::Url, ApiError> {
+    let mut url = reqwest::Url::parse(&live.server_url)
+        .map_err(|err| ApiError::bad_gateway(format!("invalid live server URL: {err}")))?;
+    let mut segments = url.path_segments_mut().map_err(|_| {
+        ApiError::bad_gateway("invalid live server URL: cannot append path segments")
+    })?;
+    segments.pop_if_empty();
+    for segment in path_segments {
+        segments.push(segment);
+    }
+    drop(segments);
+    Ok(url)
 }
 
 fn db_path(repo_root: &Path) -> PathBuf {

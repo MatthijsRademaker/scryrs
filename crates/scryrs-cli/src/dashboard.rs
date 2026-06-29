@@ -6,20 +6,24 @@ use clap::ArgMatches;
 pub(crate) fn write_dashboard_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(
         out,
-        "scryrs dashboard — start local dashboard server\n\n\
-Starts a local HTTP server for browsing .scryrs hotspot, session, and event data.\n\n\
+        "scryrs dashboard — start dashboard server\n\n\
+Starts an HTTP server for browsing local .scryrs artifacts or live hotspot data proxied from scryrs server.\n\n\
 USAGE\n\
-  scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]\n\n\
+  scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--server-url <URL> --repository-id <ID>] [--no-open] [--dev]\n\n\
 FLAGS\n\
-  -p, --port <PORT>   TCP port to bind (default 8080)\n\
-  -b, --bind <ADDR>   Bind address (default 127.0.0.1)\n\
-      --no-open       Do not open browser automatically\n\
-      --dev           Serve SPA from crates/scryrs-dashboard/frontend/dist/ instead of embedded assets\n\n\
+  -p, --port <PORT>         TCP port to bind (default 8080)\n\
+  -b, --bind <ADDR>         Bind address (default 127.0.0.1)\n\
+      --server-url <URL>    Live-mode scryrs server base URL (requires --repository-id)\n\
+      --repository-id <ID>  Live-mode repository identity (requires --server-url)\n\
+      --no-open             Do not open browser automatically\n\
+      --dev                 Serve SPA from crates/scryrs-dashboard/frontend/dist/ instead of embedded assets\n\n\
 REST API\n\
+  GET /api/meta\n\
   GET /api/hotspots\n\
-  GET /api/sessions\n\
-  GET /api/sessions/:sessionId\n\
-  GET /api/events\n"
+  GET /api/signals (live mode only)\n\
+  GET /api/sessions (local mode only)\n\
+  GET /api/sessions/:sessionId (local mode only)\n\
+  GET /api/events (local mode only)\n"
     )
 }
 
@@ -31,7 +35,7 @@ pub(crate) fn execute_dashboard(err: &mut impl Write, m: &ArgMatches) -> i32 {
             let _ = writeln!(err, "scryrs dashboard: {message}");
             let _ = writeln!(
                 err,
-                "Usage: scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]"
+                "Usage: scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--server-url <URL> --repository-id <ID>] [--no-open] [--dev]"
             );
             return 2;
         }
@@ -42,7 +46,21 @@ pub(crate) fn execute_dashboard(err: &mut impl Write, m: &ArgMatches) -> i32 {
             let _ = writeln!(err, "scryrs dashboard: {message}");
             let _ = writeln!(
                 err,
-                "Usage: scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]"
+                "Usage: scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--server-url <URL> --repository-id <ID>] [--no-open] [--dev]"
+            );
+            return 2;
+        }
+    };
+    let source_mode = match scryrs_dashboard::SourceMode::from_dashboard_args(
+        m.get_one::<String>("server-url").map(String::as_str),
+        m.get_one::<String>("repository-id").map(String::as_str),
+    ) {
+        Ok(mode) => mode,
+        Err(error) => {
+            let _ = writeln!(err, "scryrs dashboard: {error}");
+            let _ = writeln!(
+                err,
+                "Usage: scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--server-url <URL> --repository-id <ID>] [--no-open] [--dev]"
             );
             return 2;
         }
@@ -63,6 +81,7 @@ pub(crate) fn execute_dashboard(err: &mut impl Write, m: &ArgMatches) -> i32 {
         m.get_flag("no-open"),
         m.get_flag("dev"),
         repo_root,
+        source_mode,
     ) {
         Ok(config) => config,
         Err(error) => {
