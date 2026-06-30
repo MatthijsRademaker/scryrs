@@ -15,14 +15,14 @@ env:
   IMAGE_NAME: ghcr.io/matthijsrademaker/scryrs-server
 
 jobs:
-  # Create the GitHub Release once so matrix build jobs can attach assets to it
-  # without racing on release creation.
+  # Create draft release first so /releases/latest/download never points at an
+  # empty published release while matrix jobs are still uploading assets.
   create-release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create release (idempotent)
+      - name: Create draft release (idempotent)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -30,7 +30,7 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists; reusing it."
           else
-            gh release create "$TAG" --verify-tag --generate-notes --title "$TAG"
+            gh release create "$TAG" --verify-tag --generate-notes --title "$TAG" --draft
           fi
 
   build-release:
@@ -89,6 +89,18 @@ jobs:
         run: |
           ASSET="${{ steps.stage.outputs.asset }}"
           gh release upload "${GITHUB_REF_NAME}" "$ASSET" "$ASSET.sha256" --clobber
+
+  publish-release:
+    needs:
+      - create-release
+      - build-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "${GITHUB_REF_NAME}" --draft=false
 
   publish-image:
     runs-on: ubuntu-latest
