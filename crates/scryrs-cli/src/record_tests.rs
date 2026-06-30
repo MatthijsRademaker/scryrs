@@ -62,7 +62,12 @@ fn record_stdin_all_valid_exits_0() {
     let mut err = Vec::new();
 
     assert_eq!(
-        run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes(),),
+        run_record_with_io(
+            ["record", "--stdin", "--mode", "local"],
+            &mut out,
+            &mut err,
+            input.as_bytes(),
+        ),
         0
     );
 
@@ -85,7 +90,12 @@ fn record_stdin_some_invalid_exits_1() {
     let mut err = Vec::new();
 
     assert_eq!(
-        run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes(),),
+        run_record_with_io(
+            ["record", "--stdin", "--mode", "local"],
+            &mut out,
+            &mut err,
+            input.as_bytes(),
+        ),
         1
     );
 
@@ -110,7 +120,12 @@ fn record_stdin_blank_lines_are_skipped() {
     let mut err = Vec::new();
 
     assert_eq!(
-        run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes(),),
+        run_record_with_io(
+            ["record", "--stdin", "--mode", "local"],
+            &mut out,
+            &mut err,
+            input.as_bytes(),
+        ),
         0
     );
 
@@ -142,7 +157,13 @@ fn record_file_all_valid_exits_0() {
 
     assert_eq!(
         run_record_with_io(
-            ["record", "--file", &file_path.display().to_string()],
+            [
+                "record",
+                "--file",
+                &file_path.display().to_string(),
+                "--mode",
+                "local"
+            ],
             &mut out,
             &mut err,
             stdin,
@@ -175,7 +196,13 @@ fn record_file_some_invalid_exits_1() {
 
     assert_eq!(
         run_record_with_io(
-            ["record", "--file", &file_path.display().to_string()],
+            [
+                "record",
+                "--file",
+                &file_path.display().to_string(),
+                "--mode",
+                "local"
+            ],
             &mut out,
             &mut err,
             stdin,
@@ -240,7 +267,13 @@ fn record_unreadable_file_exits_2() {
 
     assert_eq!(
         run_record_with_io(
-            ["record", "--file", "/nonexistent/path/events.jsonl"],
+            [
+                "record",
+                "--file",
+                "/nonexistent/path/events.jsonl",
+                "--mode",
+                "local"
+            ],
             &mut out,
             &mut err,
             stdin,
@@ -262,7 +295,12 @@ fn record_output_is_valid_json() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes());
+    run_record_with_io(
+        ["record", "--stdin", "--mode", "local"],
+        &mut out,
+        &mut err,
+        input.as_bytes(),
+    );
 
     let out_str = String::from_utf8_lossy(&out);
     let summary: serde_json::Value = match serde_json::from_str(out_str.trim()) {
@@ -281,7 +319,12 @@ fn record_rejection_diagnostics_are_valid_json() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes());
+    run_record_with_io(
+        ["record", "--stdin", "--mode", "local"],
+        &mut out,
+        &mut err,
+        input.as_bytes(),
+    );
 
     let stderr = String::from_utf8_lossy(&err);
     let diag: serde_json::Value = match serde_json::from_str(stderr.trim()) {
@@ -300,7 +343,12 @@ fn record_multiple_rejections_all_on_stderr() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes());
+    run_record_with_io(
+        ["record", "--stdin", "--mode", "local"],
+        &mut out,
+        &mut err,
+        input.as_bytes(),
+    );
 
     let stdout = String::from_utf8_lossy(&out);
     assert!(stdout.contains("\"accepted\":0"));
@@ -416,7 +464,12 @@ fn record_persists_to_scryrs_db() {
     let mut err = Vec::new();
 
     assert_eq!(
-        run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes()),
+        run_record_with_io(
+            ["record", "--stdin", "--mode", "local"],
+            &mut out,
+            &mut err,
+            input.as_bytes()
+        ),
         0
     );
 
@@ -443,8 +496,12 @@ fn record_does_not_create_events_jsonl() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    let _exit_code =
-        run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes());
+    let _exit_code = run_record_with_io(
+        ["record", "--stdin", "--mode", "local"],
+        &mut out,
+        &mut err,
+        input.as_bytes(),
+    );
 
     // The SQLite store should be created at the override path.
     assert!(
@@ -490,7 +547,12 @@ fn record_stdin_persists_rows_to_sqlite() {
     let mut err = Vec::new();
 
     assert_eq!(
-        run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes()),
+        run_record_with_io(
+            ["record", "--stdin", "--mode", "local"],
+            &mut out,
+            &mut err,
+            input.as_bytes()
+        ),
         0
     );
     assert!(
@@ -546,7 +608,13 @@ fn record_file_persists_rows_to_sqlite() {
 
     assert_eq!(
         run_record_with_io(
-            ["record", "--file", &file_path.display().to_string()],
+            [
+                "record",
+                "--file",
+                &file_path.display().to_string(),
+                "--mode",
+                "local"
+            ],
             &mut out,
             &mut err,
             stdin,
@@ -599,7 +667,12 @@ fn mixed_valid_invalid_rejected_lines_no_rows() {
     let mut err = Vec::new();
 
     assert_eq!(
-        run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes()),
+        run_record_with_io(
+            ["record", "--stdin", "--mode", "local"],
+            &mut out,
+            &mut err,
+            input.as_bytes()
+        ),
         1
     );
 
@@ -648,7 +721,12 @@ fn record_fatal_store_failure_exits_2() {
     let mut err = Vec::new();
 
     assert_eq!(
-        run_record_with_io(["record", "--stdin"], &mut out, &mut err, input.as_bytes()),
+        run_record_with_io(
+            ["record", "--stdin", "--mode", "local"],
+            &mut out,
+            &mut err,
+            input.as_bytes()
+        ),
         2,
         "fatal store failure must exit 2"
     );
@@ -665,6 +743,99 @@ fn record_fatal_store_failure_exits_2() {
     assert!(
         stderr.contains("scryrs record: cannot open trace datastore"),
         "stderr must report store failure, got: {stderr}"
+    );
+}
+
+// =============================================================================
+// Default-is-live transport selection (default-live-mode change)
+// =============================================================================
+
+/// Run `record` with CWD pinned to `dir`, holding the CWD guard for the whole
+/// invocation so ancestor discovery (`scryrs.json` / `.scryrs/.env`) resolves
+/// from the temp dir rather than the crate's real working directory. Cannot use
+/// `run_record_with_io` here: it locks the same guard that `with_cwd` would.
+fn run_record_in_dir<R: Read>(dir: &std::path::Path, args: &[&str], stdin: R) -> (i32, Vec<u8>) {
+    let _guard = crate::test_support::CWD_GUARD
+        .lock()
+        .unwrap_or_else(|e| panic!("CWD guard poisoned: {e}"));
+    let original = std::env::current_dir().unwrap_or_else(|e| panic!("current_dir: {e}"));
+    std::env::set_current_dir(dir).unwrap_or_else(|e| panic!("set_current_dir: {e}"));
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = base_run_with_io(
+        args.iter().map(|s| s.to_string()),
+        &mut out,
+        &mut err,
+        stdin,
+    );
+
+    std::env::set_current_dir(&original).unwrap_or_else(|e| panic!("restore cwd: {e}"));
+    let _ = out;
+    (code, err)
+}
+
+/// Bare `record` (no `--mode`) with no resolvable remote config must fail fast
+/// with exit 2 and deterministic guidance — never silently fall back to local.
+#[test]
+fn record_default_without_config_fails_fast_with_guidance() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    let input = make_valid_event_json("s1", "doc/a.md");
+    let (code, err) = run_record_in_dir(dir.path(), &["record", "--stdin"], input.as_bytes());
+
+    assert_eq!(code, 2, "default live with no config must exit 2");
+    let err_str = String::from_utf8_lossy(&err);
+    assert!(
+        err_str.contains("live mode is the default"),
+        "must explain live is the default, got: {err_str}"
+    );
+    assert!(
+        err_str.contains(".scryrs/.env"),
+        "must describe populating .scryrs/.env, got: {err_str}"
+    );
+    assert!(
+        err_str.contains("--mode local"),
+        "must describe selecting local mode, got: {err_str}"
+    );
+    // No local store was created in the temp dir.
+    assert!(!dir.path().join(".scryrs/scryrs.db").exists());
+}
+
+/// `.scryrs/.env` participates in the precedence chain: a complete env file in
+/// the temp dir resolves remote config so the default (live) path activates and
+/// attempts a network submission (which fails to connect, exiting 2 loudly —
+/// not the missing-config guidance, proving config WAS resolved).
+#[test]
+fn record_default_resolves_remote_from_scryrs_env() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    let scryrs_dir = dir.path().join(".scryrs");
+    std::fs::create_dir_all(&scryrs_dir).unwrap_or_else(|e| panic!("create .scryrs: {e}"));
+    // Port 1 is unbindable/unconnectable, forcing a connection failure rather
+    // than a real network call.
+    std::fs::write(
+        scryrs_dir.join(".env"),
+        "SCRYRS_REMOTE_INGEST_URL=http://127.0.0.1:1\n\
+         SCRYRS_REPOSITORY_ID=repo-env\n\
+         SCRYRS_WORKSPACE_ID=ws-env\n\
+         SCRYRS_AGENT_ID=agent-env\n\
+         SCRYRS_REMOTE_TIMEOUT_MS=200\n",
+    )
+    .unwrap_or_else(|e| panic!("write .env: {e}"));
+
+    let input = make_valid_event_json("s1", "doc/a.md");
+    let (code, err) = run_record_in_dir(dir.path(), &["record", "--stdin"], input.as_bytes());
+
+    // Config resolved (remote active) → transport failure, exit 2, but NOT the
+    // missing-config guidance.
+    assert_eq!(code, 2, "remote transport failure must exit 2");
+    let err_str = String::from_utf8_lossy(&err);
+    assert!(
+        !err_str.contains("live mode is the default but"),
+        "config was resolved; must not emit missing-config guidance, got: {err_str}"
+    );
+    assert!(
+        err_str.contains("scryrs record:"),
+        "must emit a record diagnostic, got: {err_str}"
     );
 }
 

@@ -171,7 +171,7 @@ fn e2e_record_to_hotspots_pipeline() {
         let mut err = Vec::new();
 
         let exit = scryrs_cli::run_with_io(
-            ["record", "--stdin"],
+            ["record", "--stdin", "--mode", "local"],
             &mut out,
             &mut err,
             fixture.as_bytes(),
@@ -317,7 +317,7 @@ fn e2e_empty_store_produces_success() {
         let mut out = Vec::new();
         let mut err = Vec::new();
         let exit = scryrs_cli::run_with_io(
-            ["record", "--stdin"],
+            ["record", "--stdin", "--mode", "local"],
             &mut out,
             &mut err,
             "\n".as_bytes(), // blank line is skipped by ingest_jsonl

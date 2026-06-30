@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from "vue";
-import { Alert, Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, EmptyState, Table } from "@/shared/ui";
+import { AnimatePresence } from "motion-v";
+import { Alert, Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, EmptyState } from "@/shared/ui";
 import { routeUnavailableMessage } from "@/shared/lib/dashboard-mode";
 import { useMetaStore } from "@/stores/meta";
 import { useSignalStore } from "@/stores/signals";
+import SignalRow from "./SignalRow.vue";
 
 const meta = useMetaStore();
 const signals = useSignalStore();
 const unavailableMessage = computed(() => routeUnavailableMessage("signals", meta.mode));
+const maxScore = computed(() => Math.max(1, ...signals.signals.map((signal) => signal.score)));
 
 const connectionVariant = computed(() => {
   switch (signals.connectionState) {
@@ -71,28 +74,13 @@ onUnmounted(() => {
         </CardHeader>
         <CardContent>
           <EmptyState v-if="signals.signals.length === 0" title="No signals yet" description="Waiting for replayed or live hotspot signals from the configured server." />
-          <Table v-else>
-            <thead class="bg-card/40 text-xs uppercase tracking-wider text-muted-foreground">
-              <tr>
-                <th class="px-3 py-2.5 text-left font-medium">ID</th>
-                <th class="px-3 py-2.5 text-left font-medium">Subject</th>
-                <th class="px-3 py-2.5 text-left font-medium">Kind</th>
-                <th class="px-3 py-2.5 text-left font-medium">Score</th>
-                <th class="px-3 py-2.5 text-left font-medium">Threshold / Delta</th>
-                <th class="px-3 py-2.5 text-left font-medium">Timestamp</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="signal in signals.signals" :key="signal.id" class="border-t border-border transition-colors hover:bg-foreground/[0.03]">
-                <td class="px-3 py-2.5 font-mono tabular-nums text-muted-foreground">{{ signal.id }}</td>
-                <td class="px-3 py-2.5 font-medium text-foreground">{{ signal.subject }}</td>
-                <td class="px-3 py-2.5 text-muted-foreground">{{ signal.subjectKind }}</td>
-                <td class="px-3 py-2.5 tabular-nums">{{ signal.score }}</td>
-                <td class="px-3 py-2.5 text-sm text-muted-foreground">threshold {{ signal.threshold }} · Δ {{ signal.delta }}</td>
-                <td class="px-3 py-2.5 text-muted-foreground">{{ signal.createdAt }}</td>
-              </tr>
-            </tbody>
-          </Table>
+          <!-- Newest-first live feed. Replayed history fades in calmly; only
+               live-tail signals (signal.live) ignite — see SignalRow. -->
+          <div v-else class="flex flex-col gap-2">
+            <AnimatePresence :initial="false">
+              <SignalRow v-for="signal in signals.feed" :key="signal.id" :signal="signal" :max-score="maxScore" />
+            </AnimatePresence>
+          </div>
         </CardContent>
       </Card>
     </template>

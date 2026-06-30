@@ -17,14 +17,15 @@ COMMANDS\n\
   scryrs hook <HARNESS> [--stdin | --file <PATH>]\n\
       Translate a harness's native tool event and record it (fail-open).\n\
       Supported harnesses: claude-code (stdin), pi (--file).\n\
-  scryrs init --agent <NAME> [--mode local|live] [--ingest-url <URL>]\n\
+  scryrs init --agent <NAME> [--mode live|local] [--ingest-url <URL>]\n\
         [--workspace-id <ID>] [--agent-id <ID>] [--repository-id <ID>]\n\
       Install the scryrs trace hook for a supported agent harness.\n\
       Supported harnesses: claude-code, pi\n\
-      --mode local (default): local SQLite trace store (.scryrs/scryrs.db).\n\
-      --mode live: remote ingest via scryrs server (writes project scryrs.json).\n\
-        Live mode requires --ingest-url, --workspace-id, and --agent-id.\n\
+      --mode live (default): remote ingest via scryrs server (writes project scryrs.json\n\
+        and a gitignored .scryrs/.env). Identity resolves from flags, then env,\n\
+        then .scryrs/.env, then scryrs.json remote; unresolved config fails fast.\n\
         --repository-id is derived from Git remote origin when omitted.\n\
+      --mode local: local SQLite trace store (.scryrs/scryrs.db), no network.\n\
   scryrs doctor [--json]\n\
       Run the installation and readiness diagnostic command.\n\
       Reports binary version, command surface, resolved mode, local store,\n\
@@ -61,20 +62,22 @@ COMMANDS\n\
       Accept a validated proposal without mutating the proposal inbox artifact.\n\
   scryrs proposals reject <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>\n\
       Reject a validated proposal without mutating the proposal inbox artifact.\n\
-  scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--server-url <URL> --repository-id <ID>] [--no-open] [--dev]\n\
-      Start dashboard server and open the browser dashboard.\n\
+  scryrs dashboard [--mode live|local] [--port <PORT>] [--bind <ADDR>] [--server-url <URL>] [--repository-id <ID>] [--no-open] [--dev]\n\
+      Start dashboard server and open the browser dashboard (live by default).\n\
   scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]\n\
       Start the central trace ingest server with live hotspot query
 \
       and signal streaming endpoints.\n\n\
 RECORD MODES\n\
-  Local mode (default): persisted to .scryrs/scryrs.db, no network calls.\n\
-  Remote mode: activated when a non-empty ingest URL is configured.\n\
-      Configure via scryrs.json `remote` section, overridden by:\n\
+  Remote mode (default): submits to the configured ingest server.\n\
+      Identity resolves by precedence — flags, then environment, then\n\
+        .scryrs/.env, then scryrs.json `remote` — using the variables:\n\
         SCRYRS_REMOTE_INGEST_URL, SCRYRS_REPOSITORY_ID,\n\
         SCRYRS_WORKSPACE_ID, SCRYRS_AGENT_ID, SCRYRS_REMOTE_TIMEOUT_MS.\n\
       Remote mode skips SQLite entirely (no dual-write, no local fallback).\n\
-      Default timeout: 3000 ms.\n\n\
+      Unresolved required config fails fast (exit 2) with guidance.\n\
+      Default timeout: 3000 ms.\n\
+  Local mode (--mode local): persisted to .scryrs/scryrs.db, no network calls.\n\n\
 RECORD OUTPUT\n\
   Local mode — single-line JSON summary on stdout:\n\
     {{\n\

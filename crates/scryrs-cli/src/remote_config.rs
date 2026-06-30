@@ -4,6 +4,7 @@
 //! applies environment overrides, and returns deterministic local-vs-remote transport
 //! mode. Called before input/store I/O so that mode selection is side-effect free.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Remote ingest configuration, resolved from manifest defaults and environment overrides.
@@ -41,18 +42,50 @@ pub(crate) enum RemoteConfigError {
     MissingIdentity { field: &'static str },
 }
 
+impl RemoteConfigError {
+    /// The configuration field that could not be resolved.
+    pub(crate) fn missing_field(&self) -> &'static str {
+        match self {
+            RemoteConfigError::MissingIdentity { field } => field,
+        }
+    }
+}
+
 impl std::fmt::Display for RemoteConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RemoteConfigError::MissingIdentity { field } => {
                 write!(
                     f,
-                    "remote ingest requires {field} — configure it in scryrs.json remote.{field} or set SCRYRS_{}",
+                    "remote ingest requires {field} — set {0} in .scryrs/.env, set the {0} environment variable, or configure scryrs.json remote.{field}",
                     env_key(field)
                 )
             }
         }
     }
+}
+
+/// Write deterministic remediation guidance when required live configuration
+/// cannot be resolved from any layer. Names the missing field and both
+/// remediation paths: populating `.scryrs/.env`, or selecting local mode.
+pub(crate) fn write_missing_config_guidance(
+    err: &mut impl std::io::Write,
+    command: &str,
+    missing_field: &str,
+) {
+    let _ = writeln!(
+        err,
+        "scryrs {command}: live mode is the default but {missing_field} is not configured"
+    );
+    let _ = writeln!(
+        err,
+        "Populate .scryrs/.env with SCRYRS_REMOTE_INGEST_URL, SCRYRS_REPOSITORY_ID, SCRYRS_WORKSPACE_ID, and SCRYRS_AGENT_ID,"
+    );
+    let _ = writeln!(
+        err,
+        "or rerun with --mode local for local-only, zero-network operation."
+    );
+    let _ = writeln!(err, "See `scryrs --help`");
 }
 
 /// Default remote timeout in milliseconds.
@@ -76,9 +109,18 @@ fn env_key(field: &str) -> &'static str {
     }
 }
 
-/// Resolve the remote config by walking ancestor directories for `scryrs.json`,
-/// reading its optional `remote` section, applying environment overrides, and
-/// determining transport mode.
+/// Optional CLI-provided overrides that take precedence over every other layer.
+#[derive(Debug, Default, Clone)]
+#[allow(dead_code)]
+pub(crate) struct RemoteOverrides {
+    pub ingest_url: Option<String>,
+    pub repository_id: Option<String>,
+    pub workspace_id: Option<String>,
+    pub agent_id: Option<String>,
+    pub timeout_ms: Option<u64>,
+}
+
+/// Resolve the remote config using the default precedence with no CLI overrides.
 ///
 /// When `base_path` is provided, ancestor discovery starts from that directory
 /// (used by hook-triggered resolution rooted at the event cwd). When `None`,
@@ -89,19 +131,47 @@ fn env_key(field: &str) -> &'static str {
 pub(crate) fn resolve_remote_config(
     base_path: Option<&Path>,
 ) -> Result<Option<ResolvedRemote>, RemoteConfigError> {
-    let manifest_remote = discover_manifest_remote(base_path);
+    resolve_remote_config_with(base_path, &RemoteOverrides::default())
+}
 
-    // Apply env overrides on top of manifest defaults.
-    let ingest_url = env_or(ENV_INGEST_URL, manifest_remote.ingest_url.clone());
-    let repository_id = env_or(ENV_REPOSITORY_ID, manifest_remote.repository_id.clone());
-    let workspace_id = env_or(ENV_WORKSPACE_ID, manifest_remote.workspace_id.clone());
-    let agent_id = env_or(ENV_AGENT_ID, manifest_remote.agent_id.clone());
-    let timeout_ms: u64 = match std::env::var(ENV_TIMEOUT_MS) {
-        Ok(val) => val.trim().parse().unwrap_or(DEFAULT_REMOTE_TIMEOUT_MS),
-        Err(_) => manifest_remote
-            .timeout_ms
-            .unwrap_or(DEFAULT_REMOTE_TIMEOUT_MS),
-    };
+/// Resolve the remote config across the full precedence chain, highest first:
+/// CLI overrides > process environment > `.scryrs/.env` > `scryrs.json` `remote`.
+///
+/// `repository_id` falls back to the normalized Git remote-origin identity when
+/// unresolved by any layer. `timeout_ms` defaults to [`DEFAULT_REMOTE_TIMEOUT_MS`].
+#[allow(dead_code)]
+pub(crate) fn resolve_remote_config_with(
+    base_path: Option<&Path>,
+    overrides: &RemoteOverrides,
+) -> Result<Option<ResolvedRemote>, RemoteConfigError> {
+    let manifest_remote = discover_manifest_remote(base_path);
+    let dotenv = load_dotenv(base_path);
+
+    let ingest_url = resolve_field(
+        overrides.ingest_url.as_deref(),
+        ENV_INGEST_URL,
+        &dotenv,
+        &manifest_remote.ingest_url,
+    );
+    let repository_id = resolve_field(
+        overrides.repository_id.as_deref(),
+        ENV_REPOSITORY_ID,
+        &dotenv,
+        &manifest_remote.repository_id,
+    );
+    let workspace_id = resolve_field(
+        overrides.workspace_id.as_deref(),
+        ENV_WORKSPACE_ID,
+        &dotenv,
+        &manifest_remote.workspace_id,
+    );
+    let agent_id = resolve_field(
+        overrides.agent_id.as_deref(),
+        ENV_AGENT_ID,
+        &dotenv,
+        &manifest_remote.agent_id,
+    );
+    let timeout_ms = resolve_timeout(overrides.timeout_ms, &dotenv, manifest_remote.timeout_ms);
 
     // If no ingest URL resolved, stay in local mode.
     if ingest_url.is_empty() {
@@ -110,7 +180,6 @@ pub(crate) fn resolve_remote_config(
 
     // Remote mode active — resolve repository_id.
     let repo_id = if repository_id.is_empty() {
-        // Try git remote origin as fallback.
         git_remote_origin_url().unwrap_or_default()
     } else {
         repository_id
@@ -142,6 +211,137 @@ pub(crate) fn resolve_remote_config(
             timeout_ms,
         },
     }))
+}
+
+/// Resolve the dashboard live target (server URL + repository id) from the
+/// precedence chain, without requiring the workspace/agent identity that
+/// ingest needs. Returns `Ok(None)` when no server URL resolves.
+#[allow(dead_code)]
+pub(crate) fn resolve_dashboard_target(
+    base_path: Option<&Path>,
+    server_url_override: Option<&str>,
+    repository_id_override: Option<&str>,
+) -> Result<Option<(String, String)>, RemoteConfigError> {
+    let manifest_remote = discover_manifest_remote(base_path);
+    let dotenv = load_dotenv(base_path);
+
+    let server_url = resolve_field(
+        server_url_override,
+        ENV_INGEST_URL,
+        &dotenv,
+        &manifest_remote.ingest_url,
+    );
+    if server_url.is_empty() {
+        return Ok(None);
+    }
+
+    let repository_id = resolve_field(
+        repository_id_override,
+        ENV_REPOSITORY_ID,
+        &dotenv,
+        &manifest_remote.repository_id,
+    );
+    let repo_id = if repository_id.is_empty() {
+        git_remote_origin_url().unwrap_or_default()
+    } else {
+        repository_id
+    };
+    if repo_id.is_empty() {
+        return Err(RemoteConfigError::MissingIdentity {
+            field: "repository_id",
+        });
+    }
+
+    Ok(Some((server_url, repo_id)))
+}
+
+/// Resolve a single string field by precedence: CLI override, process env,
+/// `.scryrs/.env`, then manifest default. First non-empty (trimmed) value wins.
+fn resolve_field(
+    override_value: Option<&str>,
+    env_var: &str,
+    dotenv: &HashMap<String, String>,
+    manifest_value: &str,
+) -> String {
+    if let Some(value) = override_value {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    if let Ok(value) = std::env::var(env_var) {
+        if !value.trim().is_empty() {
+            return value.trim().to_string();
+        }
+    }
+    if let Some(value) = dotenv.get(env_var) {
+        if !value.trim().is_empty() {
+            return value.trim().to_string();
+        }
+    }
+    manifest_value.trim().to_string()
+}
+
+/// Resolve the timeout by the same precedence; unparseable values fall through.
+fn resolve_timeout(
+    override_value: Option<u64>,
+    dotenv: &HashMap<String, String>,
+    manifest_value: Option<u64>,
+) -> u64 {
+    if let Some(value) = override_value {
+        return value;
+    }
+    if let Ok(value) = std::env::var(ENV_TIMEOUT_MS) {
+        if let Ok(parsed) = value.trim().parse::<u64>() {
+            return parsed;
+        }
+    }
+    if let Some(value) = dotenv.get(ENV_TIMEOUT_MS) {
+        if let Ok(parsed) = value.trim().parse::<u64>() {
+            return parsed;
+        }
+    }
+    manifest_value.unwrap_or(DEFAULT_REMOTE_TIMEOUT_MS)
+}
+
+/// Load `.scryrs/.env` from the nearest ancestor directory that contains one.
+/// A missing file is not an error — it contributes no values.
+fn load_dotenv(base_path: Option<&Path>) -> HashMap<String, String> {
+    let path = match find_nearest_ancestor(".scryrs/.env", base_path) {
+        Some(p) => p,
+        None => return HashMap::new(),
+    };
+    match std::fs::read_to_string(&path) {
+        Ok(content) => parse_dotenv(&content),
+        Err(_) => HashMap::new(),
+    }
+}
+
+/// Parse `KEY=value` dotenv content. Blank lines and lines beginning with `#`
+/// are ignored. Surrounding single or double quotes on the value are stripped.
+fn parse_dotenv(content: &str) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = trimmed.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if key.is_empty() {
+            continue;
+        }
+        let value = value.trim();
+        let value = value
+            .strip_prefix('"')
+            .and_then(|v| v.strip_suffix('"'))
+            .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
+            .unwrap_or(value);
+        map.insert(key.to_string(), value.to_string());
+    }
+    map
 }
 
 /// Raw remote defaults parsed from the nearest ancestor `scryrs.json`.
@@ -224,14 +424,6 @@ fn find_nearest_ancestor(filename: &str, base_path: Option<&Path>) -> Option<Pat
     None
 }
 
-/// Return the value of `env_var` if non-empty, otherwise `default`.
-fn env_or(env_var: &str, default: String) -> String {
-    match std::env::var(env_var) {
-        Ok(val) if !val.trim().is_empty() => val.trim().to_string(),
-        _ => default,
-    }
-}
-
 /// Try to resolve the Git remote origin URL from the current working directory.
 #[allow(clippy::disallowed_methods)]
 fn git_remote_origin_url() -> Option<String> {
@@ -253,4 +445,132 @@ fn git_remote_origin_url() -> Option<String> {
     // Strip trailing `.git` suffix for normalization.
     let normalized = trimmed.strip_suffix(".git").unwrap_or(trimmed);
     Some(normalized.to_string())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    /// An environment variable name guaranteed not to be set, so `resolve_field`
+    /// tests are deterministic regardless of the ambient process environment.
+    const UNSET_ENV: &str = "SCRYRS_REMOTE_CONFIG_TEST_DEFINITELY_UNSET";
+
+    fn unique_temp_dir(tag: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("scryrs-remote-config-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    #[test]
+    fn parse_dotenv_ignores_comments_and_blanks() {
+        let content =
+            "# a comment\n\n  # indented comment\nSCRYRS_REMOTE_INGEST_URL=http://x:8081\n";
+        let map = parse_dotenv(content);
+        assert_eq!(map.len(), 1);
+        assert_eq!(
+            map.get("SCRYRS_REMOTE_INGEST_URL").map(String::as_str),
+            Some("http://x:8081")
+        );
+    }
+
+    #[test]
+    fn parse_dotenv_strips_quotes_and_trims() {
+        let content = "SCRYRS_WORKSPACE_ID = \"ws-1\" \nSCRYRS_AGENT_ID='agent-1'\n";
+        let map = parse_dotenv(content);
+        assert_eq!(
+            map.get("SCRYRS_WORKSPACE_ID").map(String::as_str),
+            Some("ws-1")
+        );
+        assert_eq!(
+            map.get("SCRYRS_AGENT_ID").map(String::as_str),
+            Some("agent-1")
+        );
+    }
+
+    #[test]
+    fn parse_dotenv_skips_lines_without_equals_or_empty_key() {
+        let content = "no_equals_here\n=missing_key\nSCRYRS_AGENT_ID=ok\n";
+        let map = parse_dotenv(content);
+        assert_eq!(map.len(), 1);
+        assert_eq!(map.get("SCRYRS_AGENT_ID").map(String::as_str), Some("ok"));
+    }
+
+    #[test]
+    fn resolve_field_override_wins() {
+        let dotenv = HashMap::new();
+        let resolved = resolve_field(Some("flag-value"), UNSET_ENV, &dotenv, "manifest-value");
+        assert_eq!(resolved, "flag-value");
+    }
+
+    #[test]
+    fn resolve_field_falls_through_override_to_dotenv() {
+        let mut dotenv = HashMap::new();
+        dotenv.insert(UNSET_ENV.to_string(), "dotenv-value".to_string());
+        // Empty override falls through; env unset; dotenv wins over manifest.
+        let resolved = resolve_field(Some("   "), UNSET_ENV, &dotenv, "manifest-value");
+        assert_eq!(resolved, "dotenv-value");
+    }
+
+    #[test]
+    fn resolve_field_falls_back_to_manifest() {
+        let dotenv = HashMap::new();
+        let resolved = resolve_field(None, UNSET_ENV, &dotenv, "  manifest-value  ");
+        assert_eq!(resolved, "manifest-value");
+    }
+
+    #[test]
+    fn resolve_timeout_prefers_override_then_dotenv_then_manifest_then_default() {
+        let dotenv = HashMap::new();
+        assert_eq!(resolve_timeout(Some(42), &dotenv, Some(99)), 42);
+
+        let mut dotenv = HashMap::new();
+        dotenv.insert(ENV_TIMEOUT_MS.to_string(), "1500".to_string());
+        // Process env is normally unset in tests; dotenv wins over manifest here.
+        if std::env::var(ENV_TIMEOUT_MS).is_err() {
+            assert_eq!(resolve_timeout(None, &dotenv, Some(99)), 1500);
+        }
+
+        let empty = HashMap::new();
+        if std::env::var(ENV_TIMEOUT_MS).is_err() {
+            assert_eq!(resolve_timeout(None, &empty, Some(99)), 99);
+            assert_eq!(
+                resolve_timeout(None, &empty, None),
+                DEFAULT_REMOTE_TIMEOUT_MS
+            );
+        }
+    }
+
+    #[test]
+    fn load_dotenv_missing_file_is_empty() {
+        let dir = unique_temp_dir("missing");
+        let map = load_dotenv(Some(&dir));
+        assert!(map.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_dotenv_reads_scryrs_env() {
+        let dir = unique_temp_dir("present");
+        let scryrs_dir = dir.join(".scryrs");
+        std::fs::create_dir_all(&scryrs_dir).expect("create .scryrs");
+        std::fs::write(
+            scryrs_dir.join(".env"),
+            "SCRYRS_REMOTE_INGEST_URL=http://srv:8081\nSCRYRS_WORKSPACE_ID=ws\n",
+        )
+        .expect("write .env");
+
+        let map = load_dotenv(Some(&dir));
+        assert_eq!(
+            map.get("SCRYRS_REMOTE_INGEST_URL").map(String::as_str),
+            Some("http://srv:8081")
+        );
+        assert_eq!(
+            map.get("SCRYRS_WORKSPACE_ID").map(String::as_str),
+            Some("ws")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

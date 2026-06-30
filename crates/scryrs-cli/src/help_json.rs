@@ -37,14 +37,15 @@ pub(crate) fn cli_surface_doc() -> String {
             },
             {
                 "name": "record",
-                "description": "Ingest JSONL trace events from stdin or file. Defaults to local mode (writes to .scryrs/scryrs.db). Activates remote mode when a non-empty ingest URL is configured via scryrs.json `remote` section (overridden by SCRYRS_REMOTE_INGEST_URL, SCRYRS_REPOSITORY_ID, SCRYRS_WORKSPACE_ID, SCRYRS_AGENT_ID, SCRYRS_REMOTE_TIMEOUT_MS). Remote mode skips local SQLite and submits a single batch to POST /v1/trace-events/batch.",
+                "description": "Ingest JSONL trace events from stdin or file. Defaults to remote (live) transport, submitting a single batch to POST /v1/trace-events/batch. Identity resolves by precedence: CLI flags, then SCRYRS_REMOTE_* environment variables, then .scryrs/.env, then the scryrs.json `remote` section. When live config is unresolved, the command fails fast (exit 2) with guidance instead of silently using local mode. Use --mode local for the SQLite store (.scryrs/scryrs.db).",
                 "modes": [
                     {"name": "stdin", "flag": "--stdin", "description": "Read JSONL events from stdin"},
-                    {"name": "file", "flag": "--file", "value": "PATH", "description": "Read JSONL events from PATH"}
+                    {"name": "file", "flag": "--file", "value": "PATH", "description": "Read JSONL events from PATH"},
+                    {"name": "mode", "flag": "--mode", "value": "MODE", "values": ["live", "local"], "default": "live", "description": "Transport mode: live (default, remote ingest) or local (SQLite)"}
                 ],
                 "transport": {
                     "local": {
-                        "description": "Default transport — persists accepted events to .scryrs/scryrs.db via the canonical EventStore.",
+                        "description": "Explicit opt-in (--mode local) — persists accepted events to .scryrs/scryrs.db via the canonical EventStore.",
                         "output": {
                             "mimeType": "application/json",
                             "fields": [
@@ -56,8 +57,8 @@ pub(crate) fn cli_surface_doc() -> String {
                         }
                     },
                     "remote": {
-                        "description": "Explicit remote mode — activated by scryrs.json `remote.ingest_url` or SCRYRS_REMOTE_INGEST_URL. Skips .scryrs/scryrs.db entirely. Default timeout 3000 ms.",
-                        "configPrecedence": ["1. Environment variables (SCRYRS_REMOTE_*)", "2. scryrs.json `remote` section", "3. Git remote origin URL (repository_id fallback only)"],
+                        "description": "Default transport (live) — resolves an ingest URL from flags, env, .scryrs/.env, or scryrs.json `remote.ingest_url`. Skips .scryrs/scryrs.db entirely. Default timeout 3000 ms.",
+                        "configPrecedence": ["1. CLI flags", "2. Environment variables (SCRYRS_REMOTE_*)", "3. .scryrs/.env", "4. scryrs.json `remote` section", "5. Git remote origin URL (repository_id fallback only)"],
                         "requiredIdentity": ["repository_id", "workspace_id", "agent_id"],
                         "output": {
                             "mimeType": "application/json",
@@ -120,27 +121,27 @@ pub(crate) fn cli_surface_doc() -> String {
                         "name": "mode",
                         "flag": "--mode",
                         "type": "string",
-                        "values": ["local", "live"],
-                        "default": "local",
-                        "description": "Install mode: local for SQLite trace store, live for remote ingest via scryrs server"
+                        "values": ["live", "local"],
+                        "default": "live",
+                        "description": "Install mode: live (default) for remote ingest via scryrs server, local for SQLite trace store"
                     },
                     {
                         "name": "ingest-url",
                         "flag": "--ingest-url",
                         "type": "string",
-                        "description": "Live-mode remote ingest URL (required with --mode live)"
+                        "description": "Live-mode remote ingest URL (overrides .scryrs/.env SCRYRS_REMOTE_INGEST_URL; resolved from env/.scryrs/.env/scryrs.json when omitted)"
                     },
                     {
                         "name": "workspace-id",
                         "flag": "--workspace-id",
                         "type": "string",
-                        "description": "Live-mode workspace identity (required with --mode live)"
+                        "description": "Live-mode workspace identity (overrides .scryrs/.env SCRYRS_WORKSPACE_ID)"
                     },
                     {
                         "name": "agent-id",
                         "flag": "--agent-id",
                         "type": "string",
-                        "description": "Live-mode agent identity (required with --mode live)"
+                        "description": "Live-mode agent identity (overrides .scryrs/.env SCRYRS_AGENT_ID)"
                     },
                     {
                         "name": "repository-id",
@@ -266,12 +267,13 @@ pub(crate) fn cli_surface_doc() -> String {
             },
             {
                 "name": "dashboard",
-                "description": "Start dashboard server and open the browser dashboard",
+                "description": "Start dashboard server and open the browser dashboard. Live is the default source mode (proxies a scryrs server); use --mode local to read local .scryrs artifacts. Live targets resolve from flags, then env, then .scryrs/.env, then scryrs.json `remote`; unresolved live config fails fast (exit 2) with guidance.",
                 "flags": [
+                    {"name": "mode", "long": "--mode", "type": "string", "values": ["live", "local"], "default": "live", "description": "Source mode: live (default) or local"},
                     {"name": "port", "short": "-p", "long": "--port", "type": "number", "default": 8080, "description": "TCP port to bind"},
                     {"name": "bind", "short": "-b", "long": "--bind", "type": "string", "default": "127.0.0.1", "description": "Bind address"},
-                    {"name": "server-url", "long": "--server-url", "type": "string", "description": "Live-mode scryrs server base URL (requires --repository-id)"},
-                    {"name": "repository-id", "long": "--repository-id", "type": "string", "description": "Live-mode repository identity (requires --server-url)"},
+                    {"name": "server-url", "long": "--server-url", "type": "string", "description": "Live-mode scryrs server base URL (overrides .scryrs/.env SCRYRS_REMOTE_INGEST_URL)"},
+                    {"name": "repository-id", "long": "--repository-id", "type": "string", "description": "Live-mode repository identity (overrides .scryrs/.env SCRYRS_REPOSITORY_ID)"},
                     {"name": "no-open", "long": "--no-open", "type": "boolean", "default": false, "description": "Do not open browser automatically"},
                     {"name": "dev", "long": "--dev", "type": "boolean", "default": false, "description": "Serve from filesystem instead of embedded assets"}
                 ],

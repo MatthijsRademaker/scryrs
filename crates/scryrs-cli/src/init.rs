@@ -19,6 +19,8 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use crate::remote_config::{self, RemoteConfig, RemoteOverrides};
+
 /// The native Claude Code `PreToolUse` hook command.
 const CLAUDE_HOOK_COMMAND: &str = "scryrs hook claude-code";
 
@@ -141,16 +143,23 @@ pub fn execute_init(
         if mode == InitMode::Live {
             let _ = writeln!(
                 err,
-                "scryrs init: --mode live is not allowed in the scryrs source repository"
+                "scryrs init: live mode is not allowed in the scryrs source repository"
             );
             let _ = writeln!(
                 err,
-                "Live mode configures a consumer project for remote ingest."
+                "Live mode is the default and configures a consumer project for remote ingest."
             );
-            let _ = writeln!(
-                err,
-                "Run scryrs init --mode live from your target project directory instead."
-            );
+            if agent_name == "pi" {
+                let _ = writeln!(
+                    err,
+                    "Use `scryrs init --agent pi --mode local` here for dogfooding, or run live init from a consumer project."
+                );
+            } else {
+                let _ = writeln!(
+                    err,
+                    "Run live init from your target project directory instead."
+                );
+            }
             return 2;
         }
         if agent_name != "pi" {
@@ -170,13 +179,28 @@ pub fn execute_init(
         }
     }
 
-    // Live-mode validation: all required remote inputs must be present and
-    // valid before any filesystem writes occur.
+    // Live-mode resolution: merge CLI flags over the shared precedence chain
+    // (flags > env > .scryrs/.env > scryrs.json remote) before any filesystem
+    // writes. Unresolved required config fails fast with remediation guidance.
+    let mut resolved_config: Option<RemoteConfig> = None;
     if mode == InitMode::Live {
-        let code =
-            validate_live_config(err, ingest_url, workspace_id, agent_id, repository_id, &cwd);
-        if code != 0 {
-            return code;
+        let overrides = RemoteOverrides {
+            ingest_url: opt_nonempty(ingest_url),
+            repository_id: repository_id.and_then(opt_nonempty),
+            workspace_id: opt_nonempty(workspace_id),
+            agent_id: opt_nonempty(agent_id),
+            timeout_ms: None,
+        };
+        match remote_config::resolve_remote_config_with(Some(&cwd), &overrides) {
+            Ok(Some(resolved)) => resolved_config = Some(resolved.config),
+            Ok(None) => {
+                remote_config::write_missing_config_guidance(err, "init", "ingest_url");
+                return 2;
+            }
+            Err(e) => {
+                remote_config::write_missing_config_guidance(err, "init", e.missing_field());
+                return 2;
+            }
         }
     }
 
@@ -215,17 +239,22 @@ pub fn execute_init(
         return code;
     }
 
-    // Live-mode: write or merge the project's `scryrs.json` `remote` section.
+    // Live-mode: write or merge the project's `scryrs.json` `remote` section
+    // and scaffold a gitignored `.scryrs/.env` template (without clobbering
+    // any values the operator has already set).
     if mode == InitMode::Live {
-        let code = write_live_manifest(
-            err,
-            target_base,
-            ingest_url,
-            workspace_id,
-            agent_id,
-            repository_id,
-            &cwd,
-        );
+        let config = match resolved_config.as_ref() {
+            Some(c) => c,
+            None => {
+                let _ = writeln!(err, "scryrs init: internal error: live config not resolved");
+                return 1;
+            }
+        };
+        let code = write_live_manifest(err, target_base, config);
+        if code != 0 {
+            return code;
+        }
+        let code = scaffold_env_template(err, &target_base.join(".scryrs"), config);
         if code != 0 {
             return code;
         }
@@ -562,10 +591,11 @@ fn detect_scryrs_source_checkout(cwd: &Path) -> Option<PathBuf> {
 
 /// Deterministic post-install instructions for live mode.
 const LIVE_NEXT_STEPS: &str = concat!(
-    "scryrs live-mode remote ingest configured in scryrs.json\n",
+    "scryrs live-mode remote ingest configured (scryrs.json remote + .scryrs/.env)\n",
     "\n",
-    "Live mode configured — every `scryrs hook` invocation will submit events\n",
+    "Live mode is the default — every `scryrs hook` invocation will submit events\n",
     "to the configured remote server. No local .scryrs/scryrs.db is created.\n",
+    "Remote identity is read from .scryrs/.env (gitignored); edit it to adjust.\n",
     "\n",
     "Next steps:\n",
     "  1. Ensure the live ingest server is running (start with `scryrs server`).\n",
@@ -576,58 +606,73 @@ const LIVE_NEXT_STEPS: &str = concat!(
     "  4. Restart or reload your agent harness for the hook to take effect.\n",
 );
 
-/// Validate live-mode configuration before any filesystem writes.
-///
-/// Checks that all required remote identity fields are present and non-empty.
-/// When `repository_id` is omitted, attempts to derive it from Git remote origin.
-///
-/// Returns 0 on success, or 2 with deterministic diagnostics on failure.
-fn validate_live_config(
-    err: &mut impl Write,
-    ingest_url: &str,
-    workspace_id: &str,
-    agent_id: &str,
-    repository_id: Option<&str>,
-    cwd: &Path,
-) -> i32 {
-    let mut failures: Vec<&str> = Vec::new();
+/// Coerce a CLI flag value to `Some(trimmed)` when non-empty, else `None`.
+fn opt_nonempty(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
 
-    if ingest_url.is_empty() {
-        failures.push("--ingest-url is required for live mode");
-    }
-    if workspace_id.is_empty() {
-        failures.push("--workspace-id is required for live mode");
-    }
-    if agent_id.is_empty() {
-        failures.push("--agent-id is required for live mode");
-    }
+/// Header written at the top of a freshly scaffolded `.scryrs/.env`.
+const SCRYRS_ENV_HEADER: &str = concat!(
+    "# scryrs remote ingest configuration (gitignored)\n",
+    "# Populate these for live mode, or run commands with --mode local.\n",
+);
 
-    // repository_id: explicit or derived from Git remote origin.
-    let provided_repo_id = repository_id.unwrap_or("");
-    let repo_id_empty = provided_repo_id.is_empty();
-    if repo_id_empty {
-        // Try deriving from Git remote origin.
-        if let Some(derived) = git_remote_origin_url(cwd) {
-            if derived.is_empty() {
-                failures.push("--repository-id could not be derived from Git remote origin; provide it explicitly");
-            }
-            // derived is non-empty, we're good.
-        } else {
-            failures.push("--repository-id could not be derived from Git remote origin; provide it explicitly");
+/// Create-or-merge a `.scryrs/.env` template with the resolved `SCRYRS_REMOTE_*`
+/// values. Existing keys are preserved verbatim — only missing keys are added,
+/// so operator edits are never clobbered. `.scryrs/.gitignore` already ignores
+/// everything except itself, so `.env` is covered without extra handling.
+///
+/// Returns 0 on success, or 1 on an I/O error.
+fn scaffold_env_template(err: &mut impl Write, scryrs_dir: &Path, config: &RemoteConfig) -> i32 {
+    use std::collections::HashSet;
+
+    let env_path = scryrs_dir.join(".env");
+    let existing = fs::read_to_string(&env_path).unwrap_or_default();
+
+    let mut present: HashSet<String> = HashSet::new();
+    for line in existing.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some((key, _)) = trimmed.split_once('=') {
+            present.insert(key.trim().to_string());
         }
     }
 
-    if !failures.is_empty() {
-        let _ = writeln!(err, "scryrs init: live-mode configuration is incomplete:");
-        for failure in &failures {
-            let _ = writeln!(err, "  {failure}");
+    let entries = [
+        ("SCRYRS_REMOTE_INGEST_URL", config.ingest_url.as_str()),
+        ("SCRYRS_REPOSITORY_ID", config.repository_id.as_str()),
+        ("SCRYRS_WORKSPACE_ID", config.workspace_id.as_str()),
+        ("SCRYRS_AGENT_ID", config.agent_id.as_str()),
+    ];
+
+    let mut contents = existing.clone();
+    if contents.is_empty() {
+        contents.push_str(SCRYRS_ENV_HEADER);
+    } else if !contents.ends_with('\n') {
+        contents.push('\n');
+    }
+
+    let mut appended = false;
+    for (key, value) in entries {
+        if !present.contains(key) {
+            contents.push_str(&format!("{key}={value}\n"));
+            appended = true;
         }
-        let _ = writeln!(
-            err,
-            "Usage: scryrs init --agent <NAME> --mode live --ingest-url <URL> --workspace-id <ID> --agent-id <ID> [--repository-id <ID>]"
-        );
-        let _ = writeln!(err, "See `scryrs --help`");
-        return 2;
+    }
+
+    // Only write when we created the file or added a missing key.
+    if existing.is_empty() || appended {
+        if let Err(e) = fs::write(&env_path, contents) {
+            let _ = writeln!(err, "scryrs init: cannot write {}: {e}", env_path.display());
+            return 1;
+        }
     }
 
     0
@@ -639,33 +684,15 @@ fn validate_live_config(
 /// unrelated top-level keys. Refuses to overwrite a non-object `scryrs.json`.
 ///
 /// Returns 0 on success, 1 on I/O error, 2 on parse/format conflict.
-fn write_live_manifest(
-    err: &mut impl Write,
-    target_base: &Path,
-    ingest_url: &str,
-    workspace_id: &str,
-    agent_id: &str,
-    repository_id: Option<&str>,
-    cwd: &Path,
-) -> i32 {
+fn write_live_manifest(err: &mut impl Write, target_base: &Path, config: &RemoteConfig) -> i32 {
     use serde_json::{Map, Value};
 
     let manifest_path = target_base.join("scryrs.json");
 
-    // Resolve repository_id: explicit or derived from Git.
-    let repo_id: String = match repository_id {
-        Some(id) if !id.is_empty() => id.to_string(),
-        _ => match git_remote_origin_url(cwd) {
-            Some(url) => url,
-            None => {
-                let _ = writeln!(
-                    err,
-                    "scryrs init: cannot resolve repository identity for live-mode manifest"
-                );
-                return 2;
-            }
-        },
-    };
+    let ingest_url = config.ingest_url.as_str();
+    let workspace_id = config.workspace_id.as_str();
+    let agent_id = config.agent_id.as_str();
+    let repo_id = config.repository_id.clone();
 
     // Load existing manifest (or start from empty object).
     let mut root: Value = if manifest_path.exists() {
@@ -747,31 +774,6 @@ fn write_live_manifest(
     }
 
     0
-}
-
-/// Try to resolve the Git remote origin URL from the given directory.
-#[allow(clippy::disallowed_methods)]
-fn git_remote_origin_url(cwd: &Path) -> Option<String> {
-    let output = std::process::Command::new("git")
-        .args(["-C"])
-        .arg(cwd)
-        .args(["remote", "get-url", "origin"])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let url = String::from_utf8(output.stdout).ok()?;
-    let trimmed = url.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    // Strip trailing `.git` suffix for normalization.
-    let normalized = trimmed.strip_suffix(".git").unwrap_or(trimmed);
-    Some(normalized.to_string())
 }
 
 // ---------------------------------------------------------------------------

@@ -51,20 +51,6 @@ pub(crate) fn execute_dashboard(err: &mut impl Write, m: &ArgMatches) -> i32 {
             return 2;
         }
     };
-    let source_mode = match scryrs_dashboard::SourceMode::from_dashboard_args(
-        m.get_one::<String>("server-url").map(String::as_str),
-        m.get_one::<String>("repository-id").map(String::as_str),
-    ) {
-        Ok(mode) => mode,
-        Err(error) => {
-            let _ = writeln!(err, "scryrs dashboard: {error}");
-            let _ = writeln!(
-                err,
-                "Usage: scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--server-url <URL> --repository-id <ID>] [--no-open] [--dev]"
-            );
-            return 2;
-        }
-    };
     let repo_root = match std::env::current_dir() {
         Ok(path) => path,
         Err(error) => {
@@ -73,6 +59,54 @@ pub(crate) fn execute_dashboard(err: &mut impl Write, m: &ArgMatches) -> i32 {
                 "scryrs dashboard: cannot determine current directory: {error}"
             );
             return 1;
+        }
+    };
+
+    // Live is the default source mode; local is an explicit opt-in. Live targets
+    // (server URL + repository id) resolve from CLI flags over the shared
+    // precedence chain (flags > env > .scryrs/.env > scryrs.json remote).
+    let mode_str = m
+        .get_one::<String>("mode")
+        .map(|s| s.as_str())
+        .unwrap_or("live");
+    if mode_str != "local" && mode_str != "live" {
+        let _ = writeln!(err, "scryrs dashboard: --mode must be local or live");
+        let _ = writeln!(
+            err,
+            "Usage: scryrs dashboard [--mode local|live] [--port <PORT>] [--bind <ADDR>] [--server-url <URL>] [--repository-id <ID>] [--no-open] [--dev]"
+        );
+        return 2;
+    }
+
+    let source_mode = if mode_str == "local" {
+        scryrs_dashboard::SourceMode::Local
+    } else {
+        let server_url = m.get_one::<String>("server-url").map(String::as_str);
+        let repository_id = m.get_one::<String>("repository-id").map(String::as_str);
+        match crate::remote_config::resolve_dashboard_target(
+            Some(&repo_root),
+            server_url,
+            repository_id,
+        ) {
+            Ok(Some((url, repo_id))) => match scryrs_dashboard::SourceMode::live(&url, &repo_id) {
+                Ok(mode) => mode,
+                Err(error) => {
+                    let _ = writeln!(err, "scryrs dashboard: {error}");
+                    return 2;
+                }
+            },
+            Ok(None) => {
+                crate::remote_config::write_missing_config_guidance(err, "dashboard", "server-url");
+                return 2;
+            }
+            Err(e) => {
+                crate::remote_config::write_missing_config_guidance(
+                    err,
+                    "dashboard",
+                    e.missing_field(),
+                );
+                return 2;
+            }
         }
     };
     let config = match scryrs_dashboard::Config::try_new(

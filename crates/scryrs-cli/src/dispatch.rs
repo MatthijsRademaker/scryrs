@@ -156,6 +156,14 @@ where
                         .num_args(1)
                         .action(ArgAction::Set)
                         .help("Read JSONL events from PATH"),
+                )
+                .arg(
+                    Arg::new("mode")
+                        .long("mode")
+                        .value_name("MODE")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Transport mode: live (default, remote ingest) or local (SQLite)"),
                 ),
         )
         .subcommand(
@@ -206,7 +214,7 @@ where
                         .value_name("MODE")
                         .num_args(1)
                         .action(ArgAction::Set)
-                        .help("Install mode: local (default) or live"),
+                        .help("Install mode: live (default) or local"),
                 )
                 .arg(
                     Arg::new("ingest-url")
@@ -214,7 +222,7 @@ where
                         .value_name("URL")
                         .num_args(1)
                         .action(ArgAction::Set)
-                        .help("Live-mode remote ingest URL (required with --mode live)"),
+                        .help("Live-mode remote ingest URL (overrides .scryrs/.env SCRYRS_REMOTE_INGEST_URL)"),
                 )
                 .arg(
                     Arg::new("workspace-id")
@@ -222,7 +230,7 @@ where
                         .value_name("ID")
                         .num_args(1)
                         .action(ArgAction::Set)
-                        .help("Live-mode workspace identity (required with --mode live)"),
+                        .help("Live-mode workspace identity (overrides .scryrs/.env SCRYRS_WORKSPACE_ID)"),
                 )
                 .arg(
                     Arg::new("agent-id")
@@ -230,7 +238,7 @@ where
                         .value_name("ID")
                         .num_args(1)
                         .action(ArgAction::Set)
-                        .help("Live-mode agent identity (required with --mode live)"),
+                        .help("Live-mode agent identity (overrides .scryrs/.env SCRYRS_AGENT_ID)"),
                 )
                 .arg(
                     Arg::new("repository-id")
@@ -265,12 +273,20 @@ where
                         .help("Bind address (default 127.0.0.1)"),
                 )
                 .arg(
+                    Arg::new("mode")
+                        .long("mode")
+                        .value_name("MODE")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Source mode: live (default) or local"),
+                )
+                .arg(
                     Arg::new("server-url")
                         .long("server-url")
                         .value_name("URL")
                         .num_args(1)
                         .action(ArgAction::Set)
-                        .help("Live-mode scryrs server base URL (requires --repository-id)"),
+                        .help("Live-mode scryrs server base URL (overrides .scryrs/.env SCRYRS_REMOTE_INGEST_URL)"),
                 )
                 .arg(
                     Arg::new("repository-id")
@@ -278,7 +294,7 @@ where
                         .value_name("ID")
                         .num_args(1)
                         .action(ArgAction::Set)
-                        .help("Live-mode repository identity (requires --server-url)"),
+                        .help("Live-mode repository identity (overrides .scryrs/.env SCRYRS_REPOSITORY_ID)"),
                 )
                 .arg(
                     Arg::new("no-open")
@@ -398,7 +414,7 @@ where
                             2
                         }
                     } else {
-                        let mode_str = m.get_one::<String>("mode").map(|s| s.as_str()).unwrap_or("local");
+                        let mode_str = m.get_one::<String>("mode").map(|s| s.as_str()).unwrap_or("live");
                         if mode_str != "local" && mode_str != "live" {
                             if writeln!(err, "scryrs init: --mode must be local or live").is_err()
                                 || writeln!(err, "Usage: scryrs init --agent <NAME> [--mode local|live]").is_err()

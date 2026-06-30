@@ -24,7 +24,7 @@ fn fixture_jsonl() -> String {
 #[allow(clippy::disallowed_methods)]
 fn run_record_and_hotspots(bin: &str, dir: &std::path::Path) {
     let mut record = Command::new(bin)
-        .args(["record", "--stdin"])
+        .args(["record", "--stdin", "--mode", "local"])
         .current_dir(dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -92,7 +92,14 @@ fn dashboard_command_serves_api_against_fixture_store() {
 
     let port = free_port();
     let mut child = Command::new(bin)
-        .args(["dashboard", "--port", &port.to_string(), "--no-open"])
+        .args([
+            "dashboard",
+            "--mode",
+            "local",
+            "--port",
+            &port.to_string(),
+            "--no-open",
+        ])
         .current_dir(dir.path())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

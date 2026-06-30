@@ -38,6 +38,21 @@ class MockEventSource {
 	}
 }
 
+function baseSignal(overrides: Record<string, unknown> = {}) {
+	return {
+		repositoryId: "repo-a",
+		subjectKind: "file",
+		subject: "src/main.rs",
+		score: 10,
+		delta: 1,
+		window: "cumulative",
+		threshold: 10,
+		evidenceRowIds: [1],
+		createdAt: "2026-06-29T19:00:00Z",
+		...overrides,
+	};
+}
+
 describe("useSignalStore", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
@@ -109,5 +124,40 @@ describe("useSignalStore", () => {
 
 		expect(store.signals.map((signal) => signal.id)).toEqual([41, 42]);
 		expect(store.connectionState).toBe("connected");
+	});
+
+	it("marks replayed signals as not live and live-tail signals as live", async () => {
+		const store = useSignalStore();
+
+		store.start();
+		const source = MockEventSource.instances[0];
+		source?.emitOpen();
+
+		// Replay burst: arrives back-to-back before the stream goes quiet.
+		source?.emitMessage(1, baseSignal({ subject: "a", score: 5 }));
+		source?.emitMessage(2, baseSignal({ subject: "b", score: 6 }));
+		expect(store.signals.every((signal) => signal.live === false)).toBe(true);
+
+		// Stream falls quiet past the settle window → subsequent signals are live.
+		await vi.advanceTimersByTimeAsync(400);
+		source?.emitMessage(3, baseSignal({ subject: "c", score: 7 }));
+
+		expect(store.signals.find((signal) => signal.id === 3)?.live).toBe(true);
+		expect(
+			store.signals.filter((signal) => signal.live).map((signal) => signal.id),
+		).toEqual([3]);
+	});
+
+	it("exposes the feed newest-first while keeping arrival order in signals", () => {
+		const store = useSignalStore();
+
+		store.start();
+		const source = MockEventSource.instances[0];
+		source?.emitOpen();
+		source?.emitMessage(1, baseSignal({ subject: "a" }));
+		source?.emitMessage(2, baseSignal({ subject: "b" }));
+
+		expect(store.signals.map((signal) => signal.id)).toEqual([1, 2]);
+		expect(store.feed.map((signal) => signal.id)).toEqual([2, 1]);
 	});
 });

@@ -22,6 +22,7 @@
       { "text": "Graph", "link": "/graph" },
       { "text": "Route Manifests", "link": "/route-manifests" },
       { "text": "Proposals", "link": "/proposals" },
+      { "text": "Live Server Setup", "link": "/live-server-setup" },
       { "text": "Live Hotspots", "link": "/live-hotspots" }
     ]
   }

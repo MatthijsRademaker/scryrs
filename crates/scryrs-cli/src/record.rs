@@ -110,15 +110,34 @@ pub(crate) fn execute_record<R: Read>(
     }
 
     // --- Resolve transport mode before input/store I/O ---
-    let remote = match remote_config::resolve_remote_config(None) {
-        Ok(r) => r,
-        Err(e) => {
-            // Missing required remote identity → fatal exit 2.
-            let _ = writeln!(err, "scryrs record: {e}");
-            if writeln!(err, "See `scryrs --help`").is_err() {
-                return 1;
+    // Live (remote) is the default; local SQLite is an explicit opt-in. When the
+    // default is live but required config is unresolved, fail fast with guidance
+    // rather than silently degrading to local mode.
+    let mode_str = m
+        .get_one::<String>("mode")
+        .map(|s| s.as_str())
+        .unwrap_or("live");
+    if mode_str != "local" && mode_str != "live" {
+        let _ = writeln!(err, "scryrs record: --mode must be local or live");
+        if writeln!(err, "See `scryrs --help`").is_err() {
+            return 1;
+        }
+        return 2;
+    }
+
+    let remote = if mode_str == "local" {
+        None
+    } else {
+        match remote_config::resolve_remote_config(None) {
+            Ok(Some(resolved)) => Some(resolved),
+            Ok(None) => {
+                remote_config::write_missing_config_guidance(err, "record", "ingest_url");
+                return 2;
             }
-            return 2;
+            Err(e) => {
+                remote_config::write_missing_config_guidance(err, "record", e.missing_field());
+                return 2;
+            }
         }
     };
 

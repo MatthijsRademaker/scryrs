@@ -148,6 +148,7 @@ fn build_doctor_report(repo_root: &Path) -> DoctorReport {
         command_surface_finding(&command_surface),
         config_finding(&manifest),
         mode_finding(mode, &resolved_remote),
+        live_default_config_finding(repo_root, &resolved_remote),
         local_store_finding(repo_root, mode),
         claude_hook_finding(repo_root),
         pi_hook_finding(repo_root),
@@ -327,6 +328,39 @@ fn mode_finding(
             Severity::Error,
             "mode resolution returned an unexpected state".into(),
             None,
+        ),
+    }
+}
+
+/// Diagnose whether the live default has resolvable configuration. Because live
+/// is now the default for `init`, `record`, and `dashboard`, an unresolved remote
+/// config is a warning with remediation rather than a silent local fallback.
+fn live_default_config_finding(
+    repo_root: &Path,
+    resolved_remote: &Result<Option<remote_config::ResolvedRemote>, RemoteConfigError>,
+) -> DoctorFinding {
+    let env_present = repo_root.join(".scryrs").join(".env").is_file();
+    match resolved_remote {
+        Ok(Some(_)) => DoctorFinding::new(
+            "liveConfig",
+            Severity::Ok,
+            "live config resolves (ingest URL and identity present)".into(),
+            Some(json!({ "resolved": true, "envFilePresent": env_present })),
+        ),
+        Ok(None) => DoctorFinding::new(
+            "liveConfig",
+            Severity::Warn,
+            "live mode is the default but no ingest URL resolves; populate .scryrs/.env (SCRYRS_REMOTE_INGEST_URL, SCRYRS_REPOSITORY_ID, SCRYRS_WORKSPACE_ID, SCRYRS_AGENT_ID) or run commands with --mode local".into(),
+            Some(json!({ "resolved": false, "missing": "ingest_url", "envFilePresent": env_present })),
+        ),
+        Err(error) => DoctorFinding::new(
+            "liveConfig",
+            Severity::Warn,
+            format!(
+                "live mode is the default but {} is unresolved; populate .scryrs/.env or run commands with --mode local",
+                error.missing_field()
+            ),
+            Some(json!({ "resolved": false, "missing": error.missing_field(), "envFilePresent": env_present })),
         ),
     }
 }
@@ -1189,7 +1223,26 @@ mod tests {
         assert_eq!(exit, 0);
         assert!(stderr.is_empty());
         let report = read_json_report(&stdout);
-        assert_eq!(report["overallStatus"], "ok");
+        // Live is the default. A local workspace with no resolvable remote
+        // config still warns on the liveConfig finding, so overall is "warn"
+        // (not "ok"), while the local store and hook findings remain "ok".
+        assert_eq!(report["overallStatus"], "warn");
+        let live_config = report["findings"]
+            .as_array()
+            .and_then(|findings| {
+                findings
+                    .iter()
+                    .find(|finding| finding["category"] == "liveConfig")
+            })
+            .unwrap_or_else(|| panic!("missing liveConfig finding: {report}"));
+        assert_eq!(live_config["status"], "warn");
+        assert!(
+            live_config["summary"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("live mode is the default"),
+            "liveConfig summary must explain the live default, got: {live_config}"
+        );
         let local_store = report["findings"]
             .as_array()
             .and_then(|findings| {

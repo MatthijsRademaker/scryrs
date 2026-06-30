@@ -4,8 +4,8 @@ scryrs CLI helps teams observe agent coding activity, detect knowledge hotspots,
 
 scryrs supports three current workflow paths:
 
-- **Local observe → detect loop:** Run `scryrs hook` or `scryrs record` to capture trace events locally, then `scryrs hotspots` to score them, and `scryrs dashboard` to visually browse ranked hotspots, sessions, and events — all from `.scryrs/` in your project root.
-- **Central live-ingest flow:** Configure a remote ingest URL (via `scryrs.json` or `SCRYRS_REMOTE_*` env vars), then `scryrs record` or `scryrs hook` submits events to a `scryrs server` running centrally. The server provides live hotspot rankings and an SSE signal stream for real-time monitoring across multiple agent instances.
+- **Central live-ingest flow (default):** `scryrs init`, `scryrs record`, and `scryrs dashboard` default to live mode. Configure a remote ingest URL and identity — preferably in a gitignored `.scryrs/.env` (also resolvable from `SCRYRS_REMOTE_*` env vars, CLI flags, or `scryrs.json` `remote`) — then `scryrs record` or `scryrs hook` submits events to a `scryrs server` running centrally. The server provides live hotspot rankings and an SSE signal stream for real-time monitoring across multiple agent instances.
+- **Local observe → detect loop (`--mode local`):** Run `scryrs init --mode local`, then `scryrs hook` / `scryrs record --mode local` to capture trace events locally, `scryrs hotspots` to score them, and `scryrs dashboard --mode local` to browse ranked hotspots, sessions, and events — all from `.scryrs/` in your project root.
 - **Promote → review artifact flow:** Run `scryrs graph`, `scryrs route`, and `scryrs propose` to produce machine-readable graph, route, and inbox proposal artifacts, then use `scryrs proposals list|accept|reject` to review those inbox proposals without mutating source-of-truth docs or graph/route artifacts.
 
 For hotspot interpretation and scoring rationale, see [Hotspots](./hotspots.md). For harness integration rules and fail-open guarantees, see [Trace Hook Contract](./trace-hook-contract.md).
@@ -24,12 +24,15 @@ The current public CLI surface provides eleven implemented root commands: `hotsp
 
 Ingest JSONL trace events from stdin or a file. `--stdin` and `--file` are mutually exclusive; providing both or neither exits 2.
 
-`record` supports two transport modes: local (default) and remote (when explicitly configured). The mode is selected before ingestion begins.
+`record` supports two transport modes: **remote (default)** and local (explicit `--mode local`). The mode is selected before ingestion begins. Remote is the default — when it is selected but required config cannot be resolved, `record` fails fast (exit 2) with guidance rather than silently falling back to local.
 
-#### Local mode (default)
+#### Local mode (`--mode local`)
+
+Local mode is now an explicit opt-in. It is unchanged in behavior from prior releases.
 
 | Field | Value |
 |-------|-------|
+| Selection | `--mode local` (explicit) |
 | Input | `--stdin` reads newline-delimited `TraceEvent` JSON from stdin; `--file <PATH>` reads from a JSONL file |
 | Output | Single-line JSON summary on stdout; one JSON rejection diagnostic per rejected non-empty line on stderr |
 | Exit 0 | All processed non-empty lines were accepted |
@@ -60,17 +63,19 @@ Ingest JSONL trace events from stdin or a file. `--stdin` and `--file` are mutua
 
 **Persistence:** Accepted events are persisted to `.scryrs/scryrs.db` (the canonical SQLite trace datastore) in the current working directory. This store is append-only and ingestion-only; no query, delete, or analysis APIs are provided. `.scryrs/events.jsonl` is the ingestion input format and is NOT used as the canonical persistence store.
 
-#### Remote mode
+#### Remote mode (default)
 
-Remote mode activates when a non-empty ingest URL is configured — via `SCRYRS_REMOTE_INGEST_URL` environment variable or the `remote.ingest_url` field in a `scryrs.json` manifest discovered in an ancestor directory.
+Remote mode is the default. It resolves an ingest URL from the precedence chain below; when none resolves (and `--mode local` was not passed), `record` exits 2 with guidance rather than running locally.
 
 **Config precedence (highest to lowest):**
 
-1. Environment variables (`SCRYRS_REMOTE_INGEST_URL`, `SCRYRS_REPOSITORY_ID`, `SCRYRS_WORKSPACE_ID`, `SCRYRS_AGENT_ID`, `SCRYRS_REMOTE_TIMEOUT_MS`)
-2. `scryrs.json` `remote` section (nearest ancestor)
-3. Git remote origin URL (`repository_id` fallback only)
+1. CLI flags (where applicable; `init`/`dashboard` accept `--ingest-url`/`--server-url`, etc.)
+2. Environment variables (`SCRYRS_REMOTE_INGEST_URL`, `SCRYRS_REPOSITORY_ID`, `SCRYRS_WORKSPACE_ID`, `SCRYRS_AGENT_ID`, `SCRYRS_REMOTE_TIMEOUT_MS`)
+3. `.scryrs/.env` dotenv file (nearest ancestor)
+4. `scryrs.json` `remote` section (nearest ancestor)
+5. Git remote origin URL (`repository_id` fallback only)
 
-**Required identity fields for remote mode:** `repository_id`, `workspace_id`, `agent_id`. Missing any of these when an ingest URL is configured exits 2 with a diagnostic.
+**Required identity fields for remote mode:** `repository_id`, `workspace_id`, `agent_id`. Missing any of these when an ingest URL is configured exits 2 with a diagnostic. Missing the ingest URL under the default also exits 2 with remediation guidance (populate `.scryrs/.env`, or use `--mode local`).
 
 **Remote semantics:**
 

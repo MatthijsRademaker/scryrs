@@ -124,25 +124,34 @@ A `HotspotSignal` is emitted as an SSE event when a subject's cumulative score c
 
 ## Getting Started
 
-Start the server:
+For a step-by-step install and run guide — Docker Compose, single-binary, connecting agents and the dashboard, verification, and troubleshooting — see [Live Server Setup](./live-server-setup.md). The essentials:
+
+Start the server with no flags — it binds `127.0.0.1:8081` and stores at `.scryrs/server.db` by default:
 
 ```bash
-scryrs server --bind 0.0.0.0 --port 8081 --store /data/scryrs/server.db
+scryrs server
 ```
 
-This starts the long-lived HTTP server with all three REST endpoints. The startup message prints the listen address and store path to stderr.
+This starts the long-lived HTTP server with all three REST endpoints. The startup message prints the listen address and store path to stderr. Override `--bind`, `--port`, or `--store` only when the defaults don't fit (for example, `--bind 0.0.0.0` to accept connections from other hosts).
 
 To configure hooks for remote mode, all nine event families and the `TraceEvent` schema remain identical to local mode. Hooks continue to emit the same `TraceEvent` records, and `scryrs record` handles the transport wrapper automatically when remote ingest is configured. See the [CLI v0 Contract](./cli-v0-contract.md) for the complete endpoint surface and the [Trace Hook Contract](./trace-hook-contract.md) appendix for remote ingestion identity field semantics and the `ServerIngestEnvelope` transport contract.
 
 ## Live Dashboard Mode
 
-The dashboard now has a matching **live read path**. Start it with both live flags:
+The dashboard has a matching **live read path**, and live is now the **default**.
+With a configured `.scryrs/.env` (or `scryrs.json` `remote`), a bare invocation
+runs live; flags override the resolved targets:
 
 ```bash
+scryrs dashboard
+# or override inline:
 scryrs dashboard --server-url http://127.0.0.1:8081 --repository-id repo-a
 ```
 
-Live dashboard mode keeps the browser on same-origin `/api/*` calls and lets the dashboard backend proxy the live server contract:
+Use `scryrs dashboard --mode local` to read local `.scryrs` artifacts instead. If
+no server URL resolves from flags, env, `.scryrs/.env`, or `scryrs.json`, live
+startup fails `2` with remediation guidance. Live dashboard mode keeps the browser
+on same-origin `/api/*` calls and lets the dashboard backend proxy the live server contract:
 
 - `GET /api/meta` reports `mode: "live"` and the configured `repositoryId`.
 - `GET /api/hotspots` proxies `GET /v1/repositories/{repository_id}/hotspots?window=cumulative` and preserves the upstream `cursor`.
@@ -162,6 +171,7 @@ Local and live dashboard modes stay deliberately separate:
 
 ## Related Pages
 
+- [Live Server Setup](./live-server-setup.md) — quickstart and extensive install/run guide for the live server
 - [Hotspots](./hotspots.md) — domain-oriented explanation of local batch hotspots, scoring, and interpretation
 - [CLI v0 Contract](./cli-v0-contract.md) — complete endpoint tables, JSON schemas, exit codes, and the `scryrs server` invocation contract
 - [Trace Hook Contract](./trace-hook-contract.md) — how harness hooks capture `TraceEvent` records, plus the remote ingestion appendix with `ServerIngestEnvelope` identity semantics

@@ -15,7 +15,7 @@ fn run_record_stdin(input: &str, debug: Option<&str>) -> std::process::Output {
     let cwd = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
     let mut command = Command::new(env!("CARGO_BIN_EXE_scryrs"));
     command
-        .args(["record", "--stdin"])
+        .args(["record", "--stdin", "--mode", "local"])
         .current_dir(cwd.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

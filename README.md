@@ -130,16 +130,25 @@ Once `scryrs` is installed and reachable on `PATH`, install trace hooks for your
 agent harness:
 
 ```bash
-# Local mode (default) — SQLite trace store (.scryrs/scryrs.db)
-scryrs init --agent claude-code
-scryrs init --agent pi
-
-# Live mode — remote ingest via scryrs server
-scryrs init --agent claude-code --mode live \
+# Live mode (DEFAULT) — remote ingest via scryrs server.
+# Identity resolves from flags, env, .scryrs/.env, or scryrs.json remote.
+scryrs init --agent claude-code \
   --ingest-url http://scryrs-server:8081 \
   --workspace-id my-workspace \
   --agent-id agent-1
+
+# ...or put identity in a gitignored .scryrs/.env and just run:
+scryrs init --agent claude-code
+
+# Local mode — single-machine SQLite trace store (.scryrs/scryrs.db), no network:
+scryrs init --agent claude-code --mode local
+scryrs init --agent pi --mode local
 ```
+
+> **Breaking change:** `init`, `record`, and `dashboard` now **default to live mode**.
+> If you relied on the previous local default, add `--mode local` or populate
+> `.scryrs/.env`. When live is the default but no ingest URL/identity resolves, the
+> command fails fast (exit 2) with guidance instead of silently writing locally.
 
 **Note:** `scripts/install` only installs the CLI binary. It does not create or modify
 `.claude/`, `.pi/`, `.scryrs/`, `scryrs.json`, git hooks, or shell profile files.
@@ -160,22 +169,25 @@ This starts `scryrs-server` bound to `0.0.0.0:8081` with persistent storage at
 `/data/scryrs/server.db`. The service is reachable by name from any container on
 the `scryrs-net` network.
 
-Once the server is running, configure each agent workspace for live remote ingest:
+Once the server is running, configure each agent workspace for live remote ingest
+(live is the default, so no `--mode` flag is needed):
 
 ```bash
 # In each agent workspace (not the scryrs source checkout):
-scryrs init --agent claude-code --mode live \
+scryrs init --agent claude-code \
   --ingest-url http://scryrs-server:8081 \
   --workspace-id my-workspace \
   --agent-id agent-1
 ```
 
-Live mode creates or merges a `scryrs.json` `remote` section in the project
-root and installs the same harness hook transport as local mode. It does not
-scaffold a local `.scryrs/scryrs.db` — all events flow to the shared server.
+Live mode creates or merges a `scryrs.json` `remote` section, scaffolds a
+gitignored `.scryrs/.env` template, and installs the harness hook transport. It
+does not scaffold a local `.scryrs/scryrs.db` — all events flow to the shared
+server.
 
-The `--repository-id` flag is optional; when omitted, live-mode init derives it
-from the Git remote origin URL of the target project.
+The `--repository-id` flag is optional; when omitted, live init derives it
+from the Git remote origin URL of the target project. Identity may also be placed
+in `.scryrs/.env` instead of flags.
 
 **Agent containers on the same network:** attach your agent containers to
 `scryrs-net` so they can resolve `http://scryrs-server:8081`:
@@ -186,7 +198,7 @@ docker run --network scryrs-net ...
 ```
 
 For a complete multi-agent setup: run `docker compose up -d` once for the
-server, then run `scryrs init --mode live` in each agent workspace pointing at
+server, then run `scryrs init` in each agent workspace pointing at
 the same server endpoint. The live server provides `POST /v1/trace-events/batch`
 ingest, `GET /v1/repositories/{id}/hotspots` queries, and `GET
 /v1/repositories/{id}/signals` SSE streaming.
@@ -239,13 +251,15 @@ COMMANDS
       Start the central trace ingest server for POST /v1/trace-events/batch.
 
 RECORD MODES
-  Local mode (default): persisted to .scryrs/scryrs.db, no network calls.
-  Remote mode: activated when a non-empty ingest URL is configured.
-      Configure via scryrs.json `remote` section.
-      Environment overrides: SCRYRS_REMOTE_INGEST_URL, SCRYRS_REPOSITORY_ID,
-      SCRYRS_WORKSPACE_ID, SCRYRS_AGENT_ID, SCRYRS_REMOTE_TIMEOUT_MS.
+  Remote mode (default): submits to the configured ingest server.
+      Identity resolves by precedence — flags, then environment, then
+      .scryrs/.env, then scryrs.json `remote` — using SCRYRS_REMOTE_INGEST_URL,
+      SCRYRS_REPOSITORY_ID, SCRYRS_WORKSPACE_ID, SCRYRS_AGENT_ID,
+      SCRYRS_REMOTE_TIMEOUT_MS.
       Remote mode skips SQLite entirely (no dual-write, no local fallback).
+      Unresolved required config fails fast (exit 2) with guidance.
       Default timeout: 3000 ms.
+  Local mode (--mode local): persisted to .scryrs/scryrs.db, no network calls.
 
 RECORD OUTPUT
   A single-line JSON summary on stdout.
@@ -352,7 +366,7 @@ See `scryrs --help`
 
 ## Current status
 
-Current CLI surface ships full local evidence loop plus first graph, route, and proposal artifacts. `scryrs record` ingests JSONL trace events via `--stdin` or `--file <PATH>`, validates against the shared `TraceEvent` schema, and persists accepted events locally or submits them remotely. `scryrs hotspots <PATH>` scores subjects with deterministic weights and writes `.scryrs/hotspots.json`. `scryrs graph <PATH>` builds deterministic `KnowledgeGraphDocument` output from hotspots plus optional docs navigation metadata. `scryrs route <PATH>` projects `.scryrs/graph.json` into deterministic `.scryrs/routes.json`. `scryrs propose <PATH>` writes validated review-only `ProposalDocument` artifacts under `.scryrs/proposals/`. `scryrs dashboard` serves local hotspot and session UI. `scryrs server` starts the central live-ingest server at `POST /v1/trace-events/batch` with live hotspot query and SSE signal streaming. Optional model-assisted curation is present only as library crate `crates/scryrs-curator-llm`; no model-backed CLI path exists.
+Current CLI surface ships full local evidence loop plus first graph, route, and proposal artifacts. `scryrs record` ingests JSONL trace events via `--stdin` or `--file <PATH>`, validates against the shared `TraceEvent` schema, and submits accepted events to the live server by default (or persists locally with `--mode local`). `scryrs hotspots <PATH>` scores subjects with deterministic weights and writes `.scryrs/hotspots.json`. `scryrs graph <PATH>` builds deterministic `KnowledgeGraphDocument` output from hotspots plus optional docs navigation metadata. `scryrs route <PATH>` projects `.scryrs/graph.json` into deterministic `.scryrs/routes.json`. `scryrs propose <PATH>` writes validated review-only `ProposalDocument` artifacts under `.scryrs/proposals/`. `scryrs dashboard` serves the hotspot UI (live by default, or local with `--mode local`). `scryrs server` starts the central live-ingest server at `POST /v1/trace-events/batch` with live hotspot query and SSE signal streaming. Optional model-assisted curation is present only as library crate `crates/scryrs-curator-llm`; no model-backed CLI path exists.
 
 ## Local checks
 

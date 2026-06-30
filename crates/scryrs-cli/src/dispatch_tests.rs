@@ -421,24 +421,36 @@ fn dashboard_help_exits_0_and_lists_flags() {
 }
 
 #[test]
-fn dashboard_partial_live_configuration_exits_2() {
-    let mut out = Vec::new();
-    let mut err = Vec::new();
+fn dashboard_default_live_without_config_fails_fast_with_guidance() {
+    // Live is the default for `dashboard`. With no resolvable server URL or
+    // repository identity (no flags, no .scryrs/.env, no scryrs.json remote in
+    // the temp dir, no git remote), startup must fail fast with exit 2 and
+    // deterministic guidance — the old "supply both flags" behavior is gone.
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    crate::test_support::with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
 
-    assert_eq!(
-        run_with_writers(
-            ["dashboard", "--server-url", "http://localhost:8081"],
-            &mut out,
-            &mut err,
-        ),
-        2
-    );
-    assert!(out.is_empty());
-    let err_str = String::from_utf8_lossy(&err);
-    assert!(
-        err_str.contains("both --server-url and --repository-id are required for live mode"),
-        "dashboard partial live config must fail loudly, got: {err_str}"
-    );
+        assert_eq!(
+            run_with_writers(["dashboard"], &mut out, &mut err),
+            2,
+            "default live dashboard without config must exit 2"
+        );
+        assert!(out.is_empty());
+        let err_str = String::from_utf8_lossy(&err);
+        assert!(
+            err_str.contains("live mode is the default"),
+            "must explain live is the default, got: {err_str}"
+        );
+        assert!(
+            err_str.contains(".scryrs/.env"),
+            "must describe populating .scryrs/.env, got: {err_str}"
+        );
+        assert!(
+            err_str.contains("--mode local"),
+            "must describe selecting local mode, got: {err_str}"
+        );
+    });
 }
 
 #[test]
