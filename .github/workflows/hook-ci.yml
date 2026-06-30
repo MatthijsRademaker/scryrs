@@ -39,7 +39,7 @@ jobs:
           node-version: "22"
 
       - name: Build scryrs binary
-        run: cargo build --release -p scryrs-cli
+        run: cargo build --release -p scryrs-cli --no-default-features --features core,graph,runtime,server
 
       - name: Install fixture dependencies
         run: npm install better-sqlite3 tsx
