@@ -161,7 +161,7 @@ onUnmounted(() => {
     <Alert v-if="meta.isLiveMode && store.pollState === 'stale'" variant="destructive">
       <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <span>Cached data shown — last refresh failed: {{ store.staleError }}</span>
-        <Button variant="outline" @click="store.load()">Retry</Button>
+        <Button variant="outline" @click="store.startPolling()">Retry</Button>
       </div>
     </Alert>
 
@@ -224,7 +224,7 @@ onUnmounted(() => {
             <OutcomePulse :counts="entry.counts.outcome" />
             <div class="mt-1 flex items-center justify-between border-t border-border pt-3 text-xs text-muted-foreground">
               <span><span class="tabular-nums text-foreground/80">{{ entry.sessionCount }}</span> sessions</span>
-              <span><span class="tabular-nums text-foreground/80">{{ entry.score }}</span> events</span>
+              <span><span class="tabular-nums text-foreground/80">{{ totalEvents(entry) }}</span> events</span>
             </div>
           </Card>
         </template>

@@ -162,7 +162,10 @@ export const useHotspotStore = defineStore("hotspots", () => {
 
 	/** Start periodic polling against `/api/hotspots`. */
 	function startPolling(intervalMs = 15_000) {
-		if (pollTimer !== null) return;
+		if (pollTimer !== null) {
+			clearInterval(pollTimer);
+			pollTimer = null;
+		}
 		pollState.value = "polling";
 		// Immediate first fetch.
 		void fetchAndUpdate(true);
@@ -182,6 +185,7 @@ export const useHotspotStore = defineStore("hotspots", () => {
 
 	// ── Tab-visibility pause/resume ────────────────────────────────────────
 	let visibilityDebounce: ReturnType<typeof setTimeout> | null = null;
+	let visibilityWired = false;
 
 	function onVisibilityChange() {
 		if (visibilityDebounce !== null) {
@@ -206,10 +210,13 @@ export const useHotspotStore = defineStore("hotspots", () => {
 	}
 
 	function wireVisibility() {
+		if (visibilityWired) return;
+		visibilityWired = true;
 		document.addEventListener("visibilitychange", onVisibilityChange);
 	}
 
 	function unwireVisibility() {
+		visibilityWired = false;
 		if (visibilityDebounce !== null) {
 			clearTimeout(visibilityDebounce);
 			visibilityDebounce = null;

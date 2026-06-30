@@ -376,6 +376,73 @@ describe("useHotspotStore", () => {
 		});
 	});
 
+	// ── 6.8 Stale-state retry resumes polling ───────────────────────────────
+	describe("stale-state retry", () => {
+		it("startPollingRaw transitions from stale back to polling on success", async () => {
+			const mock = vi.spyOn(client, "getHotspots");
+			mock.mockResolvedValueOnce(
+				makeReport([makeEntry({ subject: "a.rs", score: 10 })]),
+			);
+			mock.mockRejectedValueOnce(new Error("poll failed"));
+			mock.mockResolvedValueOnce(
+				makeReport([makeEntry({ subject: "a.rs", score: 200 })]),
+			);
+
+			const store = useHotspotStore();
+
+			store.startPollingRaw(5_000);
+
+			// First fetch succeeds → polling.
+			await vi.advanceTimersByTimeAsync(0);
+			expect(store.pollState).toBe("polling");
+			expect(store.staleError).toBeNull();
+
+			// Second fetch fails → stale.
+			await vi.advanceTimersByTimeAsync(5_000);
+			await vi.advanceTimersByTimeAsync(0);
+			expect(store.pollState).toBe("stale");
+			expect(store.staleError).toBe("poll failed");
+			expect(store.entries).toHaveLength(1);
+			expect(store.entries[0].subject).toBe("a.rs");
+
+			// Retry: resume polling from stale.
+			store.startPollingRaw(5_000);
+
+			// Immediate fetch succeeds → transitions to polling, not stale.
+			await vi.advanceTimersByTimeAsync(0);
+			expect(store.pollState).toBe("polling");
+			expect(store.staleError).toBeNull();
+			expect(store.entries[0].score).toBe(200);
+
+			store.stopPollingRaw();
+		});
+
+		it("load() does not transition from stale to polling (regression guard)", async () => {
+			const mock = vi.spyOn(client, "getHotspots");
+			mock.mockResolvedValueOnce(makeReport([makeEntry({ subject: "a.rs" })]));
+			mock.mockRejectedValueOnce(new Error("poll failed"));
+			// Third call: load() after stale. Mock a success so it's a valid response.
+			mock.mockResolvedValueOnce(
+				makeReport([makeEntry({ subject: "a.rs", score: 99 })]),
+			);
+
+			const store = useHotspotStore();
+
+			store.startPollingRaw(5_000);
+			await vi.advanceTimersByTimeAsync(0);
+			await vi.advanceTimersByTimeAsync(5_000);
+			await vi.advanceTimersByTimeAsync(0);
+
+			expect(store.pollState).toBe("stale");
+
+			// load() is a one-shot fetch — it does NOT restore polling.
+			await store.load();
+			expect(store.pollState).toBe("stale");
+
+			store.stopPollingRaw();
+		});
+	});
+
 	// ── Manual load ────────────────────────────────────────────────────────
 	describe("manual load", () => {
 		it("load() populates entries and sets pollState to idle", async () => {
