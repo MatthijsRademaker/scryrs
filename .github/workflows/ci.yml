@@ -59,12 +59,13 @@ jobs:
         run: scripts/verify-docs-publish
 
       - name: Install dependency policy tools
-        # Pin to versions whose MSRV still allows the pinned 1.85.0 toolchain.
-        # cargo-deny >= 0.19 and cargo-audit >= 0.22.2 require rustc 1.88+;
-        # 0.18.3 / 0.22.1 are the last releases that support rustc 1.85.
+        # Keep workspace build/test on Rust 1.85.0, but install policy tools with
+        # dedicated Rust 1.88 toolchain. cargo-deny 0.18.x cannot parse newer
+        # advisory records that use CVSS 4.0.
         run: |
-          cargo install --locked cargo-deny@0.18.3
-          cargo install --locked cargo-audit@0.22.1
+          rustup toolchain install 1.88.0 --profile minimal
+          cargo +1.88.0 install --locked cargo-deny@0.19.9
+          cargo +1.88.0 install --locked cargo-audit@0.22.2
 
       - name: Dependency policy
         run: cargo deny check
