@@ -21,7 +21,7 @@ JSONL
 
 cd "$REPO_ROOT"
 
-"$SCRYRS_BIN" record --file "$EVENTS_PATH" >/tmp/scryrs-core-artifact-loop-record.json
+"$SCRYRS_BIN" record --mode local --file "$EVENTS_PATH" >/tmp/scryrs-core-artifact-loop-record.json
 [[ -f .scryrs/scryrs.db ]]
 grep -F '"command":"record"' /tmp/scryrs-core-artifact-loop-record.json >/dev/null
 

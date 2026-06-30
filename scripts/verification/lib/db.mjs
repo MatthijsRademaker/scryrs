@@ -1,13 +1,27 @@
 /**
  * SQLite datastore helpers for scryrs cross-harness verification fixtures.
  *
- * Replaces the JSONL helpers. Reads accepted events from the canonical
- * .scryrs/scryrs.db SQLite datastore.
+ * Reads accepted events from the canonical `.scryrs/scryrs.db` SQLite
+ * datastore via Python's stdlib `sqlite3` module. This avoids native Node
+ * bindings inside Linux Docker fixtures mounted over a host `node_modules/`.
  */
 
-import Database from "better-sqlite3";
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fail } from "./assert.mjs";
+
+const SQLITE_READ_SCRIPT = String.raw`
+import json
+import sqlite3
+import sys
+
+conn = sqlite3.connect(sys.argv[1])
+try:
+    rows = conn.execute("SELECT event_json FROM trace_events ORDER BY rowid").fetchall()
+    print(json.dumps([row[0] for row in rows]))
+finally:
+    conn.close()
+`;
 
 /**
  * Read all persisted events from a scryrs SQLite datastore.
@@ -21,29 +35,37 @@ export function readEventsDb(dbPath) {
 		return [];
 	}
 
-	let db;
-	try {
-		db = new Database(dbPath, { readonly: true });
-	} catch {
+	const result = spawnSync("python3", ["-c", SQLITE_READ_SCRIPT, dbPath], {
+		encoding: "utf-8",
+	});
+
+	if (result.error) {
+		fail("readEventsDb", `python3 spawn failed: ${result.error.message}`);
+		return [];
+	}
+
+	if (result.status !== 0) {
+		const reason = (
+			result.stderr ||
+			result.stdout ||
+			"unknown sqlite read error"
+		).trim();
+		fail("readEventsDb", `SQLite query failed: ${reason}`);
 		return [];
 	}
 
 	let rows;
 	try {
-		rows = db
-			.prepare("SELECT event_json FROM trace_events ORDER BY rowid")
-			.all();
+		rows = JSON.parse(result.stdout || "[]");
 	} catch (err) {
-		fail("readEventsDb", `SQL query failed: ${err.message}`);
-		db.close();
+		fail("readEventsDb", `invalid Python JSON output: ${err.message}`);
 		return [];
 	}
-	db.close();
 
 	const events = [];
-	for (const row of rows) {
+	for (const eventJson of rows) {
 		try {
-			events.push(JSON.parse(row.event_json));
+			events.push(JSON.parse(eventJson));
 		} catch {
 			fail("readEventsDb", `invalid JSON in event_json column`);
 		}

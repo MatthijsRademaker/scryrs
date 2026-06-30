@@ -36,7 +36,7 @@ scripts/verification/
 ├── README.md                    # This file
 ├── lib/
 │   ├── assert.mjs               # pass/fail/assert helpers + summary
-│   ├── db.mjs                   # readEventsDb, assertEventShape (SQLite)
+│   ├── db.mjs                   # readEventsDb, assertEventShape (SQLite via python3)
 │   └── pi-shim-driver.mjs       # loads hooks/pi/index.ts via tsx with a mock Pi
 ├── claude-code-e2e.mjs          # native `scryrs hook claude-code`
 ├── pi-hook-e2e.mjs              # native `scryrs hook pi` + transport shim
@@ -70,7 +70,7 @@ Authoritative headless production-readiness gate. It runs these required lanes, 
 Authoritative hook-capture verification entrypoint. It:
 
 1. Builds the real `scryrs` binary via `cargo build --release` in a Rust Docker container.
-2. Installs fixture deps (`better-sqlite3`, `tsx`) in a Node.js Docker container.
+2. Installs fixture deps (`tsx`) in a Node.js Docker container.
 3. Runs the Claude Code fixture against the binary.
 4. Runs the Pi fixture (native command + transport shim) against the binary.
 5. Runs the installed-hook fixture to validate `scryrs init` output.
@@ -126,7 +126,7 @@ Two layers: (A) drives `scryrs hook pi --file <tmp>` with crafted raw Pi events,
 
 ### `installed-hook-e2e.mjs`
 
-Runs `scryrs init --agent claude-code` and `scryrs init --agent pi` in temporary consumer directories and proves the installed artifacts capture events.
+Runs `scryrs init --agent claude-code --mode local` and `scryrs init --agent pi --mode local` in temporary consumer directories and proves the installed artifacts capture events.
 
 ### `live-hotspots-e2e.mjs`
 
@@ -134,7 +134,7 @@ Starts a fresh `scryrs server`, waits for readiness through the live hotspot que
 
 ### `core-artifact-loop-e2e.sh`
 
-Creates a temporary repository, records deterministic local trace events, materializes hotspots/graph/routes/proposals, accepts one proposal, and asserts the expected artifact directories and files exist.
+Creates a temporary repository, records deterministic local trace events via `scryrs record --mode local`, materializes hotspots/graph/routes/proposals, accepts one proposal, and asserts the expected artifact directories and files exist.
 
 ## Usage
 
@@ -242,7 +242,7 @@ mkdir -p "$REPO_ROOT"
 cd "$REPO_ROOT"
 
 "$SCRYRS_BIN" --version
-"$SCRYRS_BIN" init --agent claude-code
+"$SCRYRS_BIN" init --agent claude-code --mode local
 "$SCRYRS_BIN" doctor --json
 
 cat > events.jsonl <<'JSONL'
@@ -250,7 +250,7 @@ cat > events.jsonl <<'JSONL'
 {"schema_version":"0.1.0","timestamp":"2026-06-29T12:00:01Z","session_id":"macos-manual-1","event_type":"SearchRun","tool_name":"grep","payload":{"type":"SearchRun","query":"auth"},"outcome":{"result":"Success"}}
 JSONL
 
-"$SCRYRS_BIN" record --file events.jsonl
+"$SCRYRS_BIN" record --mode local --file events.jsonl
 "$SCRYRS_BIN" hotspots .
 "$SCRYRS_BIN" graph .
 "$SCRYRS_BIN" route .

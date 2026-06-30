@@ -14,7 +14,7 @@
  *
  * Prerequisites:
  *   - Real `scryrs` binary (SCRYRS_BIN env, or target/release/scryrs)
- *   - tsx and better-sqlite3 available (npm install)
+ *   - tsx available (npm install)
  *
  * Usage: node scripts/verification/pi-hook-e2e.mjs
  */

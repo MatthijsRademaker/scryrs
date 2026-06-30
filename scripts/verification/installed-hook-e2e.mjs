@@ -1,7 +1,8 @@
 /**
  * Installed-hook end-to-end verification.
  *
- * Runs `scryrs init --agent claude-code` and `scryrs init --agent pi` in
+ * Runs `scryrs init --agent claude-code --mode local` and
+ * `scryrs init --agent pi --mode local` in
  * temporary consumer project directories, then proves the installed artifacts
  * actually capture events against the real `scryrs` binary.
  *
@@ -15,14 +16,13 @@
  *
  * Prerequisites:
  *   - Real `scryrs` binary (SCRYRS_BIN env, or target/release/scryrs)
- *   - tsx and better-sqlite3 available (npm install)
+ *   - tsx available (npm install)
  *
  * Usage: node scripts/verification/installed-hook-e2e.mjs [--claude-only|--pi-only]
  */
 
 import {
 	existsSync,
-	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
@@ -33,7 +33,7 @@ import { join, dirname } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { pass, fail, summary, assert } from "./lib/assert.mjs";
+import { fail, summary, assert } from "./lib/assert.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -104,7 +104,8 @@ function countNativeClaudeHook(settings) {
 		const hooks = entry?.hooks;
 		if (!Array.isArray(hooks)) continue;
 		for (const h of hooks) {
-			if (h?.type === "command" && h?.command === "scryrs hook claude-code") n++;
+			if (h?.type === "command" && h?.command === "scryrs hook claude-code")
+				n++;
 		}
 	}
 	return n;
@@ -118,11 +119,15 @@ function testClaudeCodeInstalled() {
 	const consumerDir = tempDir();
 	try {
 		// 1. Run scryrs init.
-		const initStdout = execFileSync(SCRYRS_BIN, ["init", "--agent", "claude-code"], {
-			cwd: consumerDir,
-			encoding: "utf-8",
-			timeout: 5000,
-		});
+		const initStdout = execFileSync(
+			SCRYRS_BIN,
+			["init", "--agent", "claude-code", "--mode", "local"],
+			{
+				cwd: consumerDir,
+				encoding: "utf-8",
+				timeout: 5000,
+			},
+		);
 
 		// 2. settings.json has the native command hook; no .mjs file anywhere.
 		const settingsPath = join(consumerDir, ".claude", "settings.json");
@@ -142,12 +147,18 @@ function testClaudeCodeInstalled() {
 			initStdout.includes("scryrs hook claude-code"),
 			"next steps mention `scryrs hook claude-code`",
 		);
-		assert(initStdout.includes("settings.json"), "next steps mention settings.json");
+		assert(
+			initStdout.includes("settings.json"),
+			"next steps mention settings.json",
+		);
 		assert(
 			initStdout.includes("Restart your Claude Code session"),
 			"next steps mention restarting the session",
 		);
-		assert(!initStdout.toLowerCase().includes(".mjs"), "next steps do not mention any .mjs file");
+		assert(
+			!initStdout.toLowerCase().includes(".mjs"),
+			"next steps do not mention any .mjs file",
+		);
 
 		// 4. Drive the native command with a PreToolUse payload on stdin.
 		const payload = JSON.stringify({
@@ -162,11 +173,17 @@ function testClaudeCodeInstalled() {
 			encoding: "utf-8",
 			timeout: 15000,
 		});
-		assert(r.status === 0 && (r.stdout ?? "") === "", "native hook exits 0 with empty stdout");
+		assert(
+			r.status === 0 && (r.stdout ?? "") === "",
+			"native hook exits 0 with empty stdout",
+		);
 
 		// 5. Confirm persistence via hotspots.
 		const count = analyzedEventCount(consumerDir);
-		assert(count >= 1, `installed Claude Code integration persisted events (analyzedEventCount=${count})`);
+		assert(
+			count >= 1,
+			`installed Claude Code integration persisted events (analyzedEventCount=${count})`,
+		);
 	} catch (err) {
 		fail("Claude Code installed E2E", String(err?.message || err));
 	} finally {
@@ -186,24 +203,49 @@ function testPiInstalled() {
 	const consumerDir = tempDir();
 	try {
 		// 1. Run scryrs init.
-		const initStdout = execFileSync(SCRYRS_BIN, ["init", "--agent", "pi"], {
-			cwd: consumerDir,
-			encoding: "utf-8",
-			timeout: 5000,
-		});
+		const initStdout = execFileSync(
+			SCRYRS_BIN,
+			["init", "--agent", "pi", "--mode", "local"],
+			{
+				cwd: consumerDir,
+				encoding: "utf-8",
+				timeout: 5000,
+			},
+		);
 
 		// 2. Installed artifact exists at the expected path.
-		const hookPath = join(consumerDir, ".pi", "extensions", "pi-trace", "index.ts");
-		assert(existsSync(hookPath), "installed Pi hook exists at .pi/extensions/pi-trace/index.ts");
+		const hookPath = join(
+			consumerDir,
+			".pi",
+			"extensions",
+			"pi-trace",
+			"index.ts",
+		);
+		assert(
+			existsSync(hookPath),
+			"installed Pi hook exists at .pi/extensions/pi-trace/index.ts",
+		);
 		if (!existsSync(hookPath)) return;
 
 		const src = readFileSync(hookPath, "utf-8");
-		assert(src.includes("hook"), "installed Pi shim delegates to `scryrs hook pi`");
-		assert(!src.includes("scryrs record"), "installed Pi shim no longer uses `scryrs record`");
+		assert(
+			src.includes("hook"),
+			"installed Pi shim delegates to `scryrs hook pi`",
+		);
+		assert(
+			!src.includes("scryrs record"),
+			"installed Pi shim no longer uses `scryrs record`",
+		);
 
 		// 3. Next-step text.
-		assert(initStdout.includes("Next steps:"), "init stdout contains next steps");
-		assert(initStdout.includes("Reload Pi"), "next steps instruct reloading Pi");
+		assert(
+			initStdout.includes("Next steps:"),
+			"init stdout contains next steps",
+		);
+		assert(
+			initStdout.includes("Reload Pi"),
+			"next steps instruct reloading Pi",
+		);
 
 		// 4. Transpile via tsx and exercise with a simulated tool_result; the shim
 		//    must invoke `scryrs hook pi --file` and persist.
@@ -220,7 +262,10 @@ function testPiInstalled() {
 			encoding: "utf-8",
 			timeout: 30000,
 		});
-		assert(driver.status === 0, "installed Pi shim transpiles and runs via tsx without error");
+		assert(
+			driver.status === 0,
+			"installed Pi shim transpiles and runs via tsx without error",
+		);
 
 		let parsed = null;
 		try {
@@ -235,11 +280,17 @@ function testPiInstalled() {
 				c.args[1] === "pi" &&
 				c.args[2] === "--file",
 		);
-		assert(delegated, "installed Pi shim invokes `scryrs hook pi --file <tmp>`");
+		assert(
+			delegated,
+			"installed Pi shim invokes `scryrs hook pi --file <tmp>`",
+		);
 
 		// 5. Confirm persistence via hotspots.
 		const count = analyzedEventCount(consumerDir);
-		assert(count >= 1, `installed Pi integration persisted events (analyzedEventCount=${count})`);
+		assert(
+			count >= 1,
+			`installed Pi integration persisted events (analyzedEventCount=${count})`,
+		);
 	} catch (err) {
 		fail("Pi installed E2E", String(err?.message || err));
 	} finally {

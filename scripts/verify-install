@@ -34,14 +34,14 @@ run_rust -- \
         SCRYRS_INSTALL_DIR='/workspace/.tmp-scryrs-verify-install' /workspace/scripts/install
     "
 
-# Verify the installed binary works.
+# Verify the installed binary inside the Linux container that built it.
 step "Verify <temp-install-dir>/scryrs --version"
-if [[ ! -x "$TEMP_INSTALL_DIR/scryrs" ]]; then
-    echo "[verify-install] FAIL: installed binary not found or not executable at $TEMP_INSTALL_DIR/scryrs" >&2
+if [[ ! -f "$TEMP_INSTALL_DIR/scryrs" ]]; then
+    echo "[verify-install] FAIL: installed binary not found at $TEMP_INSTALL_DIR/scryrs" >&2
     exit 1
 fi
 
-VERSION_OUTPUT="$("$TEMP_INSTALL_DIR/scryrs" --version 2>&1)" || {
+VERSION_OUTPUT="$(run_rust -- bash -c '/workspace/.tmp-scryrs-verify-install/scryrs --version' 2>&1)" || {
     echo "[verify-install] FAIL: installed binary --version failed" >&2
     echo "[verify-install] Output: $VERSION_OUTPUT" >&2
     exit 1

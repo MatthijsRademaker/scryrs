@@ -120,12 +120,13 @@ INIT_EXIT=0
 # which also uses glibc. Alpine-based node images use musl and won't run the binary.
 FIXTURE_NODE_IMAGE="${FIXTURE_NODE_IMAGE:-node:22}"
 
-# Pre-install fixture deps: better-sqlite3 (read the store) and tsx (transpile
-# the Pi index.ts shim). The Claude Code path needs neither a hook file nor node.
-step "Installing fixture dependencies (better-sqlite3, tsx)"
+# Pre-install fixture deps: tsx (transpile the Pi index.ts shim). SQLite reads
+# use Python stdlib inside the fixture container, so no native Node addon build
+# is needed.
+step "Installing fixture dependencies (tsx)"
 run_node --image "$FIXTURE_NODE_IMAGE" \
     -- \
-    npm install better-sqlite3 tsx \
+    npm install tsx \
     || { echo "ERROR: failed to install fixture dependencies" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
@@ -169,19 +170,28 @@ fi
 # ---------------------------------------------------------------------------
 if $RUN_INIT; then
 	step "Running installed-hook E2E fixture"
-	INIT_ARGS=()
+	INIT_MODE_ARG=""
 	if $PI_ONLY; then
-		INIT_ARGS+=(--pi-only)
+		INIT_MODE_ARG="--pi-only"
 	fi
 	if $CLAUDE_ONLY; then
-		INIT_ARGS+=(--claude-only)
+		INIT_MODE_ARG="--claude-only"
 	fi
-	run_node --image "$FIXTURE_NODE_IMAGE" \
-		-e "PATH=/workspace/.docker-fixtures:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-		-e "SCRYRS_BIN=/workspace/.docker-fixtures/scryrs" \
-		-- \
-		node /workspace/scripts/verification/installed-hook-e2e.mjs "${INIT_ARGS[@]}" \
-		|| INIT_EXIT=$?
+	if [[ -n "$INIT_MODE_ARG" ]]; then
+		run_node --image "$FIXTURE_NODE_IMAGE" \
+			-e "PATH=/workspace/.docker-fixtures:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+			-e "SCRYRS_BIN=/workspace/.docker-fixtures/scryrs" \
+			-- \
+			node /workspace/scripts/verification/installed-hook-e2e.mjs "$INIT_MODE_ARG" \
+			|| INIT_EXIT=$?
+	else
+		run_node --image "$FIXTURE_NODE_IMAGE" \
+			-e "PATH=/workspace/.docker-fixtures:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+			-e "SCRYRS_BIN=/workspace/.docker-fixtures/scryrs" \
+			-- \
+			node /workspace/scripts/verification/installed-hook-e2e.mjs \
+			|| INIT_EXIT=$?
+	fi
 	if [[ $INIT_EXIT -eq 0 ]]; then
 		echo "  Installed-hook fixture: PASSED"
 	else
