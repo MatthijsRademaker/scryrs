@@ -1,4 +1,4 @@
-# scryrs-server — containerized central trace ingest service
+# scryrs-server — containerized central trace ingest service + live dashboard
 #
 # Repository packaging / maintainer asset. This Dockerfile is the SOURCE of the
 # published image; consumers do NOT build it. Released versions are published by
@@ -22,8 +22,7 @@ FROM rust:1.85.0 AS builder
 WORKDIR /build
 
 # The scryrs-dashboard crate's build.rs compiles the frontend with Bun, so the
-# JS toolchain must be present in the builder (the default feature set enabled
-# by `--features server,core` includes the dashboard). Mirrors the CI toolchain.
+# JS toolchain must be present in the builder. Mirrors the CI toolchain.
 RUN apt-get update && apt-get install -y --no-install-recommends curl unzip \
     && rm -rf /var/lib/apt/lists/* \
     && curl -fsSL https://bun.sh/install | bash
@@ -31,14 +30,15 @@ ENV PATH="/root/.bun/bin:${PATH}"
 
 COPY . .
 
-# Build scryrs-cli with server + core features in release mode.
-RUN cargo build -p scryrs-cli --features server,core --release
+# Build scryrs-cli with server, core, and dashboard features in release mode.
+RUN cargo build -p scryrs-cli --features server,core,dashboard --release
 
 # Minimal runtime image.
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/target/release/scryrs /usr/local/bin/scryrs
