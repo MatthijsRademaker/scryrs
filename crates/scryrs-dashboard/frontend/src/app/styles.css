@@ -215,6 +215,11 @@
       scry-in 280ms ease-out both,
       scry-glow 1100ms ease-out 1;
   }
+
+  /* Score-change highlight for live polling table cells (~1s oklch flash). */
+  .score-flash {
+    animation: score-flash 1s ease-out;
+  }
 }
 
 @keyframes scry-in {
@@ -256,10 +261,20 @@
   animation: scry-pulse 1.8s ease-in-out infinite;
 }
 
+@keyframes score-flash {
+  0% {
+    color: var(--flame-to);
+  }
+  100% {
+    color: inherit;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .scry-in,
   .scry-glow,
   .pulse-dot,
+  .score-flash,
   * {
     animation: none !important;
     transition-duration: 0.01ms !important;
