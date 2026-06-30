@@ -1,17 +1,21 @@
-# scryrs — multi-agent live hotspot server stack
+# scryrs — repository-root live hotspot server stack
 #
-# Starts the containerized central trace ingest service with persistent storage
-# and a stable service name reachable from other agent containers on the same
-# Docker network.
+# Repository packaging / maintainer asset for building and smoke-checking the
+# scryrs-server image from a source checkout. This is NOT the consumer path:
+# consumer workspaces use `scryrs init --mode live` + `scryrs up`, which generate
+# `.scryrs/compose.yml` referencing the published image
+# `ghcr.io/matthijsrademaker/scryrs-server:latest` (no local build) plus a local
+# `.scryrs/.env`, instead of reusing this file.
 #
 # Quickstart:
 #   docker compose up -d
 #
-# Agent workspaces connect via live-mode init:
+# Consumer workspaces connect via live-mode init:
 #   scryrs init --agent claude-code --mode live \
-#     --ingest-url http://scryrs-server:8081 \
+#     --ingest-url http://scryrs:8081 \
 #     --workspace-id my-workspace \
-#     --agent-id agent-1
+#     --agent-id agent-1 \
+#     --docker-network <existing-agent-network>
 
 version: "3.8"
 

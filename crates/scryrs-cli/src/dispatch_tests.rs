@@ -1388,8 +1388,8 @@ fn help_json_contains_grouped_proposals_surface_and_bumped_version() {
     assert!(err.is_empty());
     let json_str = String::from_utf8_lossy(&out);
     assert!(
-        json_str.contains("\"surfaceVersion\":\"0.11.0\""),
-        "--help-json must bump surfaceVersion to 0.11.0, got:\n{json_str}"
+        json_str.contains("\"surfaceVersion\":\"0.12.1\""),
+        "--help-json must bump surfaceVersion to 0.12.1, got:\n{json_str}"
     );
     assert!(
         json_str.contains("\"name\":\"proposals\""),

@@ -91,12 +91,36 @@ Default features include the standalone suite, Markdown adapter, runtime, and de
 
 Get from a freshly cloned repo to your first command in under two minutes.
 
-### Prerequisites
+### Install (recommended): one-shot binary
+
+Install the latest released `scryrs` binary with a single command — no Rust toolchain
+or source checkout required. Supported platforms: **macOS arm64** and **Linux x86_64**.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/matthijsrademaker/scryrs/main/install.sh | sh
+```
+
+The installer detects your OS/arch, downloads the matching release binary, verifies it
+against its published `.sha256` checksum, installs it to `$HOME/.local/bin`, and runs
+`scryrs --version`. To customise:
+
+```bash
+# custom install directory
+curl -fsSL https://raw.githubusercontent.com/matthijsrademaker/scryrs/main/install.sh | sh -s -- --bin-dir /usr/local/bin
+
+# pin a specific release tag (default: latest)
+curl -fsSL https://raw.githubusercontent.com/matthijsrademaker/scryrs/main/install.sh | SCRYRS_VERSION=v0.1.0 sh
+```
+
+> **macOS note:** if Gatekeeper quarantines the downloaded binary, clear the flag with
+> `xattr -d com.apple.quarantine "$HOME/.local/bin/scryrs"`.
+
+### Prerequisites (source install)
 
 - **Rust 1.85+** (install via [rustup](https://rustup.rs)) — or —
 - **Docker** (the workspace ships a dev container with all tooling pre-installed)
 
-### Install from source (recommended)
+### Install from source (contributors)
 
 The `scripts/install` script builds and installs the `scryrs` binary to `$HOME/.local/bin`
 by default. It works on macOS and Linux.

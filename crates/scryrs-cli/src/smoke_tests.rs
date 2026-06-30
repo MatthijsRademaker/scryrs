@@ -9,6 +9,7 @@ fn public_run_entrypoint_no_panic() {
     // hotspots with no store exits 2 (missing store).
     assert_eq!(run(["hotspots", "/tmp"]), 2);
     assert_eq!(run(["record", "--file", "/nonexistent"]), 2);
+    assert_eq!(run(["up"]), 2);
     assert_eq!(run(Vec::<&str>::new()), 0);
     assert_eq!(run(["unknown"]), 2);
     assert_eq!(run(["hotspots"]), 2);
@@ -102,7 +103,7 @@ fn dockerfile_has_correct_entrypoint() {
 }
 
 #[test]
-fn compose_has_scryrs_server_service_and_network() {
+fn root_compose_remains_packaging_asset_with_server_service_and_network() {
     let compose = include_str!("../../../docker-compose.yml");
     assert!(
         compose.contains("scryrs-server:"),

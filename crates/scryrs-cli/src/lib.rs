@@ -1,10 +1,12 @@
 //! v0 CLI contract: `scryrs hotspots <PATH>`, `scryrs record --stdin|--file <PATH>`,
-//! `scryrs init --agent <NAME>`, and `scryrs dashboard`.
+//! `scryrs init --agent <NAME>`, `scryrs up`, and `scryrs dashboard`.
 
 mod dashboard;
 mod doctor;
 mod init;
+mod live_bootstrap;
 mod server;
+mod up;
 
 #[cfg(feature = "core")]
 mod chrono;
@@ -45,3 +47,5 @@ mod proposals_tests;
 mod record_tests;
 #[cfg(test)]
 mod smoke_tests;
+#[cfg(test)]
+mod up_tests;

@@ -1,12 +1,21 @@
 # scryrs-server — containerized central trace ingest service
 #
-# Build:
+# Repository packaging / maintainer asset. This Dockerfile is the SOURCE of the
+# published image; consumers do NOT build it. Released versions are published by
+# the release workflow to:
+#   ghcr.io/matthijsrademaker/scryrs-server:<version>  (and :latest, linux/amd64)
+#
+# Consumer workspaces use `scryrs init --mode live` + `scryrs up`, which scaffold
+# `.scryrs/compose.yml` referencing the published ghcr.io image — no local build.
+#
+# Maintainer/dev build:
 #   docker build -t scryrs-server .
 #
-# Run standalone:
-#   docker run -p 8081:8081 -v scryrs-data:/data/scryrs scryrs-server
+# Run the published image standalone:
+#   docker run -p 8081:8081 -v scryrs-data:/data/scryrs \
+#     ghcr.io/matthijsrademaker/scryrs-server:latest
 #
-# Or use the provided docker-compose.yml for multi-agent networking.
+# Or use repository-root docker-compose.yml for maintainer/dev smoke workflows.
 
 FROM rust:1.85.0 AS builder
 

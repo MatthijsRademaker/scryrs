@@ -129,27 +129,27 @@ When an unrecognized agent name is provided, the installer SHALL exit with code 
 
 ### Requirement: Pre-existing target files trigger loud refusal
 
-If the target file or directory already exists at the installation path, the installer SHALL exit 2 with a deterministic collision error and remediation instructions. The installer SHALL NOT overwrite, merge, or partially mutate any existing file.
+The installer SHALL preserve existing managed files deterministically. For file-based harness installs, identical existing managed content SHALL be treated as a successful no-op, while divergent existing content SHALL still fail loudly instead of being overwritten.
 
-#### Scenario: Hook file already exists
+#### Scenario: Identical Pi runtime copy is accepted as no-op
 
-- **GIVEN** `.claude/hooks/scryrs-hook.mjs` already exists from a prior installation
-- **WHEN** `scryrs init --agent claude-code` is invoked
+- **GIVEN** `.pi/extensions/pi-trace/index.ts` already exists and is byte-identical to the embedded Pi hook source
+- **WHEN** `scryrs init --agent pi` is invoked again
+- **THEN** the exit code is 0
+- **AND** the existing file content is preserved unchanged
+- **AND** the installer continues with the rest of the requested init work
+
+#### Scenario: Divergent Pi runtime copy is refused
+
+- **GIVEN** `.pi/extensions/pi-trace/index.ts` already exists and differs from the embedded Pi hook source
+- **WHEN** `scryrs init --agent pi` is invoked
 - **THEN** the exit code is 2
-- **AND** stderr indicates the file already exists at the target path
-- **AND** stderr provides remediation instructions (e.g., remove the file and rerun)
-- **AND** the existing file content is not modified
-
-#### Scenario: Target directory already exists but target file does not
-
-- **GIVEN** `.claude/hooks/` directory already exists but contains no `scryrs-hook.mjs`
-- **WHEN** `scryrs init --agent claude-code` is invoked
-- **THEN** the installer creates `scryrs-hook.mjs` inside the existing directory
-- **AND** the exit code is 0
+- **AND** stderr reports the existing path conflict with remediation guidance
+- **AND** the divergent file is not overwritten
 
 #### Scenario: Pi target directory already exists but target file does not
 
-- **GIVEN** `.pi/extensions/pi-trace/` directory already exists but contains no `index.ts`
+- **GIVEN** `.pi/extensions/pi-trace/` already exists but contains no `index.ts`
 - **WHEN** `scryrs init --agent pi` is invoked
 - **THEN** the installer creates `index.ts` inside the existing directory
 - **AND** the exit code is 0
@@ -208,7 +208,7 @@ The installer SHALL continue to detect the scryrs source checkout by ancestry ma
 
 ### Requirement: Successful install prints deterministic next-step text
 
-On successful installation, the installer SHALL print deterministic, mode-specific next-step instructions to stdout. Local mode SHALL keep the current local guidance. Live mode SHALL explain that the project is configured for remote ingest, identify the configured live-server endpoint, and describe the server/Docker follow-up needed to start or connect the shared service.
+On successful installation, the installer SHALL print deterministic, mode-specific next-step instructions to stdout. Local mode SHALL keep the current local guidance. Live mode SHALL explain that the project is configured for remote ingest, identify the configured live-server endpoint, and direct the operator to launch the managed workspace compose stack with `scryrs up`.
 
 #### Scenario: Local mode keeps current next steps
 
@@ -216,12 +216,13 @@ On successful installation, the installer SHALL print deterministic, mode-specif
 - **THEN** stdout contains the existing local next-step guidance
 - **AND** it does not mention Docker or a remote ingest URL
 
-#### Scenario: Live mode prints remote-server next steps
+#### Scenario: Live mode prints workspace-bootstrap next steps
 
 - **WHEN** `scryrs init --agent claude-code --mode live` completes successfully
 - **THEN** stdout states that live remote ingest was configured
 - **AND** stdout includes the remote server endpoint for the project
-- **AND** stdout includes deterministic next steps for starting or connecting to the shared server, including the documented Docker workflow
+- **AND** stdout tells the operator to start the managed live server with `scryrs up`
+- **AND** stdout does not tell the operator to check out the scryrs source repository and run the root `docker-compose.yml`
 
 ### Requirement: Installer does not create or depend on scryrs.json
 
@@ -340,31 +341,53 @@ This change SHALL NOT modify any Rust crate outside `scryrs-cli`. It SHALL NOT m
 
 ### Requirement: Init supports explicit local and live setup modes
 
-The `init` subcommand SHALL accept `--mode local|live` with `local` as the default. Local mode SHALL preserve the existing local-install flow. Live mode SHALL use deterministic CLI inputs for `ingest_url`, `workspace_id`, `agent_id`, and optional `repository_id`; when `repository_id` is omitted, the installer SHALL derive it from Git remote origin using the normalized repository identity contract required by live ingest. Missing or invalid live-mode configuration SHALL exit 2 before the installer writes hook files, `.scryrs/` artifacts, or `scryrs.json`.
+The `init` subcommand SHALL accept `--mode local|live` with `live` as the default. Local mode SHALL preserve the existing local-install flow. Live mode SHALL use deterministic CLI inputs for `ingest_url`, `workspace_id`, and required `docker_network`, with optional `repository_id` and optional `agent_id`. When `repository_id` is omitted, the installer SHALL derive it from Git remote origin using the normalized repository identity contract required by live ingest. When `agent_id` is omitted, the installer SHALL NOT require it and SHALL leave it to runtime autogeneration; `agent_id` is not a required live-mode input. Missing or invalid live-mode configuration (a missing `ingest_url`, `workspace_id`, or `docker_network`, or an underivable `repository_id`) SHALL exit 2 before the installer writes hook files, `.scryrs/` artifacts, or `scryrs.json`.
 
-#### Scenario: Default init remains local
+#### Scenario: Default init validates complete live bootstrap inputs before writing
 
 - **WHEN** `scryrs init --agent pi` or `scryrs init --agent claude-code` is invoked without `--mode`
-- **THEN** the installer behaves as the existing local-mode path
-- **AND** no remote configuration is required
-- **AND** no network-specific next-step text is emitted
+- **THEN** the installer resolves live-mode bootstrap inputs
+- **AND** the command succeeds only after `ingest_url`, `workspace_id`, and `docker_network` are all valid and `repository_id` is resolvable
+- **AND** no partial files are written before that validation completes
 
-#### Scenario: Live mode validates remote identity before writing
+#### Scenario: agent_id is not a required live-mode input
 
-- **WHEN** `scryrs init --agent pi --mode live` is invoked with complete live-mode inputs
-- **THEN** the installer validates the remote identity set before writing any files
-- **AND** the command succeeds only after the full live configuration is valid
+- **WHEN** `scryrs init --agent claude-code --mode live` is invoked without an `agent_id` value
+- **THEN** the command does not fail for a missing `agent_id`
+- **AND** no `agent_id` is written into committed config
+- **AND** `agent_id` is left to runtime autogeneration
 
 #### Scenario: Invalid live mode fails without partial writes
 
-- **WHEN** `scryrs init --agent claude-code --mode live` is invoked with a missing or empty required live-mode field
+- **WHEN** `scryrs init --agent claude-code --mode live` is invoked with a missing or empty required live-mode field (`ingest_url`, `workspace_id`, or `docker_network`)
 - **THEN** the exit code is 2
 - **AND** stderr contains deterministic validation guidance
 - **AND** no hook files, `.scryrs/` artifacts, or `scryrs.json` changes are written
 
+#### Scenario: Local mode remains an explicit opt-in
+
+- **WHEN** `scryrs init --agent pi --mode local` or `scryrs init --agent claude-code --mode local` is invoked
+- **THEN** the installer behaves as the existing local-mode path
+- **AND** no live bootstrap scaffold is required
+- **AND** no network-specific next-step text is emitted
+
 ### Requirement: Live-mode init writes project remote config without local-store scaffolding
 
-In live mode, the installer SHALL install the same harness hook transport, create `.scryrs/`, `.scryrs/.gitignore`, and `.scryrs/hooks/` under the target project, and create-or-merge only the `remote` section of the target project's `scryrs.json`. It SHALL preserve unrelated manifest keys. It SHALL NOT create `.scryrs/scryrs.db`, SHALL NOT dual-write, and SHALL NOT add direct HTTP logic to hook artifacts.
+In live mode, the installer SHALL install the same harness hook transport, create `.scryrs/`, `.scryrs/.gitignore`, `.scryrs/hooks/`, `.scryrs/.env`, and `.scryrs/compose.yml` under the target project, and create-or-merge the target project's `scryrs.json` so that `scryrs.json` is the single committed source of truth for live config. It SHALL write only the committed shared constants — `ingest_url`, `workspace_id`, and `docker_network` — into the `remote` object, preserving unrelated manifest keys. It SHALL NOT write `repository_id` or `agent_id` into committed config (these are derived/autogenerated at resolution time). The scaffolded `.scryrs/.env` SHALL be created as an overrides-only stub: the installer SHALL NOT pre-populate it with managed ingest identity or the Docker network value. It SHALL NOT create `.scryrs/scryrs.db`, SHALL NOT dual-write managed values into both `scryrs.json` and `.scryrs/.env`, and SHALL NOT add direct HTTP logic to hook artifacts.
+
+#### Scenario: Live mode scaffolds compose and overrides-only env
+
+- **WHEN** `scryrs init --agent pi --mode live` succeeds
+- **THEN** `.scryrs/`, `.scryrs/.gitignore`, `.scryrs/hooks/`, `.scryrs/.env`, and `.scryrs/compose.yml` exist under the target project
+- **AND** `.scryrs/scryrs.db` does not exist
+- **AND** the scaffolded `.scryrs/.env` does not contain managed ingest identity or `SCRYRS_DOCKER_NETWORK` values
+
+#### Scenario: Live mode writes only shared constants into the manifest
+
+- **WHEN** `scryrs init --agent claude-code --mode live` succeeds
+- **THEN** `scryrs.json` `remote` contains `ingest_url`, `workspace_id`, and `docker_network`
+- **AND** `scryrs.json` `remote` does not contain `repository_id` or `agent_id`
+- **AND** the same managed values are not duplicated into `.scryrs/.env`
 
 #### Scenario: Live mode merges into an existing manifest
 
@@ -372,10 +395,13 @@ In live mode, the installer SHALL install the same harness hook transport, creat
 - **WHEN** `scryrs init --agent claude-code --mode live` succeeds
 - **THEN** the installer updates only the `remote` section
 - **AND** unrelated manifest keys remain unchanged
+- **AND** the workspace-local `.scryrs/compose.yml` is created or preserved as a managed bootstrap file
 
-#### Scenario: Live mode skips local trace-store creation
+#### Scenario: Conflicting committed manifest value fails loudly
 
-- **WHEN** `scryrs init --agent pi --mode live` succeeds
-- **THEN** `.scryrs/`, `.scryrs/.gitignore`, and `.scryrs/hooks/` exist under the target project
-- **AND** `.scryrs/scryrs.db` does not exist
+- **GIVEN** a target project `scryrs.json` already contains a `remote.ingest_url`, `remote.workspace_id`, or `remote.docker_network` value that conflicts with the resolved live bootstrap inputs
+- **WHEN** `scryrs init --mode live` is invoked
+- **THEN** the exit code is 2
+- **AND** stderr reports the conflicting manifest field with remediation guidance
+- **AND** no partial files are written
 

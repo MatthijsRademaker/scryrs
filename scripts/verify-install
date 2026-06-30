@@ -12,6 +12,29 @@ source "$SCRIPT_DIR/lib/docker-verification.sh"
 step "bash -n scripts/install"
 bash -n "$ROOT/scripts/install"
 
+# ── One-shot installer (install.sh) ──────────────────────────────────────────
+step "sh -n install.sh"
+sh -n "$ROOT/install.sh"
+
+step "install.sh --help exits 0"
+sh "$ROOT/install.sh" --help >/dev/null
+
+# Real download path requires a published GitHub Release reachable from the
+# runner; it is opt-in so the headless verification container does not fail when
+# no release exists yet. Set SCRYRS_VERIFY_DOWNLOAD=1 (optionally with
+# SCRYRS_VERSION=<tag>) to exercise the full download + checksum + install flow.
+if [[ "${SCRYRS_VERIFY_DOWNLOAD:-0}" == "1" ]]; then
+    step "install.sh full download into temp dir"
+    DL_DIR="$ROOT/.tmp-scryrs-verify-download"
+    rm -rf "$DL_DIR"
+    mkdir -p "$DL_DIR"
+    SCRYRS_INSTALL_DIR="$DL_DIR" sh "$ROOT/install.sh"
+    "$DL_DIR/scryrs" --version
+    rm -rf "$DL_DIR"
+else
+    echo "[verify-install] (skipping install.sh download test; set SCRYRS_VERIFY_DOWNLOAD=1 to enable)"
+fi
+
 # ── 2.3–2.4 Linux temp-directory installer verification ─────────────────────
 step "Linux temp-directory install via run_rust"
 

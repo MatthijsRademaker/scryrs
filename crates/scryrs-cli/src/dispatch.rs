@@ -15,6 +15,7 @@ use crate::propose::write_proposals;
 use crate::record::execute_record;
 use crate::route::write_route_json;
 use crate::server::{execute_server, write_server_help};
+use crate::up::execute_up;
 
 pub fn run<I, S>(args: I) -> i32
 where
@@ -90,6 +91,7 @@ where
             && first != "route"
             && first != "propose"
             && first != "proposals"
+            && first != "up"
             && first != "--help"
             && first != "-h"
             && first != "--version"
@@ -116,7 +118,8 @@ where
             || args[0] == "doctor"
             || args[0] == "graph"
             || args[0] == "route"
-            || args[0] == "propose")
+            || args[0] == "propose"
+            || args[0] == "up")
     {
         Some(args[0].as_str())
     } else {
@@ -247,8 +250,17 @@ where
                         .num_args(1)
                         .action(ArgAction::Set)
                         .help("Live-mode repository identity (derived from Git remote origin if omitted)"),
+                )
+                .arg(
+                    Arg::new("docker-network")
+                        .long("docker-network")
+                        .value_name("NAME")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Live-mode external Docker network name (overrides .scryrs/.env SCRYRS_DOCKER_NETWORK)"),
                 ),
         )
+        .subcommand(Command::new("up").about("Start the workspace-managed live-server Compose stack").disable_help_flag(true).disable_version_flag(true))
         .subcommand(
             Command::new("dashboard")
                 .about("Start dashboard server")
@@ -434,6 +446,7 @@ where
                             let workspace_id = m.get_one::<String>("workspace-id").map(|s| s.as_str()).unwrap_or("");
                             let agent_id = m.get_one::<String>("agent-id").map(|s| s.as_str()).unwrap_or("");
                             let repository_id = m.get_one::<String>("repository-id").map(|s| s.as_str());
+                            let docker_network = m.get_one::<String>("docker-network").map(|s| s.as_str()).unwrap_or("");
                             init::execute_init(
                                 &mut out,
                                 &mut err,
@@ -443,10 +456,12 @@ where
                                 workspace_id,
                                 agent_id,
                                 repository_id,
+                                docker_network,
                             )
                         }
                     }
                 }
+                Some(("up", _)) => execute_up(&mut out, &mut err),
                 Some(("dashboard", m)) => execute_dashboard(&mut err, m),
                 Some(("server", m)) => execute_server(&mut err, m),
                 Some(("graph", m)) => {
@@ -597,6 +612,16 @@ where
                         if writeln!(err, "scryrs hook: unexpected argument").is_err()
                             || writeln!(err, "Usage: scryrs hook <HARNESS> [--stdin | --file <PATH>]")
                                 .is_err()
+                            || writeln!(err, "See `scryrs --help`").is_err()
+                        {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                    Some("up") => {
+                        if writeln!(err, "scryrs up: unexpected argument").is_err()
+                            || writeln!(err, "Usage: scryrs up").is_err()
                             || writeln!(err, "See `scryrs --help`").is_err()
                         {
                             1
