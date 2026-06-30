@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import { Motion, useReducedMotion } from "motion-v";
 import { Badge, EventTypeBar, OutcomePulse } from "@/shared/ui";
@@ -64,15 +64,26 @@ onMounted(() => {
   if (props.entry.deltaType === "entered" && ignites.value) {
     delaySeconds.value = nextIgnitionDelayMs(performance.now()) / 1000;
   }
-  if (props.entry.scoreIncreased && ignites.value) {
-    // Count up from zero to new score, capped at 800ms.
-    const durationMs = Math.min(800, 300 + Math.abs(props.entry.score) * 10);
-    const delayMs = props.entry.deltaType === "entered" ? nextIgnitionDelayMs(performance.now()) : 0;
-    runCountUp(0, props.entry.score, durationMs, delayMs);
-  } else {
-    display.value = props.entry.score;
-  }
 });
+
+watch(
+  () => [props.entry.score, props.entry.scoreIncreased, props.entry.deltaType] as const,
+  ([score, scoreIncreased, deltaType]) => {
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = 0;
+    }
+    if (scoreIncreased && ignites.value) {
+      // Count up from the previous display value to the new score, capped at 800ms.
+      const from = display.value;
+      const durationMs = Math.min(800, 300 + Math.abs(score) * 10);
+      const delayMs = deltaType === "entered" ? nextIgnitionDelayMs(performance.now()) : 0;
+      runCountUp(from, score, durationMs, delayMs);
+    } else {
+      display.value = score;
+    }
+  },
+);
 
 onUnmounted(() => {
   if (rafId) cancelAnimationFrame(rafId);

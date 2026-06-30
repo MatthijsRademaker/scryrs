@@ -263,46 +263,79 @@ describe("useHotspotStore", () => {
 
 	// ── 6.6 Tab-visibility pause/resume ────────────────────────────────────
 	describe("tab-visibility pause/resume", () => {
-		it("pauses polling when document becomes hidden and resumes on visible", async () => {
+		it("pauses polling when document becomes hidden and resumes on visible via visibilitychange event", async () => {
 			const mock = vi
 				.spyOn(client, "getHotspots")
 				.mockResolvedValue(makeReport([makeEntry()]));
 
-			// Mock document for visibility testing.
-			const hiddenState = { value: false };
-			vi.stubGlobal("document", {
-				hidden: false,
-				addEventListener: vi.fn(),
-				removeEventListener: vi.fn(),
-			});
+			// Track the visibilitychange handler so we can fire it manually.
+			let visibilityHandler: (() => void) | null = null;
+			let hidden = false;
+
+			const docMock = {
+				get hidden() {
+					return hidden;
+				},
+				addEventListener: vi.fn((_event: string, handler: () => void) => {
+					visibilityHandler = handler;
+				}),
+				removeEventListener: vi.fn(() => {
+					visibilityHandler = null;
+				}),
+			};
+			vi.stubGlobal("document", docMock);
 
 			const store = useHotspotStore();
 
-			store.startPollingRaw(1_000);
+			// Start polling via the public API (maps to startPollingWithVisibility).
+			store.startPolling(1_000);
+			expect(docMock.addEventListener).toHaveBeenCalledWith(
+				"visibilitychange",
+				expect.any(Function),
+			);
+
+			// Immediate first fetch.
+			await vi.advanceTimersByTimeAsync(0);
+			expect(store.pollState).toBe("polling");
+			expect(mock).toHaveBeenCalledTimes(1);
+
+			// Simulate tab hidden → fires visibilitychange handler.
+			hidden = true;
+			expect(visibilityHandler).not.toBeNull();
+			visibilityHandler!();
+			// Advance past 500ms debounce.
+			await vi.advanceTimersByTimeAsync(500);
+
+			// Poll state is preserved (not reset to idle).
+			expect(store.pollState).toBe("polling");
+
+			// After pause, interval ticks should NOT fire.
+			await vi.advanceTimersByTimeAsync(2_000);
+			expect(mock).toHaveBeenCalledTimes(1); // No additional calls.
+
+			// Simulate tab visible → fires visibilitychange handler.
+			hidden = false;
+			visibilityHandler!();
+			// Advance past 500ms debounce.
+			await vi.advanceTimersByTimeAsync(500);
+
+			// Resume: immediate fresh fetch.
+			expect(mock).toHaveBeenCalledTimes(2);
 			await vi.advanceTimersByTimeAsync(0);
 			expect(store.pollState).toBe("polling");
 
-			// Simulate document hidden → pause.
-			vi.stubGlobal("document", {
-				get hidden() {
-					return hiddenState.value;
-				},
-				addEventListener: vi.fn(),
-				removeEventListener: vi.fn(),
-			});
-			hiddenState.value = true;
-			store.stopPollingRaw();
-			// After explicit stop, state resets to idle (unless stale/error).
+			// Stop polling via public API (maps to stopPollingFull) — removes listener.
+			store.stopPolling();
+			expect(docMock.removeEventListener).toHaveBeenCalledWith(
+				"visibilitychange",
+				expect.any(Function),
+			);
 			expect(store.pollState).toBe("idle");
 
-			// Simulate resume → restart.
-			hiddenState.value = false;
-			store.startPollingRaw(1_000);
-			expect(mock).toHaveBeenCalled();
-			await vi.advanceTimersByTimeAsync(0);
-			expect(store.pollState).toBe("polling");
+			// After stop, interval ticks should NOT fire.
+			await vi.advanceTimersByTimeAsync(2_000);
+			expect(mock).toHaveBeenCalledTimes(2);
 
-			store.stopPollingRaw();
 			vi.unstubAllGlobals();
 		});
 	});

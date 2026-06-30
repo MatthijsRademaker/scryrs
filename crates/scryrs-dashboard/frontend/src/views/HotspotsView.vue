@@ -13,6 +13,7 @@ import {
   CardTitle,
   EmptyState,
   EventTypeBar,
+  OutcomePulse,
   Table,
 } from "@/shared/ui";
 import HeroCard from "@/components/HeroCard.vue";
