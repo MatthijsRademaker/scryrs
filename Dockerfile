@@ -20,6 +20,15 @@
 FROM rust:1.85.0 AS builder
 
 WORKDIR /build
+
+# The scryrs-dashboard crate's build.rs compiles the frontend with Bun, so the
+# JS toolchain must be present in the builder (the default feature set enabled
+# by `--features server,core` includes the dashboard). Mirrors the CI toolchain.
+RUN apt-get update && apt-get install -y --no-install-recommends curl unzip \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:${PATH}"
+
 COPY . .
 
 # Build scryrs-cli with server + core features in release mode.

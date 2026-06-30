@@ -48,6 +48,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The dashboard crate's build.rs compiles the frontend with Bun, so the
+      # JS toolchain must be present for the --all-features release build.
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
       - name: Install Rust
         run: |
           rustup toolchain install 1.85.0 --profile minimal
