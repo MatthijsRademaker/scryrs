@@ -1,7 +1,7 @@
 pub(crate) const SCRYRS_DOCKER_NETWORK_ENV: &str = "SCRYRS_DOCKER_NETWORK";
 
 pub(crate) const SCRYRS_COMPOSE_TEMPLATE: &str = concat!(
-    "# Managed by `scryrs init --mode live`. Edit via scryrs, not by hand.\n",
+    "# Managed by `scryrs setup live --with-compose`. Edit via scryrs, not by hand.\n",
     "version: \"3.8\"\n\n",
     "services:\n",
     "  scryrs:\n",

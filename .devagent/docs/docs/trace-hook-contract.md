@@ -353,22 +353,28 @@ This tier exists as a lowest-common-denominator fallback for harnesses with no h
 
 ## Install and Setup
 
-Hook installation is automated via `scryrs init --agent <name>`. Run the installer from the target project directory:
+Hook installation is automated via `scryrs init --agent <name>` (hook only — no
+config). Run the installer from the target project directory:
 
 ```bash
-scryrs init --agent claude-code  # merge native command hook into .claude/settings.json
-scryrs init --agent pi           # install the Pi transport shim
+scryrs init --agent claude-code  # merge native hook into .claude/settings.json
+scryrs init --agent pi           # install Pi shim into .pi/extensions/scryrs/index.ts
 ```
 
-For Claude Code the installer create-or-merges `.claude/settings.json` with the
-native `scryrs hook claude-code` command hook (preserving unrelated keys, idempotent
-on re-run); it writes no hook file. For Pi it writes the slimmed `index.ts` shim to
-`.pi/extensions/pi-trace/`. Both print deterministic next-step instructions.
+For Claude Code installer create-or-merges `.claude/settings.json` with native
+`scryrs hook claude-code` command hook (preserving unrelated keys, idempotent on
+re-run); it writes no hook file. For Pi it writes slimmed `index.ts` shim to
+`.pi/extensions/scryrs/index.ts`. Both print deterministic next-step instructions
+that direct you to configure transport with `scryrs setup <mode>`.
+
+Transport configuration is a separate step: `scryrs setup local` for the
+single-machine SQLite store, or `scryrs setup live` for remote ingest (the only
+command that writes `scryrs.json` `remote` and the `.scryrs/` scaffold).
 
 ### Manual setup (alternative)
 
 1. **Ensure scryrs is on `$PATH`** — the harness must be able to invoke `scryrs hook <harness>`.
-2. **Configure the harness:** for Claude Code, add `{"type":"command","command":"scryrs hook claude-code"}` under `PreToolUse` in `.claude/settings.json`; for Pi, install the `hooks/pi/index.ts` shim into `.pi/extensions/pi-trace/`.
+2. **Configure the harness:** for Claude Code, add `{"type":"command","command":"scryrs hook claude-code"}` under `PreToolUse` in `.claude/settings.json`; for Pi, install `hooks/pi/index.ts` into `.pi/extensions/scryrs/index.ts`.
 3. **Create `scryrs.json`** at the repository root (optional, recommended).
 4. **Verify fail-open behavior** — confirm that scryrs failures do not block tool execution.
 

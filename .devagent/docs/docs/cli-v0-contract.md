@@ -4,8 +4,8 @@ scryrs CLI helps teams observe agent coding activity, detect knowledge hotspots,
 
 scryrs supports three current workflow paths:
 
-- **Central live-ingest flow (default):** `scryrs init`, `scryrs up`, `scryrs record`, and `scryrs dashboard` default to live-oriented behavior. `scryrs init` writes the committed live config (`ingest_url`, `workspace_id`, `docker_network`) into `scryrs.json` `remote` — the single committed source of truth — and scaffolds `.scryrs/compose.yml` plus an overrides-only `.scryrs/.env`; `scryrs up` starts that managed server scaffold on the external Docker network named by `remote.docker_network`; then `scryrs record` or `scryrs hook` submits events to the configured live server endpoint — typically `http://scryrs:8081` for container-attached agents. The server provides live hotspot rankings and an SSE signal stream for real-time monitoring across multiple agent instances.
-- **Local observe → detect loop (`--mode local`):** Run `scryrs init --mode local`, then `scryrs hook` / `scryrs record --mode local` to capture trace events locally, `scryrs hotspots` to score them, and `scryrs dashboard --mode local` to browse ranked hotspots, sessions, and events — all from `.scryrs/` in your project root.
+- **Central live-ingest flow (default):** `scryrs init --agent <NAME>` installs the harness hook, then `scryrs setup live` writes the committed live config (`ingest_url`, `workspace_id`) into `scryrs.json` `remote` — the single committed source of truth. The self-host opt-in `scryrs setup live --with-compose` additionally scaffolds `.scryrs/compose.yml` plus an overrides-only `.scryrs/.env` and records `remote.docker_network`; `scryrs up` starts that managed server scaffold on the external Docker network named by `remote.docker_network`. Then `scryrs record` or `scryrs hook` submits events to the configured live server endpoint — typically `http://scryrs:8081` for container-attached agents. The server provides live hotspot rankings and an SSE signal stream for real-time monitoring across multiple agent instances.
+- **Local observe → detect loop:** Run `scryrs init --agent <NAME>` then `scryrs setup local`, then `scryrs hook` / `scryrs record --mode local` to capture trace events locally, `scryrs hotspots` to score them, and `scryrs dashboard --mode local` to browse ranked hotspots, sessions, and events — all from `.scryrs/` in your project root.
 - **Promote → review artifact flow:** Run `scryrs graph`, `scryrs route`, and `scryrs propose` to produce machine-readable graph, route, and inbox proposal artifacts, then use `scryrs proposals list|accept|reject` to review those inbox proposals without mutating source-of-truth docs or graph/route artifacts.
 
 For hotspot interpretation and scoring rationale, see [Hotspots](./hotspots.md). For harness integration rules and fail-open guarantees, see [Trace Hook Contract](./trace-hook-contract.md).
@@ -69,7 +69,7 @@ Remote mode is the default. It resolves an ingest URL from the precedence chain 
 
 **Config precedence (highest to lowest):**
 
-1. CLI flags (where applicable; `init`/`dashboard` accept `--ingest-url`/`--server-url`, etc.)
+1. CLI flags (where applicable; `setup`/`dashboard` accept `--ingest-url`/`--server-url`, etc.)
 2. Environment variables (`SCRYRS_REMOTE_INGEST_URL`, `SCRYRS_REPOSITORY_ID`, `SCRYRS_WORKSPACE_ID`, `SCRYRS_AGENT_ID`, `SCRYRS_REMOTE_TIMEOUT_MS`)
 3. `.scryrs/.env` dotenv file (nearest ancestor)
 4. `scryrs.json` `remote` section (nearest ancestor)
@@ -395,26 +395,57 @@ Reviews inbox proposal artifacts without mutating the inbox file itself.
 
 ### `scryrs init --agent <NAME>`
 
-Install the scryrs trace hook for a supported agent harness into the current working directory.
+Install the scryrs trace hook for a supported agent harness into the current working directory. **Hook install only:** `init` is mode-independent, needs no configuration, is idempotent, never prompts, and cannot fail on missing ingest config. It never reads or writes `scryrs.json` or the `.scryrs/` scaffold — transport configuration is owned exclusively by `scryrs setup <mode>`.
 
 | Field | Value |
 |-------|-------|
-| Input | Required `--agent <NAME>` argument. Supported harnesses: `claude-code`, `pi`. |
-| Output | Deterministic next-step instructions on stdout (plain text). Error diagnostics on stderr. |
+| Input | Required `--agent <NAME>` argument. Supported harnesses: `claude-code`, `pi`. No other flags. |
+| Output | Deterministic, hook-focused next-step instructions on stdout (plain text): confirms the hook was installed and directs the operator to run `scryrs setup <mode>` and reload their agent harness. No remote ingest URL or `scryrs up` guidance. Error diagnostics on stderr. |
 | Exit 0 | Hook installed successfully |
 | Exit 1 | I/O error (cannot create directory or write file) |
-| Exit 2 | Usage error (unsupported harness, target file collision, self-install refusal, missing or empty `--agent`) |
+| Exit 2 | Usage error (unsupported harness, target file collision, self-install refusal, or missing/empty `--agent`) |
 
 **Installation targets:**
 
-- `claude-code`: Create-or-merges `.claude/settings.json` (relative to CWD) with the native command hook `{"type":"command","command":"scryrs hook claude-code"}` under `PreToolUse`. No hook file is written.
-- `pi`: Writes `.pi/extensions/pi-trace/index.ts` (the transport shim) relative to CWD.
+- `claude-code`: Create-or-merges `.claude/settings.json` (relative to CWD) with native command hook `{"type":"command","command":"scryrs hook claude-code"}` under `PreToolUse`. No hook file is written.
+- `pi`: Writes `.pi/extensions/scryrs/index.ts` transport shim relative to CWD.
 
-**Runtime store scaffolding:** Before installing the hook, `init` eagerly scaffolds the `.scryrs/` runtime directory (relative to the resolved target base): a schema-initialized `.scryrs/scryrs.db` and a `.scryrs/.gitignore` that excludes runtime trace data from version control. This makes setup visible immediately and lets `scryrs hotspots` / `scryrs dashboard` succeed (returning an empty report) before any events are recorded; the hook still creates the store lazily as a fallback. Scaffolding is idempotent — an existing store is opened, never clobbered, and an existing `.gitignore` is preserved. It runs only after the harness name is validated, so an unsupported harness leaves the filesystem untouched.
+**Collision behavior:** For `claude-code`, installer merges into existing `.claude/settings.json` — preserving unrelated keys and existing hooks, idempotent on re-run (hook appears exactly once). For `pi`, if target file already exists with different content installer exits 2 with remediation instructions rather than overwriting.
 
-**Collision behavior:** For `claude-code`, the installer merges into an existing `.claude/settings.json` — preserving unrelated keys and existing hooks, idempotent on re-run (the hook appears exactly once). For `pi`, if the target file already exists the installer exits 2 with remediation instructions rather than overwriting.
+**Self-install guard:** `pi` hook installation inside the scryrs source repository (detected via dual-marker heuristic) is permitted for dogfooding (written at the resolved checkout root). Claude Code consumer config installation is refused there. `init` has no live mode, so it carries no live-mode refusal — refusal of live transport setup in the source checkout is owned by `scryrs setup live`.
 
-**Self-install guard:** The installer refuses to run inside the scryrs source repository (detected via dual-marker heuristic).
+### `scryrs setup <local|live>`
+
+Configure runtime trace transport. This is the **only** command that writes `scryrs.json` `remote` and the `.scryrs/` config scaffold; it is independent of `init` (it installs no hook and does not require one). `mode` is a required positional argument.
+
+| Field | Value |
+|-------|-------|
+| Input | Required positional `mode` (`local` or `live`). Live flags: `--ingest-url`, `--workspace-id`, `--agent-id`, `--repository-id`, `--with-compose`, `--docker-network`, `--no-interactive`. |
+| Output | Deterministic next-step instructions on stdout (plain text). Error diagnostics on stderr. |
+| Exit 0 | Transport configured successfully |
+| Exit 1 | I/O error (cannot create directory or write file) |
+| Exit 2 | Usage error (unknown/missing mode, source-checkout refusal for live, missing/invalid/conflicting live config, or wizard cancellation/rejection) |
+
+**`setup local`:**
+
+- Scaffolds `.scryrs/scryrs.db` plus `.scryrs/.gitignore`. Idempotent (preserves an existing store).
+- Manifest-agnostic: never creates or modifies `scryrs.json` and emits no remote/network config.
+- Permitted inside the scryrs source checkout for dogfooding.
+
+**`setup live` (core):**
+
+- Required committed fields are only `ingest_url` and `workspace_id`, resolved via precedence `CLI > env > .scryrs/.env > scryrs.json remote`.
+- Writes only those committed constants into project-root `scryrs.json` `remote` (create-or-merge, preserving unrelated keys). Does not scaffold a local SQLite database.
+- `repository_id` is derived from the Git remote origin at runtime and is never committed. `agent_id` is autogenerated per container and is never committed.
+- `docker_network` is **not** required by core `setup live`.
+- Missing required fields start a wizard only when stdin **and** stdout are terminals and `--no-interactive` is absent; otherwise fail-fast exit 2. Wizard cancellation/rejection writes nothing and exits 2.
+- A committed `remote.ingest_url`/`remote.workspace_id` that conflicts with the resolved inputs exits 2 with no partial writes.
+- Refused inside the scryrs source checkout (live setup configures consumer-project remote state).
+
+**`setup live --with-compose` (self-host opt-in):**
+
+- Additionally scaffolds `.scryrs/compose.yml` and an overrides-only `.scryrs/.env`, and writes `remote.docker_network` for later `scryrs up`.
+- Requires a resolvable `docker_network`; missing it exits 2.
 
 ### `scryrs doctor [--json]`
 
@@ -462,7 +493,7 @@ Diagnose the current installation and readiness state for the working directory.
     {
       "category": "local_store",
       "status": "warn",
-      "summary": "local store is not initialized at /repo/.scryrs/scryrs.db; run `scryrs init --agent <NAME>` or capture events first"
+      "summary": "local store is not initialized at /repo/.scryrs/scryrs.db; run `scryrs setup local` or capture events first"
     }
   ],
   "docsLinks": [
@@ -862,34 +893,46 @@ All error messages and human-facing diagnostics are written to stderr.
 
 ### Init command
 
-**When to call:** An agent should call `scryrs init --agent <NAME>` to install the scryrs trace hook for a supported harness and, in default live mode, scaffold workspace-local bootstrap files under `.scryrs/`.
+**When to call:** An agent should call `scryrs init --agent <NAME>` to install the scryrs trace hook for a supported harness. This installs the hook only — it writes no config, never prompts, and cannot fail on missing ingest config. Configure transport separately with `scryrs setup <mode>`.
 
-**Input:** A required `--agent <NAME>` argument. Supported harness names: `claude-code`, `pi`.
-
-Live mode's required inputs are `ingest_url`, `workspace_id`, and `docker_network`. `--agent-id` and `--repository-id` are optional overrides and are never written to committed config. Each field resolves from CLI flags, then `SCRYRS_REMOTE_*` / `SCRYRS_DOCKER_NETWORK`, then `.scryrs/.env`, then the `scryrs.json` `remote` section (the committed base). When omitted, `repository_id` is derived from the Git remote origin and `agent_id` is autogenerated per container from the hostname.
+**Input:** A required `--agent <NAME>` argument. Supported harness names: `claude-code`, `pi`. No other flags.
 
 **Output:**
 
-- Stdout: Deterministic next-step instructions (plain text), including the configured remote endpoint and `scryrs up` follow-up.
+- Stdout: Deterministic, hook-focused next-step instructions (plain text): confirms the hook was installed and directs the operator to run `scryrs setup <mode>` and reload their agent harness. No remote endpoint or `scryrs up` guidance.
 - Stderr: Error diagnostics on failure.
 
-**Managed live-mode writes:**
-
-- project-root `scryrs.json` `remote` section — the committed source of truth, holding only `ingest_url`, `workspace_id`, and `docker_network` (never `repository_id` or `agent_id`)
-- `.scryrs/compose.yml`
-- `.scryrs/.env` — an overrides-only stub (no managed identity or network values pre-populated)
-
-Live mode does **not** create `.scryrs/scryrs.db`.
+`init` never creates `scryrs.json` or the `.scryrs/` scaffold.
 
 **Exit codes:**
 
 - 0: Hook installed successfully.
 - 1: I/O error (cannot create directory or write file).
-- 2: Usage error (unsupported harness, conflicting committed `scryrs.json` value, self-install refusal, missing `--agent`, or missing/invalid live bootstrap config — a missing `ingest_url`, `workspace_id`, or `docker_network`, or an underivable `repository_id`).
+- 2: Usage error (unsupported harness, target file collision, self-install refusal, or missing/empty `--agent`).
+
+### Setup command
+
+**When to call:** Call `scryrs setup <local|live>` to configure runtime trace transport. This is the only command that writes `scryrs.json` `remote` and the `.scryrs/` config scaffold; it requires no prior `init`.
+
+**Input:** A required positional `mode` (`local` or `live`). Live flags: `--ingest-url`, `--workspace-id`, `--agent-id`, `--repository-id`, `--with-compose`, `--docker-network`, `--no-interactive`.
+
+`setup live`'s only required inputs are `ingest_url` and `workspace_id`. `--agent-id` and `--repository-id` are optional overrides and are never written to committed config. Each field resolves from CLI flags, then `SCRYRS_REMOTE_*` / `SCRYRS_DOCKER_NETWORK`, then `.scryrs/.env`, then the `scryrs.json` `remote` section (the committed base). When omitted, `repository_id` is derived from the Git remote origin and `agent_id` is autogenerated per container from the hostname. `docker_network` is required only for the `--with-compose` self-host opt-in.
+
+**Managed writes:**
+
+- `setup local`: `.scryrs/scryrs.db` plus `.scryrs/.gitignore`. Never touches `scryrs.json`.
+- `setup live`: project-root `scryrs.json` `remote` section — the committed source of truth, holding only `ingest_url` and `workspace_id` (never `repository_id` or `agent_id`). No local `.scryrs/scryrs.db`.
+- `setup live --with-compose`: additionally `.scryrs/compose.yml`, an overrides-only `.scryrs/.env` stub, and `remote.docker_network`.
+
+**Exit codes:**
+
+- 0: Transport configured successfully.
+- 1: I/O error (cannot create directory or write file).
+- 2: Usage error (unknown/missing mode, source-checkout refusal for live, conflicting committed `scryrs.json` value, missing required live config — `ingest_url` or `workspace_id`, or `docker_network` under `--with-compose` — or wizard cancellation/rejection).
 
 ### Up command
 
-**When to call:** Call `scryrs up` after successful live-mode init to start the workspace-managed Compose stack from `.scryrs/compose.yml`.
+**When to call:** Call `scryrs up` after a successful `scryrs setup live --with-compose` to start the workspace-managed Compose stack from `.scryrs/compose.yml`.
 
 **Input:** No positional arguments. The command requires an existing `.scryrs/compose.yml` and a resolvable external network name. It resolves the network from the precedence chain `SCRYRS_DOCKER_NETWORK` env > `.scryrs/.env` > `scryrs.json` `remote.docker_network` (the committed base), then injects the resolved value into the Compose process environment so `${SCRYRS_DOCKER_NETWORK}` substitution resolves. `compose.yml` is left unchanged.
 

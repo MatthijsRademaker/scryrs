@@ -33,7 +33,10 @@ pub(crate) fn execute_up(out: &mut impl Write, err: &mut impl Write) -> i32 {
             "scryrs up: missing required scaffold file {}",
             compose_path.display()
         );
-        let _ = writeln!(err, "Run `scryrs init --agent <NAME>` in live mode first.");
+        let _ = writeln!(
+            err,
+            "Run `scryrs setup live --with-compose` to scaffold the managed compose stack first."
+        );
         let _ = writeln!(err, "Usage: scryrs up");
         let _ = writeln!(err, "See `scryrs --help`");
         return 2;
@@ -56,7 +59,7 @@ pub(crate) fn execute_up(out: &mut impl Write, err: &mut impl Write) -> i32 {
             );
             let _ = writeln!(
                 err,
-                "Run `scryrs init --agent <NAME>` in live mode with --docker-network <NAME> to configure it."
+                "Run `scryrs setup live --with-compose --docker-network <NAME>` to configure it."
             );
             let _ = writeln!(err, "Usage: scryrs up");
             let _ = writeln!(err, "See `scryrs --help`");

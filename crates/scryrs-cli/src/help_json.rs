@@ -4,7 +4,7 @@ use serde_json::json;
 
 /// Version of the `--help-json` surface document format, independent of
 /// `SCHEMA_VERSION` which governs command output envelopes.
-const SURFACE_VERSION: &str = "0.12.1";
+const SURFACE_VERSION: &str = "0.13.0";
 
 pub(crate) fn cli_surface_doc() -> String {
     let doc = json!({
@@ -108,7 +108,7 @@ pub(crate) fn cli_surface_doc() -> String {
             },
             {
                 "name": "init",
-                "description": "Install scryrs trace hook for a supported agent harness and scaffold workspace-local live bootstrap in default live mode",
+                "description": "Install the scryrs trace hook for a supported agent harness (hook only). Idempotent and config-free: it never reads or writes scryrs.json or the .scryrs/ scaffold, and cannot fail on missing ingest config. Configure trace transport separately with `scryrs setup <mode>`.",
                 "arguments": [
                     {
                         "name": "agent",
@@ -116,14 +116,23 @@ pub(crate) fn cli_surface_doc() -> String {
                         "type": "string",
                         "required": true,
                         "description": "Agent harness name (claude-code or pi)"
-                    },
+                    }
+                ],
+                "output": {
+                    "mimeType": "text/plain",
+                    "description": "Hook-focused next-step instructions on stdout (confirms the hook was installed and directs the operator to run `scryrs setup <mode>` and reload their agent harness). Errors on stderr. Does not print a remote ingest URL or `scryrs up` guidance."
+                }
+            },
+            {
+                "name": "setup",
+                "description": "Configure local or live trace transport. The only command that writes scryrs.json remote and the .scryrs/ config scaffold; independent of `init` (no hook is installed or required). `mode` is a required positional (local or live).",
+                "arguments": [
                     {
                         "name": "mode",
-                        "flag": "--mode",
                         "type": "string",
-                        "values": ["live", "local"],
-                        "default": "live",
-                        "description": "Install mode: live (default) for remote ingest plus workspace-managed bootstrap, local for SQLite trace store"
+                        "required": true,
+                        "values": ["local", "live"],
+                        "description": "Transport mode: local (SQLite store under .scryrs/) or live (remote ingest via scryrs.json remote)"
                     },
                     {
                         "name": "ingest-url",
@@ -150,15 +159,29 @@ pub(crate) fn cli_surface_doc() -> String {
                         "description": "Optional live-mode repository identity override (derived from Git remote origin when omitted; not written to committed config)"
                     },
                     {
+                        "name": "with-compose",
+                        "flag": "--with-compose",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Live-mode opt-in: scaffold the self-hosted .scryrs/compose.yml stack plus an overrides-only .scryrs/.env (requires a docker_network) for `scryrs up`"
+                    },
+                    {
                         "name": "docker-network",
                         "flag": "--docker-network",
                         "type": "string",
-                        "description": "Live-mode external Docker network name (overrides .scryrs/.env SCRYRS_DOCKER_NETWORK)"
+                        "description": "External Docker network name for the --with-compose opt-in (overrides .scryrs/.env SCRYRS_DOCKER_NETWORK); not required by core setup live"
+                    },
+                    {
+                        "name": "no-interactive",
+                        "flag": "--no-interactive",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Disable live-setup prompts; missing live config fails fast (exit 2) instead of starting the TTY-only wizard"
                     }
                 ],
                 "output": {
                     "mimeType": "text/plain",
-                    "description": "Post-install next-step instructions on stdout. Errors on stderr. Live mode writes the committed live config (ingest_url, workspace_id, docker_network) into scryrs.json remote as the source of truth and scaffolds .scryrs/compose.yml plus an overrides-only .scryrs/.env for later `scryrs up`."
+                    "description": "Next-step instructions on stdout. Errors on stderr. setup local scaffolds .scryrs/scryrs.db + .scryrs/.gitignore (never touches scryrs.json). setup live create-or-merges the committed scryrs.json remote section (ingest_url + workspace_id required; repository_id/agent_id resolved at runtime, never committed). The compose opt-in (--with-compose) additionally scaffolds .scryrs/compose.yml + an overrides-only .scryrs/.env and writes remote.docker_network. Missing required live config starts a TTY-only wizard unless non-interactive (no TTY or --no-interactive), which fails fast."
                 }
             },
             {
@@ -438,7 +461,7 @@ pub(crate) fn cli_surface_doc() -> String {
         "exitCodes": {
             "0": "Success (hotspots: JSON written, including empty entries; record local: all events accepted; record remote: no rejections or failures; init: hook installed; up: workspace-managed compose stack started; doctor: only ok/warn findings; propose/proposals: artifacts written or listed successfully; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)",
             "1": "Hotspots: storage error. Record: one or more events rejected (local or server), or I/O error writing output. Init: I/O error. Up: docker invocation failure. Doctor: output write failure. Proposals: serialization or filesystem write failure. Dashboard: port in use or artifact read error. Server: port in use or store error.",
-            "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, self-install refusal, invalid mode, or missing/invalid live-mode configuration; up: missing scaffold files, missing external network, or unexpected arguments; doctor: one or more structural error findings; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; dashboard: invalid flags or partial live-mode configuration; server: invalid flags or bind failure."
+            "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, or self-install refusal; setup: unknown/missing mode, source-checkout refusal (live), or missing/invalid/conflicting live configuration; up: missing scaffold files, missing external network, or unexpected arguments; doctor: one or more structural error findings; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; dashboard: invalid flags or partial live-mode configuration; server: invalid flags or bind failure."
         }
     });
     serde_json::to_string(&doc).unwrap_or_else(|_| "{}".into())

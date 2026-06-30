@@ -13,24 +13,28 @@ Get a shared live hotspot server running and an agent feeding it in under two mi
 Run live bootstrap in the **consumer workspace**, not in the scryrs source checkout:
 
 ```bash
-# 1. Configure live ingest + workspace-local bootstrap.
-#    Live mode is the default; repository_id falls back to Git origin when omitted.
-scryrs init --agent claude-code \
+# 1. Install the harness hook (config-free).
+scryrs init --agent claude-code
+
+# 2. Configure live ingest and scaffold the self-host bootstrap.
+#    repository_id falls back to Git origin when omitted; --with-compose opts
+#    into the managed compose stack and requires a docker network.
+scryrs setup live --with-compose \
   --ingest-url http://scryrs:8081 \
   --workspace-id my-workspace \
-  --agent-id agent-1 \
   --docker-network my-agent-network
 
-# 2. Start the managed live server from the generated scaffold.
+# 3. Start the managed live server from the generated scaffold.
 scryrs up
 ```
 
-That writes the committed live config (`ingest_url`, `workspace_id`,
-`docker_network`) into `scryrs.json` `remote` — the single committed source of
-truth — and scaffolds `.scryrs/compose.yml` plus an overrides-only `.scryrs/.env`
-in the current workspace. The generated Compose service joins the existing
-external Docker network named by `remote.docker_network` and is reachable there
-as `http://scryrs:8081`.
+That writes the committed live config (`ingest_url`, `workspace_id`) into
+`scryrs.json` `remote` — the single committed source of truth — and, under the
+`--with-compose` opt-in, records `remote.docker_network` and scaffolds
+`.scryrs/compose.yml` plus an overrides-only `.scryrs/.env` in the current
+workspace. The generated Compose service joins the existing external Docker
+network named by `remote.docker_network` and is reachable there as
+`http://scryrs:8081`.
 
 ```bash
 # 3. Confirm it is serving (empty repo returns an empty ranking, not an error)
@@ -186,7 +190,7 @@ That stack provides:
 - **Dedicated network `scryrs-net`** — suitable for repo-root smoke checks only.
 - **`restart: unless-stopped`** — the server comes back after host or daemon restarts.
 
-For consumer workspaces, `scryrs init --mode live` instead generates
+For consumer workspaces, `scryrs setup live --with-compose` instead generates
 `.scryrs/compose.yml`, which attaches the service to an **existing external
 agent network** and publishes the `http://scryrs:8081` contract there.
 
@@ -240,31 +244,37 @@ CLI; it is not adjustable via flag or environment variable. The SSE stream sends
 
 ## Connecting agents (live ingest)
 
-Live mode is the **default**. Running `scryrs init` in an agent workspace (not the
-scryrs source checkout) configures remote ingest **and** scaffolds the workspace-local
-server bootstrap used later by `scryrs up`.
+Hook install and transport configuration are two steps. `scryrs init` installs the
+harness hook (config-free); `scryrs setup live` in an agent workspace (not the
+scryrs source checkout) configures remote ingest. Add `--with-compose` to also
+scaffold the workspace-local server bootstrap used later by `scryrs up`.
 
 ```bash
-scryrs init --agent claude-code \
+scryrs init --agent claude-code
+scryrs setup live --with-compose \
   --ingest-url http://scryrs:8081 \
   --workspace-id my-workspace \
-  --agent-id agent-1 \
-  --docker-network my-agent-network
+  --docker-network my-agent-network \
+  --no-interactive
 ```
 
-Supported harnesses are `claude-code` and `pi`. Live-mode init:
+Supported harnesses are `claude-code` and `pi`. `setup live`:
 
-- Resolves the committed live config (`ingest_url`, `workspace_id`,
-  `docker_network`) from the precedence chain (see below).
-- **Fails fast before writes** if `ingest_url`, `workspace_id`, or `docker_network`
-  is missing, `repository_id` is underivable, or an existing committed
-  `scryrs.json` value conflicts.
-- Writes only the committed shared constants (`ingest_url`, `workspace_id`,
-  `docker_network`) into the `remote` section of project-root `scryrs.json`,
-  preserving unrelated keys. It does **not** write `repository_id` or `agent_id`.
-- Scaffolds `.scryrs/compose.yml` and an overrides-only gitignored `.scryrs/.env`
-  stub — no managed identity or network values are pre-populated there.
-- Installs the requested harness hook transport.
+- Resolves the required committed live config (`ingest_url`, `workspace_id`) from
+  the precedence chain (see below). `docker_network` is required only under
+  `--with-compose`.
+- Starts an interactive wizard only when a required field is missing, stdin/stdout
+  are terminals, and `--no-interactive` is absent.
+- **Fails fast before writes** if prompting is disabled or unavailable, wizard
+  validation fails, or an existing committed `scryrs.json` value conflicts.
+- Writes only the committed shared constants (`ingest_url`, `workspace_id`, and —
+  under `--with-compose` — `docker_network`) into the `remote` section of
+  project-root `scryrs.json`, preserving unrelated keys. It does **not** write
+  `repository_id` or `agent_id`.
+- Under `--with-compose`, scaffolds `.scryrs/compose.yml` and an overrides-only
+  gitignored `.scryrs/.env` stub — no managed identity or network values are
+  pre-populated there.
+- Is refused inside the scryrs source checkout (live setup targets a consumer project).
 - Does **not** scaffold a local `.scryrs/scryrs.db` — every event flows to the server.
 
 `--repository-id` and `--agent-id` are optional and are never committed. When
@@ -275,7 +285,7 @@ container hostname, stable across the per-tool-call hook processes in one
 container.
 
 Because `scryrs.json` is committed, a fresh `git clone` of a live-configured
-project resolves to live mode without re-running `init`.
+project resolves to live mode without re-running `setup`.
 
 ### Configuring identity: `scryrs.json` as the committed source of truth
 
@@ -329,9 +339,11 @@ container hostname when unresolved by every layer.
 | `SCRYRS_AGENT_ID` | Explicit agent identity override (otherwise autogenerated per container; not committed). |
 | `SCRYRS_REMOTE_TIMEOUT_MS` | Per-request transport timeout. Default `3000` ms. |
 
-When the live default is active but the ingest URL, `workspace_id`, or the Docker
-network cannot be resolved from any layer (or `repository_id` is underivable), the
-command exits `2` and prints guidance. It never silently degrades to local mode.
+When live default is active but `ingest_url`, `workspace_id`, or Docker network
+cannot be resolved from any layer, init starts wizard only in interactive terminals.
+Otherwise — or when `--no-interactive` is passed — command exits `2` with guidance.
+It never silently degrades to local mode. Wizard cancellation or confirmation
+rejection also exits `2` with no partial writes.
 
 Remote mode skips SQLite entirely — there is no dual-write and no local fallback.
 Deduplication is first-writer-wins on the composite key
@@ -410,14 +422,15 @@ or `FAILED`.
 
 Live mode and local batch mode are **exclusive deployment choices**, not layers.
 Server-owned state does not merge with any pre-existing local `.scryrs/scryrs.db`.
-`init`, `record`, and `dashboard` now **default to live**; local is the explicit
-`--mode local` opt-in.
+`record` and `dashboard` **default to live**; local is the explicit `--mode local`
+opt-in. Transport is configured by `scryrs setup <mode>`, separate from the
+hook-only `scryrs init`.
 
-- **Single developer / single agent on one machine →** `--mode local`
-  (`scryrs init --agent claude-code --mode local`, then `scryrs hotspots .`).
+- **Single developer / single agent on one machine →** local transport
+  (`scryrs init --agent claude-code` then `scryrs setup local`, then `scryrs hotspots .`).
   No server, no network.
 - **Multiple agents — CI workers, parallel containers, a shared harness workspace →**
-  the default live mode. One server, one source of truth, instant signals.
+  live transport (`scryrs setup live`). One server, one source of truth, instant signals.
 
 The full dimension-by-dimension comparison lives in
 [Live Hotspots → Live Mode vs Local Batch](./live-hotspots.md#live-mode-vs-local-batch-hotspots).
@@ -426,10 +439,11 @@ The full dimension-by-dimension comparison lives in
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
-| `scryrs init/record/dashboard: live mode is the default but … is not configured` (exit 2) | Live is the default and no ingest URL/identity resolved | Populate `.scryrs/.env` (`SCRYRS_REMOTE_INGEST_URL`, `SCRYRS_WORKSPACE_ID`, `SCRYRS_AGENT_ID`), or rerun with `--mode local`. |
-| `scryrs init: live mode is the default but docker_network is not configured` (exit 2) | Workspace bootstrap has no external network name | Set `--docker-network <NAME>`, commit `remote.docker_network` in `scryrs.json`, or set `SCRYRS_DOCKER_NETWORK` / `.scryrs/.env`. |
-| `scryrs up: SCRYRS_DOCKER_NETWORK could not be resolved from any layer` (exit 2) | No committed `remote.docker_network` and no override | Commit `remote.docker_network` in `scryrs.json` (rerun `scryrs init` with `--docker-network`), or set `SCRYRS_DOCKER_NETWORK` / `.scryrs/.env`. |
-| `scryrs up: missing required scaffold file ...` (exit 2) | Workspace has not been bootstrapped yet | Run `scryrs init --agent <NAME>` in live mode first. |
+| `scryrs setup live: ingest_url/workspace_id is required but not configured` (exit 2) | A required live field did not resolve from any layer | Pass `--ingest-url` / `--workspace-id`, populate `.scryrs/.env`, or commit them to `scryrs.json` `remote`. |
+| `scryrs record/dashboard: live mode is the default but … is not configured` (exit 2) | Live is the default and no ingest URL/identity resolved | Populate `.scryrs/.env` (`SCRYRS_REMOTE_INGEST_URL`, `SCRYRS_WORKSPACE_ID`, `SCRYRS_AGENT_ID`), or rerun with `--mode local`. |
+| `scryrs setup live --with-compose: docker_network is required but not configured` (exit 2) | The compose opt-in has no external network name | Set `--docker-network <NAME>`, commit `remote.docker_network` in `scryrs.json`, or set `SCRYRS_DOCKER_NETWORK` / `.scryrs/.env`. |
+| `scryrs up: SCRYRS_DOCKER_NETWORK could not be resolved from any layer` (exit 2) | No committed `remote.docker_network` and no override | Commit `remote.docker_network` in `scryrs.json` (rerun `scryrs setup live --with-compose --docker-network <NAME>`), or set `SCRYRS_DOCKER_NETWORK` / `.scryrs/.env`. |
+| `scryrs up: missing required scaffold file ...` (exit 2) | Workspace has not been bootstrapped yet | Run `scryrs setup live --with-compose` first. |
 | `scryrs up: external Docker network '...' does not exist` (exit 2) | Named external network is missing | Create the network first, then rerun `scryrs up`. |
 | `scryrs server: ... port ... in use` (exit 1) | Another process holds the port | Pick another `--port`, or stop the other process. |
 | `scryrs server: unavailable (server feature not enabled)` (exit 2) | Binary built without the `server` feature | Reinstall with default features (`scripts/install`) or `cargo build -p scryrs-cli --features server,core --release`. |

@@ -1,7 +1,12 @@
+//! Tests for `scryrs init` — hook installation only.
+//!
+//! After the init/setup split, `init` installs the harness hook and nothing
+//! else: it never writes `scryrs.json` or the `.scryrs/` scaffold, never
+//! prompts, and cannot fail on missing ingest config. Transport configuration
+//! is covered by `setup_tests`.
+
 use crate::run_with_writers;
 use crate::test_support::{snapshot_dir_or_file, with_cwd};
-
-// --- 7.1: init --agent claude-code creates settings.json with native hook ---
 
 /// Parse `.claude/settings.json` under `base` into a JSON value.
 fn read_settings(base: &std::path::Path) -> serde_json::Value {
@@ -27,6 +32,8 @@ fn count_native_hook(settings: &serde_json::Value) -> usize {
         .unwrap_or(0)
 }
 
+// --- init --agent claude-code creates settings.json with native hook ---
+
 #[test]
 fn init_agent_claude_code_creates_native_settings() {
     let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
@@ -35,11 +42,7 @@ fn init_agent_claude_code_creates_native_settings() {
         let mut err = Vec::new();
 
         assert_eq!(
-            run_with_writers(
-                ["init", "--agent", "claude-code", "--mode", "local"],
-                &mut out,
-                &mut err
-            ),
+            run_with_writers(["init", "--agent", "claude-code"], &mut out, &mut err),
             0
         );
         assert!(
@@ -71,21 +74,13 @@ fn init_agent_claude_code_is_idempotent() {
         let mut out = Vec::new();
         let mut err = Vec::new();
         assert_eq!(
-            run_with_writers(
-                ["init", "--agent", "claude-code", "--mode", "local"],
-                &mut out,
-                &mut err
-            ),
+            run_with_writers(["init", "--agent", "claude-code"], &mut out, &mut err),
             0
         );
         let mut out2 = Vec::new();
         let mut err2 = Vec::new();
         assert_eq!(
-            run_with_writers(
-                ["init", "--agent", "claude-code", "--mode", "local"],
-                &mut out2,
-                &mut err2
-            ),
+            run_with_writers(["init", "--agent", "claude-code"], &mut out2, &mut err2),
             0
         );
         // Re-running does not duplicate the hook.
@@ -100,108 +95,70 @@ fn init_agent_claude_code_is_idempotent() {
     });
 }
 
-// --- 7.1b: init scaffolds the .scryrs/ runtime store ---
+// --- init is manifest-agnostic: it never writes scryrs.json or .scryrs/ ---
 
 #[test]
-fn init_claude_code_scaffolds_scryrs_store() {
+fn init_claude_code_does_not_create_manifest_or_scaffold() {
     let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
     with_cwd(dir.path(), || {
         let mut out = Vec::new();
         let mut err = Vec::new();
 
         assert_eq!(
-            run_with_writers(
-                ["init", "--agent", "claude-code", "--mode", "local"],
-                &mut out,
-                &mut err
-            ),
+            run_with_writers(["init", "--agent", "claude-code"], &mut out, &mut err),
             0
         );
-        assert!(
-            err.is_empty(),
-            "stderr must be empty, got: {}",
-            String::from_utf8_lossy(&err)
-        );
+        assert!(err.is_empty(), "stderr: {}", String::from_utf8_lossy(&err));
 
-        // The runtime store and its .gitignore exist.
-        let db = dir.path().join(".scryrs/scryrs.db");
-        let gitignore = dir.path().join(".scryrs/.gitignore");
+        // The hook is installed, but no config side effects exist.
+        assert!(dir.path().join(".claude/settings.json").exists());
         assert!(
-            db.exists(),
-            "scryrs.db must be scaffolded at {}",
-            db.display()
+            !dir.path().join("scryrs.json").exists(),
+            "init must not create scryrs.json"
         );
         assert!(
-            gitignore.exists(),
-            ".scryrs/.gitignore must be scaffolded at {}",
-            gitignore.display()
-        );
-
-        // The .gitignore ignores trace data but keeps itself tracked.
-        let ignore =
-            std::fs::read_to_string(&gitignore).unwrap_or_else(|e| panic!("read gitignore: {e}"));
-        assert!(ignore.contains("!.gitignore"), "got: {ignore}");
-
-        // The db is a schema-initialized scryrs store (no rows yet).
-        let conn = rusqlite::Connection::open(&db).unwrap_or_else(|e| panic!("open db: {e}"));
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM trace_events", [], |r| r.get(0))
-            .unwrap_or_else(|e| panic!("query trace_events: {e}"));
-        assert_eq!(count, 0, "fresh store must have no events");
-
-        // stdout announces the scaffolded store.
-        let stdout = String::from_utf8_lossy(&out);
-        assert!(
-            stdout.contains(".scryrs/"),
-            "must mention .scryrs/, got: {stdout}"
+            !dir.path().join(".scryrs").exists(),
+            "init must not create the .scryrs scaffold"
         );
     });
 }
 
 #[test]
-fn init_pi_scaffolds_scryrs_store() {
+fn init_pi_does_not_create_manifest_or_scaffold() {
     let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
     with_cwd(dir.path(), || {
         let mut out = Vec::new();
         let mut err = Vec::new();
 
         assert_eq!(
-            run_with_writers(
-                ["init", "--agent", "pi", "--mode", "local"],
-                &mut out,
-                &mut err
-            ),
+            run_with_writers(["init", "--agent", "pi"], &mut out, &mut err),
             0
         );
-        assert!(dir.path().join(".scryrs/scryrs.db").exists());
-        assert!(dir.path().join(".scryrs/.gitignore").exists());
+        assert!(dir.path().join(".pi/extensions/scryrs/index.ts").exists());
+        assert!(!dir.path().join("scryrs.json").exists());
+        assert!(!dir.path().join(".scryrs").exists());
     });
 }
 
 #[test]
-fn init_unknown_harness_does_not_scaffold() {
+fn init_unknown_harness_does_not_write() {
     let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
     with_cwd(dir.path(), || {
         let mut out = Vec::new();
         let mut err = Vec::new();
 
         assert_eq!(
-            run_with_writers(
-                ["init", "--agent", "unknown", "--mode", "local"],
-                &mut out,
-                &mut err
-            ),
+            run_with_writers(["init", "--agent", "unknown"], &mut out, &mut err),
             2
         );
         // An unsupported harness must leave the filesystem untouched.
-        assert!(
-            !dir.path().join(".scryrs").exists(),
-            ".scryrs must not be created for an unsupported harness"
-        );
+        assert!(!dir.path().join(".scryrs").exists());
+        assert!(!dir.path().join(".claude").exists());
+        assert!(!dir.path().join(".pi").exists());
     });
 }
 
-// --- 7.2: init --agent pi writes hook file ---
+// --- init --agent pi writes hook file ---
 
 #[test]
 fn init_agent_pi_writes_hook_file() {
@@ -211,11 +168,7 @@ fn init_agent_pi_writes_hook_file() {
         let mut err = Vec::new();
 
         assert_eq!(
-            run_with_writers(
-                ["init", "--agent", "pi", "--mode", "local"],
-                &mut out,
-                &mut err
-            ),
+            run_with_writers(["init", "--agent", "pi"], &mut out, &mut err),
             0
         );
         assert!(
@@ -240,7 +193,7 @@ fn init_agent_pi_writes_hook_file() {
     });
 }
 
-// --- 7.3: init --agent unknown exits 2 ---
+// --- init --agent unknown exits 2 ---
 
 #[test]
 fn init_agent_unknown_exits_2() {
@@ -250,11 +203,7 @@ fn init_agent_unknown_exits_2() {
         let mut err = Vec::new();
 
         assert_eq!(
-            run_with_writers(
-                ["init", "--agent", "unknown", "--mode", "local"],
-                &mut out,
-                &mut err
-            ),
+            run_with_writers(["init", "--agent", "unknown"], &mut out, &mut err),
             2
         );
         assert!(out.is_empty(), "stdout must be empty");
@@ -275,7 +224,7 @@ fn init_agent_unknown_exits_2() {
     });
 }
 
-// --- 7.4: existing settings.json is merged, not clobbered ---
+// --- existing settings.json is merged, not clobbered ---
 
 #[test]
 fn init_claude_code_merges_existing_settings() {
@@ -301,11 +250,7 @@ fn init_claude_code_merges_existing_settings() {
         let mut err = Vec::new();
 
         assert_eq!(
-            run_with_writers(
-                ["init", "--agent", "claude-code", "--mode", "local"],
-                &mut out,
-                &mut err
-            ),
+            run_with_writers(["init", "--agent", "claude-code"], &mut out, &mut err),
             0,
             "merge must succeed (not refuse), stderr: {}",
             String::from_utf8_lossy(&err)
@@ -327,7 +272,7 @@ fn init_claude_code_merges_existing_settings() {
     assert_eq!(count_native_hook(&settings), 1);
 }
 
-// --- 7.6: pi/index.ts collision ---
+// --- pi/index.ts collision ---
 
 #[test]
 fn init_pi_hook_file_collision_exits_2() {
@@ -346,11 +291,7 @@ fn init_pi_hook_file_collision_exits_2() {
         let mut err = Vec::new();
 
         assert_eq!(
-            run_with_writers(
-                ["init", "--agent", "pi", "--mode", "local"],
-                &mut out,
-                &mut err
-            ),
+            run_with_writers(["init", "--agent", "pi"], &mut out, &mut err),
             2
         );
         let err_str = String::from_utf8_lossy(&err);
@@ -365,7 +306,7 @@ fn init_pi_hook_file_collision_exits_2() {
     });
 }
 
-// --- 7.7: self-install detection (Claude Code refused) ---
+// --- self-install detection (Claude Code refused) ---
 
 #[test]
 fn init_self_install_detection_refuses_claude_code() {
@@ -384,11 +325,7 @@ fn init_self_install_detection_refuses_claude_code() {
         let mut err = Vec::new();
 
         assert_eq!(
-            run_with_writers(
-                ["init", "--agent", "claude-code", "--mode", "local"],
-                &mut out,
-                &mut err
-            ),
+            run_with_writers(["init", "--agent", "claude-code"], &mut out, &mut err),
             2
         );
         let err_str = String::from_utf8_lossy(&err);
@@ -403,7 +340,7 @@ fn init_self_install_detection_refuses_claude_code() {
     });
 }
 
-// --- 7.7b: self-install detection (Pi allowed at source root) ---
+// --- self-install detection (Pi allowed at source root) ---
 
 #[test]
 fn init_self_install_pi_allowed_at_source_root() {
@@ -422,11 +359,7 @@ fn init_self_install_pi_allowed_at_source_root() {
         let mut err = Vec::new();
 
         assert_eq!(
-            run_with_writers(
-                ["init", "--agent", "pi", "--mode", "local"],
-                &mut out,
-                &mut err
-            ),
+            run_with_writers(["init", "--agent", "pi"], &mut out, &mut err),
             0
         );
         assert!(
@@ -452,7 +385,7 @@ fn init_self_install_pi_allowed_at_source_root() {
     });
 }
 
-// --- 7.7c: Pi self-install from subdirectory resolves to source root ---
+// --- Pi self-install from subdirectory resolves to source root ---
 
 #[test]
 fn init_self_install_pi_from_subdirectory_resolves_to_root() {
@@ -475,11 +408,7 @@ fn init_self_install_pi_from_subdirectory_resolves_to_root() {
         let mut err = Vec::new();
 
         assert_eq!(
-            run_with_writers(
-                ["init", "--agent", "pi", "--mode", "local"],
-                &mut out,
-                &mut err
-            ),
+            run_with_writers(["init", "--agent", "pi"], &mut out, &mut err),
             0
         );
         assert!(
@@ -506,7 +435,7 @@ fn init_self_install_pi_from_subdirectory_resolves_to_root() {
     });
 }
 
-// --- 7.7d: Pi collision inside source checkout still exits 2 ---
+// --- Pi collision inside source checkout still exits 2 ---
 
 #[test]
 fn init_self_install_pi_collision_in_source_repo_exits_2() {
@@ -534,11 +463,7 @@ fn init_self_install_pi_collision_in_source_repo_exits_2() {
         let mut err = Vec::new();
 
         assert_eq!(
-            run_with_writers(
-                ["init", "--agent", "pi", "--mode", "local"],
-                &mut out,
-                &mut err
-            ),
+            run_with_writers(["init", "--agent", "pi"], &mut out, &mut err),
             2
         );
         let err_str = String::from_utf8_lossy(&err);
@@ -553,7 +478,7 @@ fn init_self_install_pi_collision_in_source_repo_exits_2() {
     });
 }
 
-// --- 7.8: unrelated project passes self-install check ---
+// --- unrelated project passes self-install check ---
 
 #[test]
 fn init_unrelated_project_passes_self_install_check() {
@@ -569,13 +494,8 @@ fn init_unrelated_project_passes_self_install_check() {
         let mut out = Vec::new();
         let mut err = Vec::new();
 
-        // Should succeed — this is a normal project (local mode needs no remote config)
         assert_eq!(
-            run_with_writers(
-                ["init", "--agent", "claude-code", "--mode", "local"],
-                &mut out,
-                &mut err
-            ),
+            run_with_writers(["init", "--agent", "claude-code"], &mut out, &mut err),
             0
         );
         assert!(
@@ -586,7 +506,7 @@ fn init_unrelated_project_passes_self_install_check() {
     });
 }
 
-// --- 7.9: init without --agent exits 2 ---
+// --- init without --agent exits 2 ---
 
 #[test]
 fn init_without_agent_exits_2() {
@@ -613,7 +533,7 @@ fn init_without_agent_exits_2() {
     });
 }
 
-// --- 7.10: init with empty --agent value exits 2 ---
+// --- init with empty --agent value exits 2 ---
 
 #[test]
 fn init_empty_agent_exits_2() {
@@ -639,7 +559,117 @@ fn init_empty_agent_exits_2() {
     });
 }
 
-// --- 7.11: init help text appears in --help output ---
+// --- init never prompts (it collects no config) ---
+
+#[test]
+fn init_never_prompts_and_installs_hook_without_config() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        // No live config present anywhere; init must still succeed (hook only)
+        // and never prompt or fail-fast on missing config.
+        assert_eq!(
+            run_with_writers(["init", "--agent", "claude-code"], &mut out, &mut err),
+            0,
+            "init must succeed without any config; stderr: {}",
+            String::from_utf8_lossy(&err)
+        );
+        assert!(err.is_empty(), "stderr: {}", String::from_utf8_lossy(&err));
+
+        let stdout = String::from_utf8_lossy(&out);
+        // No wizard / prompting output.
+        assert!(!stdout.contains("wizard"), "init must not run a wizard");
+        // No live-config guidance — that belongs to setup.
+        assert!(
+            !stdout.contains("ingest"),
+            "init must not mention ingest config"
+        );
+
+        assert!(dir.path().join(".claude/settings.json").exists());
+        assert!(!dir.path().join("scryrs.json").exists());
+        assert!(!dir.path().join(".scryrs").exists());
+    });
+}
+
+// --- next-step text points to setup, not live config or scryrs up ---
+
+#[test]
+fn init_claude_code_stdout_has_hook_focused_next_steps() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(["init", "--agent", "claude-code"], &mut out, &mut err),
+            0
+        );
+        assert!(err.is_empty());
+        let stdout = String::from_utf8_lossy(&out);
+        assert!(stdout.contains("Next steps:"));
+        assert!(stdout.contains("scryrs is on your PATH"));
+        assert!(stdout.contains("settings.json"));
+        assert!(stdout.contains("Restart your Claude Code session"));
+        // Directs to setup; does not include a remote URL or `scryrs up`.
+        assert!(stdout.contains("scryrs setup"));
+        assert!(!stdout.contains("scryrs up"));
+        assert!(!stdout.contains("ingest_url"));
+    });
+}
+
+#[test]
+fn init_pi_stdout_has_hook_focused_next_steps() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(["init", "--agent", "pi"], &mut out, &mut err),
+            0
+        );
+        assert!(err.is_empty());
+        let stdout = String::from_utf8_lossy(&out);
+        assert!(stdout.contains("Next steps:"));
+        assert!(stdout.contains("scryrs is on your PATH"));
+        assert!(stdout.contains("Reload Pi"));
+        assert!(stdout.contains("scryrs setup"));
+        assert!(!stdout.contains("scryrs up"));
+    });
+}
+
+// --- init re-run is a no-op on identical hook content ---
+
+#[test]
+fn init_pi_identical_runtime_copy_is_noop() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            run_with_writers(["init", "--agent", "pi"], &mut out, &mut err),
+            0
+        );
+        assert!(err.is_empty(), "stderr: {}", String::from_utf8_lossy(&err));
+
+        let hook_path = dir.path().join(".pi/extensions/scryrs/index.ts");
+        let before = snapshot_dir_or_file(&hook_path);
+
+        out.clear();
+        err.clear();
+        assert_eq!(
+            run_with_writers(["init", "--agent", "pi"], &mut out, &mut err),
+            0
+        );
+        assert!(err.is_empty(), "stderr: {}", String::from_utf8_lossy(&err));
+        assert_eq!(before, snapshot_dir_or_file(&hook_path));
+    });
+}
+
+// --- init help surfaces (hook only, point to setup) ---
 
 #[test]
 fn init_appears_in_help_output() {
@@ -655,11 +685,14 @@ fn init_appears_in_help_output() {
     assert!(help.contains("pi"));
     assert!(help.contains("scryrs init --agent claude-code"));
     assert!(help.contains("scryrs init --agent pi"));
-    assert!(help.contains("--docker-network <NAME>"));
-    assert!(help.contains("scryrs up"));
+    // init no longer documents a --mode option.
+    assert!(
+        !help.contains("scryrs init --agent <NAME> [--mode"),
+        "init must not document --mode"
+    );
+    // Points to setup for transport configuration.
+    assert!(help.contains("scryrs setup"));
 }
-
-// --- 7.12: init entry appears in --help-json output ---
 
 #[test]
 fn init_appears_in_help_json() {
@@ -672,7 +705,7 @@ fn init_appears_in_help_json() {
     let doc: serde_json::Value =
         serde_json::from_str(&json_str).unwrap_or_else(|e| panic!("parse help-json: {e}"));
 
-    assert_eq!(doc["surfaceVersion"], "0.12.1");
+    assert_eq!(doc["surfaceVersion"], "0.13.0");
 
     let commands = doc["commands"]
         .as_array()
@@ -681,11 +714,6 @@ fn init_appears_in_help_json() {
         .iter()
         .find(|c| c["name"] == "init")
         .unwrap_or_else(|| panic!("init must be in commands array"));
-
-    assert_eq!(
-        init_cmd["description"],
-        "Install scryrs trace hook for a supported agent harness and scaffold workspace-local live bootstrap in default live mode"
-    );
 
     let args = init_cmd["arguments"]
         .as_array()
@@ -697,976 +725,25 @@ fn init_appears_in_help_json() {
     assert_eq!(agent_arg["required"], true);
     assert_eq!(agent_arg["type"], "string");
 
-    let docker_network_arg = args
-        .iter()
-        .find(|a| a["name"] == "docker-network")
-        .unwrap_or_else(|| panic!("--docker-network must be in arguments"));
-    assert_eq!(docker_network_arg["flag"], "--docker-network");
-
-    let up_cmd = commands
-        .iter()
-        .find(|c| c["name"] == "up")
-        .unwrap_or_else(|| panic!("up must be in commands array"));
-    assert_eq!(
-        up_cmd["description"],
-        "Start the workspace-managed live-server Compose stack from .scryrs/compose.yml, resolving the external network from scryrs.json remote.docker_network (override via SCRYRS_DOCKER_NETWORK or .scryrs/.env)"
-    );
+    // init must not document --mode or any live-mode remote-configuration args.
+    for forbidden in [
+        "mode",
+        "ingest-url",
+        "workspace-id",
+        "docker-network",
+        "no-interactive",
+    ] {
+        assert!(
+            !args.iter().any(|a| a["name"] == forbidden),
+            "init must not include argument {forbidden}"
+        );
+    }
 }
 
-// --- 7.14: claude-code stdout contains next-step text ---
-
-#[test]
-fn init_claude_code_stdout_has_next_steps() {
-    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    with_cwd(dir.path(), || {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        assert_eq!(
-            run_with_writers(
-                ["init", "--agent", "claude-code", "--mode", "local"],
-                &mut out,
-                &mut err
-            ),
-            0
-        );
-        assert!(err.is_empty());
-        let stdout = String::from_utf8_lossy(&out);
-        assert!(stdout.contains("Next steps:"));
-        assert!(stdout.contains("scryrs is on your PATH"));
-        assert!(stdout.contains("settings.json"));
-        assert!(stdout.contains("Restart your Claude Code session"));
-    });
-}
-
-// --- 7.15: pi stdout contains next-step text ---
-
-#[test]
-fn init_pi_stdout_has_next_steps() {
-    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    with_cwd(dir.path(), || {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        assert_eq!(
-            run_with_writers(
-                ["init", "--agent", "pi", "--mode", "local"],
-                &mut out,
-                &mut err
-            ),
-            0
-        );
-        assert!(err.is_empty());
-        let stdout = String::from_utf8_lossy(&out);
-        assert!(stdout.contains("Next steps:"));
-        assert!(stdout.contains("scryrs is on your PATH"));
-        assert!(stdout.contains("Reload Pi"));
-    });
-}
-
-// --- 7.17: default mode is live; bare init without resolvable config fails fast ---
-
-#[test]
-fn init_default_mode_is_live_and_fails_fast_without_config() {
-    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    with_cwd(dir.path(), || {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        // Default (no --mode) resolves live. With no remote config in the temp
-        // dir (no flags, no .scryrs/.env, no scryrs.json remote), the installer
-        // must fail fast with exit 2 and deterministic guidance — never silently
-        // fall back to local mode.
-        assert_eq!(
-            run_with_writers(["init", "--agent", "claude-code"], &mut out, &mut err),
-            2
-        );
-
-        let err_str = String::from_utf8_lossy(&err);
-        // Guidance from write_missing_config_guidance.
-        assert!(
-            err_str.contains("live mode is the default"),
-            "must explain live is the default, got: {err_str}"
-        );
-        assert!(
-            err_str.contains(".scryrs/.env"),
-            "must describe populating .scryrs/.env, got: {err_str}"
-        );
-        assert!(
-            err_str.contains("--mode local"),
-            "must describe selecting local mode, got: {err_str}"
-        );
-
-        // No filesystem writes occurred — fail-fast happens before any scaffolding.
-        assert!(
-            !dir.path().join(".scryrs").exists(),
-            ".scryrs must not be created on fail-fast"
-        );
-        assert!(!dir.path().join("scryrs.json").exists());
-        assert!(!dir.path().join(".claude").exists());
-    });
-}
-
-#[test]
-fn init_explicit_local_mode_creates_db_and_not_manifest() {
-    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    with_cwd(dir.path(), || {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        assert_eq!(
-            run_with_writers(
-                ["init", "--agent", "pi", "--mode", "local"],
-                &mut out,
-                &mut err
-            ),
-            0
-        );
-        assert!(err.is_empty());
-
-        assert!(dir.path().join(".scryrs/scryrs.db").exists());
-        assert!(!dir.path().join("scryrs.json").exists());
-
-        let stdout = String::from_utf8_lossy(&out);
-        assert!(!stdout.contains("Docker"));
-        assert!(!stdout.contains("live ingest"));
-    });
-}
-
-// --- 7.18: live-mode validation before writes ---
-
-#[test]
-fn init_live_missing_ingest_url_exits_2_without_writes() {
-    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    with_cwd(dir.path(), || {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        assert_eq!(
-            run_with_writers(
-                [
-                    "init",
-                    "--agent",
-                    "pi",
-                    "--mode",
-                    "live",
-                    "--workspace-id",
-                    "ws1",
-                    "--agent-id",
-                    "a1"
-                ],
-                &mut out,
-                &mut err,
-            ),
-            2
-        );
-        let err_str = String::from_utf8_lossy(&err);
-        // Missing ingest_url → no ingest URL resolves → Ok(None) → guidance for ingest_url.
-        assert!(
-            err_str.contains("ingest_url is not configured"),
-            "must name missing ingest_url, got: {err_str}"
-        );
-        assert!(
-            err_str.contains(".scryrs/.env"),
-            "must describe populating .scryrs/.env, got: {err_str}"
-        );
-        assert!(
-            err_str.contains("--mode local"),
-            "must describe selecting local mode, got: {err_str}"
-        );
-
-        // No filesystem writes occurred.
-        assert!(!dir.path().join(".scryrs").exists());
-        assert!(!dir.path().join(".pi").exists());
-        assert!(!dir.path().join("scryrs.json").exists());
-    });
-}
-
-#[test]
-fn init_live_missing_workspace_id_exits_2_without_writes() {
-    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    with_cwd(dir.path(), || {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        assert_eq!(
-            run_with_writers(
-                [
-                    "init",
-                    "--agent",
-                    "pi",
-                    "--mode",
-                    "live",
-                    "--ingest-url",
-                    "http://localhost:8081",
-                    "--repository-id",
-                    "repo1",
-                    "--agent-id",
-                    "a1"
-                ],
-                &mut out,
-                &mut err,
-            ),
-            2
-        );
-        let err_str = String::from_utf8_lossy(&err);
-        // ingest_url + repository_id resolve; workspace_id is unresolved → guidance.
-        assert!(
-            err_str.contains("workspace_id is not configured"),
-            "must name missing workspace_id, got: {err_str}"
-        );
-        assert!(
-            err_str.contains(".scryrs/.env"),
-            "must describe populating .scryrs/.env, got: {err_str}"
-        );
-        assert!(
-            err_str.contains("--mode local"),
-            "must describe selecting local mode, got: {err_str}"
-        );
-
-        // No filesystem writes occurred.
-        assert!(!dir.path().join(".scryrs").exists());
-        assert!(!dir.path().join("scryrs.json").exists());
-    });
-}
-
-#[test]
-fn init_live_missing_agent_id_succeeds_and_is_not_committed() {
-    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    with_cwd(dir.path(), || {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        // agent_id is no longer a required live-mode input; it is autogenerated
-        // at runtime and never written to committed config.
-        assert_eq!(
-            run_with_writers(
-                [
-                    "init",
-                    "--agent",
-                    "pi",
-                    "--mode",
-                    "live",
-                    "--ingest-url",
-                    "http://localhost:8081",
-                    "--repository-id",
-                    "repo1",
-                    "--workspace-id",
-                    "ws1",
-                    "--docker-network",
-                    "agent-net"
-                ],
-                &mut out,
-                &mut err,
-            ),
-            0,
-            "stderr: {}",
-            String::from_utf8_lossy(&err)
-        );
-        assert!(err.is_empty(), "stderr: {}", String::from_utf8_lossy(&err));
-
-        let manifest = std::fs::read_to_string(dir.path().join("scryrs.json"))
-            .unwrap_or_else(|e| panic!("read manifest: {e}"));
-        let parsed: serde_json::Value =
-            serde_json::from_str(&manifest).unwrap_or_else(|e| panic!("parse manifest: {e}"));
-        // No agent_id is written into committed config.
-        assert!(
-            parsed["remote"]["agent_id"].is_null(),
-            "agent_id must not be committed, got: {}",
-            parsed["remote"]["agent_id"]
-        );
-    });
-}
-
-#[test]
-fn init_live_missing_docker_network_exits_2_without_writes() {
-    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    with_cwd(dir.path(), || {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        assert_eq!(
-            run_with_writers(
-                [
-                    "init",
-                    "--agent",
-                    "pi",
-                    "--mode",
-                    "live",
-                    "--ingest-url",
-                    "http://scryrs:8081",
-                    "--repository-id",
-                    "repo1",
-                    "--workspace-id",
-                    "ws1",
-                    "--agent-id",
-                    "a1"
-                ],
-                &mut out,
-                &mut err,
-            ),
-            2
-        );
-        let err_str = String::from_utf8_lossy(&err);
-        assert!(err_str.contains("docker_network is not configured"));
-        assert!(err_str.contains("SCRYRS_DOCKER_NETWORK"));
-        assert!(!dir.path().join(".scryrs").exists());
-        assert!(!dir.path().join("scryrs.json").exists());
-        assert!(!dir.path().join(".pi").exists());
-    });
-}
-
-// --- 7.19: live-mode scryrs.json creation and .scryrs/ scaffolding ---
-
-#[allow(clippy::disallowed_methods)]
-#[test]
-fn init_live_creates_scryrs_json_and_skips_scryrs_db() {
-    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    with_cwd(dir.path(), || {
-        // Set up a Git repo so repository_id can be derived.
-        std::process::Command::new("git")
-            .args(["init"])
-            .current_dir(dir.path())
-            .output()
-            .unwrap_or_else(|e| panic!("git init: {e}"));
-        std::process::Command::new("git")
-            .args([
-                "remote",
-                "add",
-                "origin",
-                "https://github.com/example/repo.git",
-            ])
-            .current_dir(dir.path())
-            .output()
-            .unwrap_or_else(|e| panic!("git remote: {e}"));
-
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        assert_eq!(
-            run_with_writers(
-                [
-                    "init",
-                    "--agent",
-                    "claude-code",
-                    "--mode",
-                    "live",
-                    "--ingest-url",
-                    "http://localhost:8081",
-                    "--workspace-id",
-                    "ws1",
-                    "--agent-id",
-                    "a1",
-                    "--docker-network",
-                    "agent-net",
-                ],
-                &mut out,
-                &mut err,
-            ),
-            0
-        );
-        assert!(err.is_empty(), "stderr: {}", String::from_utf8_lossy(&err));
-
-        // scryrs.json is created.
-        let manifest_path = dir.path().join("scryrs.json");
-        assert!(manifest_path.exists(), "scryrs.json must be created");
-        let manifest = std::fs::read_to_string(&manifest_path)
-            .unwrap_or_else(|e| panic!("read manifest: {e}"));
-        let parsed: serde_json::Value =
-            serde_json::from_str(&manifest).unwrap_or_else(|e| panic!("parse manifest: {e}"));
-        assert_eq!(parsed["remote"]["ingest_url"], "http://localhost:8081");
-        assert_eq!(parsed["remote"]["workspace_id"], "ws1");
-        assert_eq!(parsed["remote"]["docker_network"], "agent-net");
-        // repository_id (Git-derived) and agent_id (autogenerated) are NOT committed.
-        assert!(
-            parsed["remote"]["repository_id"].is_null(),
-            "repository_id must not be committed"
-        );
-        assert!(
-            parsed["remote"]["agent_id"].is_null(),
-            "agent_id must not be committed"
-        );
-
-        // .scryrs/ is created but .scryrs/scryrs.db is NOT.
-        assert!(dir.path().join(".scryrs").exists());
-        assert!(dir.path().join(".scryrs/.gitignore").exists());
-        assert!(dir.path().join(".scryrs/hooks").exists());
-        assert!(
-            !dir.path().join(".scryrs/scryrs.db").exists(),
-            "scryrs.db must NOT be created in live mode"
-        );
-
-        let compose_path = dir.path().join(".scryrs/compose.yml");
-        assert!(
-            compose_path.exists(),
-            ".scryrs/compose.yml must be created in live mode"
-        );
-        let compose =
-            std::fs::read_to_string(&compose_path).unwrap_or_else(|e| panic!("read compose: {e}"));
-        assert!(compose.contains("image: ghcr.io/matthijsrademaker/scryrs-server:latest"));
-        // The consumer scaffold pulls the published image; it must not require a
-        // local source build via a `build:` context.
-        assert!(!compose.contains("build:"));
-        assert!(compose.contains("container_name: scryrs"));
-        assert!(compose.contains("name: ${SCRYRS_DOCKER_NETWORK}"));
-        assert!(compose.contains("- scryrs-data:/data/scryrs"));
-
-        // Live mode scaffolds a gitignored overrides-only .scryrs/.env stub —
-        // no managed identity or network values are pre-populated.
-        let env_path = dir.path().join(".scryrs/.env");
-        assert!(
-            env_path.exists(),
-            ".scryrs/.env must be created in live mode"
-        );
-        let env_contents =
-            std::fs::read_to_string(&env_path).unwrap_or_else(|e| panic!("read .env: {e}"));
-        assert!(
-            !env_contents.contains("SCRYRS_REMOTE_INGEST_URL=http://localhost:8081"),
-            "managed ingest URL must not be written to .scryrs/.env, got: {env_contents}"
-        );
-        assert!(
-            !env_contents.contains("SCRYRS_DOCKER_NETWORK=agent-net"),
-            "managed docker network must not be written to .scryrs/.env, got: {env_contents}"
-        );
-        assert!(
-            env_contents.contains("local overrides"),
-            ".scryrs/.env must be an overrides-only stub, got: {env_contents}"
-        );
-
-        let stdout = String::from_utf8_lossy(&out);
-        assert!(stdout.contains("live-mode remote ingest"));
-        assert!(stdout.contains("Remote server endpoint: http://localhost:8081"));
-        assert!(stdout.contains("External Docker network: agent-net"));
-        assert!(stdout.contains("scryrs up"));
-        assert!(!stdout.contains("docker-compose.yml"));
-    });
-}
-
-/// Bare `scryrs init` (live default, no flags) succeeds when complete remote
-/// configuration resolves from `.scryrs/.env`. Exercises the default-is-live
-/// path plus the `.scryrs/.env` precedence layer without mutating process env.
-#[test]
-fn init_default_live_resolves_from_scryrs_env() {
-    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    // Seed a complete .scryrs/.env so live resolution has every required field.
-    let scryrs_dir = dir.path().join(".scryrs");
-    std::fs::create_dir_all(&scryrs_dir).unwrap_or_else(|e| panic!("create .scryrs: {e}"));
-    std::fs::write(
-        scryrs_dir.join(".env"),
-        "SCRYRS_REMOTE_INGEST_URL=http://localhost:8081\n\
-         SCRYRS_REPOSITORY_ID=repo-from-env\n\
-         SCRYRS_WORKSPACE_ID=ws-from-env\n\
-         SCRYRS_AGENT_ID=agent-from-env\n\
-         SCRYRS_DOCKER_NETWORK=agent-net\n",
-    )
-    .unwrap_or_else(|e| panic!("write .env: {e}"));
-
-    with_cwd(dir.path(), || {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        // No --mode (live default), no flags — config comes entirely from .env.
-        assert_eq!(
-            run_with_writers(["init", "--agent", "claude-code"], &mut out, &mut err),
-            0,
-            "stderr: {}",
-            String::from_utf8_lossy(&err)
-        );
-        assert!(err.is_empty(), "stderr: {}", String::from_utf8_lossy(&err));
-
-        // Live manifest written from resolved .env values.
-        let manifest = std::fs::read_to_string(dir.path().join("scryrs.json"))
-            .unwrap_or_else(|e| panic!("read manifest: {e}"));
-        let parsed: serde_json::Value =
-            serde_json::from_str(&manifest).unwrap_or_else(|e| panic!("parse manifest: {e}"));
-        assert_eq!(parsed["remote"]["ingest_url"], "http://localhost:8081");
-        assert_eq!(parsed["remote"]["workspace_id"], "ws-from-env");
-        assert_eq!(parsed["remote"]["docker_network"], "agent-net");
-        // repository_id/agent_id resolve from .env at runtime but are never committed.
-        assert!(parsed["remote"]["repository_id"].is_null());
-        assert!(parsed["remote"]["agent_id"].is_null());
-
-        // Live mode: no local db.
-        assert!(!dir.path().join(".scryrs/scryrs.db").exists());
-    });
-}
-
-#[test]
-fn init_live_with_explicit_repository_id_is_not_committed() {
-    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    with_cwd(dir.path(), || {
-        // No git repo — repository_id is explicit, satisfying resolution without
-        // a Git derivation, but it is still not written to committed config.
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        assert_eq!(
-            run_with_writers(
-                [
-                    "init",
-                    "--agent",
-                    "pi",
-                    "--mode",
-                    "live",
-                    "--ingest-url",
-                    "http://localhost:8081",
-                    "--workspace-id",
-                    "ws1",
-                    "--agent-id",
-                    "a1",
-                    "--repository-id",
-                    "repo-explicit",
-                    "--docker-network",
-                    "agent-net",
-                ],
-                &mut out,
-                &mut err,
-            ),
-            0
-        );
-        assert!(err.is_empty());
-
-        let manifest_path = dir.path().join("scryrs.json");
-        let manifest = std::fs::read_to_string(&manifest_path)
-            .unwrap_or_else(|e| panic!("read manifest: {e}"));
-        let parsed: serde_json::Value =
-            serde_json::from_str(&manifest).unwrap_or_else(|e| panic!("parse manifest: {e}"));
-        assert!(
-            parsed["remote"]["repository_id"].is_null(),
-            "explicit repository_id must not be committed to scryrs.json"
-        );
-        assert_eq!(parsed["remote"]["docker_network"], "agent-net");
-    });
-}
-
-#[test]
-fn init_live_merges_existing_manifest() {
-    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    // Pre-existing scryrs.json with unrelated keys.
-    std::fs::write(
-        dir.path().join("scryrs.json"),
-        r#"{"project_name": "my-project", "version": "1.0"}"#,
-    )
-    .unwrap_or_else(|e| panic!("write: {e}"));
-
-    with_cwd(dir.path(), || {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        assert_eq!(
-            run_with_writers(
-                [
-                    "init",
-                    "--agent",
-                    "claude-code",
-                    "--mode",
-                    "live",
-                    "--ingest-url",
-                    "http://localhost:8081",
-                    "--workspace-id",
-                    "ws1",
-                    "--agent-id",
-                    "a1",
-                    "--repository-id",
-                    "repo1",
-                    "--docker-network",
-                    "agent-net",
-                ],
-                &mut out,
-                &mut err,
-            ),
-            0
-        );
-        assert!(err.is_empty());
-
-        let manifest = std::fs::read_to_string(dir.path().join("scryrs.json"))
-            .unwrap_or_else(|e| panic!("read: {e}"));
-        let parsed: serde_json::Value =
-            serde_json::from_str(&manifest).unwrap_or_else(|e| panic!("parse: {e}"));
-
-        // Unrelated keys preserved.
-        assert_eq!(parsed["project_name"], "my-project");
-        assert_eq!(parsed["version"], "1.0");
-        // Remote section added with only the committed shared constants.
-        assert_eq!(parsed["remote"]["ingest_url"], "http://localhost:8081");
-        assert_eq!(parsed["remote"]["workspace_id"], "ws1");
-        assert_eq!(parsed["remote"]["docker_network"], "agent-net");
-        assert!(parsed["remote"]["agent_id"].is_null());
-        assert!(parsed["remote"]["repository_id"].is_null());
-    });
-}
-
-// --- 7.20: live mode refused in source checkout ---
-
-#[test]
-fn init_live_reuses_existing_workspace_bootstrap_for_second_harness() {
-    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    with_cwd(dir.path(), || {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        assert_eq!(
-            run_with_writers(
-                [
-                    "init",
-                    "--agent",
-                    "claude-code",
-                    "--mode",
-                    "live",
-                    "--ingest-url",
-                    "http://scryrs:8081",
-                    "--workspace-id",
-                    "ws1",
-                    "--agent-id",
-                    "a1",
-                    "--repository-id",
-                    "repo1",
-                    "--docker-network",
-                    "agent-net",
-                ],
-                &mut out,
-                &mut err,
-            ),
-            0
-        );
-        assert!(err.is_empty(), "stderr: {}", String::from_utf8_lossy(&err));
-
-        let env_before = snapshot_dir_or_file(&dir.path().join(".scryrs/.env"));
-        let compose_before = snapshot_dir_or_file(&dir.path().join(".scryrs/compose.yml"));
-        let manifest_before = snapshot_dir_or_file(&dir.path().join("scryrs.json"));
-
-        out.clear();
-        err.clear();
-        assert_eq!(
-            run_with_writers(
-                [
-                    "init",
-                    "--agent",
-                    "pi",
-                    "--mode",
-                    "live",
-                    "--ingest-url",
-                    "http://scryrs:8081",
-                    "--workspace-id",
-                    "ws1",
-                    "--agent-id",
-                    "a1",
-                    "--repository-id",
-                    "repo1",
-                    "--docker-network",
-                    "agent-net",
-                ],
-                &mut out,
-                &mut err,
-            ),
-            0
-        );
-        assert!(err.is_empty(), "stderr: {}", String::from_utf8_lossy(&err));
-
-        assert_eq!(
-            env_before,
-            snapshot_dir_or_file(&dir.path().join(".scryrs/.env"))
-        );
-        assert_eq!(
-            compose_before,
-            snapshot_dir_or_file(&dir.path().join(".scryrs/compose.yml"))
-        );
-        assert_eq!(
-            manifest_before,
-            snapshot_dir_or_file(&dir.path().join("scryrs.json"))
-        );
-        assert!(dir.path().join(".pi/extensions/scryrs/index.ts").exists());
-    });
-}
-
-#[test]
-fn init_live_conflicting_managed_bootstrap_values_fail_without_partial_writes() {
-    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    with_cwd(dir.path(), || {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        assert_eq!(
-            run_with_writers(
-                [
-                    "init",
-                    "--agent",
-                    "claude-code",
-                    "--mode",
-                    "live",
-                    "--ingest-url",
-                    "http://scryrs:8081",
-                    "--workspace-id",
-                    "ws1",
-                    "--agent-id",
-                    "a1",
-                    "--repository-id",
-                    "repo1",
-                    "--docker-network",
-                    "agent-net",
-                ],
-                &mut out,
-                &mut err,
-            ),
-            0
-        );
-        assert!(err.is_empty(), "stderr: {}", String::from_utf8_lossy(&err));
-
-        let env_before = snapshot_dir_or_file(&dir.path().join(".scryrs/.env"));
-        let compose_before = snapshot_dir_or_file(&dir.path().join(".scryrs/compose.yml"));
-        let manifest_before = snapshot_dir_or_file(&dir.path().join("scryrs.json"));
-
-        out.clear();
-        err.clear();
-        assert_eq!(
-            run_with_writers(
-                [
-                    "init",
-                    "--agent",
-                    "pi",
-                    "--mode",
-                    "live",
-                    "--ingest-url",
-                    "http://scryrs:8081",
-                    "--workspace-id",
-                    "ws1",
-                    "--agent-id",
-                    "a1",
-                    "--repository-id",
-                    "repo1",
-                    "--docker-network",
-                    "other-net",
-                ],
-                &mut out,
-                &mut err,
-            ),
-            2
-        );
-        let stderr = String::from_utf8_lossy(&err);
-        assert!(stderr.contains("conflicts with managed live bootstrap"));
-        assert_eq!(
-            env_before,
-            snapshot_dir_or_file(&dir.path().join(".scryrs/.env"))
-        );
-        assert_eq!(
-            compose_before,
-            snapshot_dir_or_file(&dir.path().join(".scryrs/compose.yml"))
-        );
-        assert_eq!(
-            manifest_before,
-            snapshot_dir_or_file(&dir.path().join("scryrs.json"))
-        );
-        assert!(!dir.path().join(".pi").exists());
-    });
-}
-
-#[test]
-fn init_pi_identical_runtime_copy_is_noop() {
-    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    with_cwd(dir.path(), || {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        assert_eq!(
-            run_with_writers(
-                ["init", "--agent", "pi", "--mode", "local"],
-                &mut out,
-                &mut err,
-            ),
-            0
-        );
-        assert!(err.is_empty(), "stderr: {}", String::from_utf8_lossy(&err));
-
-        let hook_path = dir.path().join(".pi/extensions/scryrs/index.ts");
-        let before = snapshot_dir_or_file(&hook_path);
-
-        out.clear();
-        err.clear();
-        assert_eq!(
-            run_with_writers(
-                ["init", "--agent", "pi", "--mode", "local"],
-                &mut out,
-                &mut err,
-            ),
-            0
-        );
-        assert!(err.is_empty(), "stderr: {}", String::from_utf8_lossy(&err));
-        assert_eq!(before, snapshot_dir_or_file(&hook_path));
-    });
-}
-
-#[test]
-fn init_live_refused_in_source_checkout() {
-    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    // Create a fake scryrs source checkout.
-    std::fs::write(
-        dir.path().join("Cargo.toml"),
-        "[workspace]\nmembers = [\"crates/scryrs-cli\"]\n",
-    )
-    .unwrap_or_else(|e| panic!("write Cargo.toml: {e}"));
-    std::fs::create_dir_all(dir.path().join("hooks/claude-code"))
-        .unwrap_or_else(|e| panic!("create_dir: {e}"));
-
-    with_cwd(dir.path(), || {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        assert_eq!(
-            run_with_writers(
-                [
-                    "init",
-                    "--agent",
-                    "claude-code",
-                    "--mode",
-                    "live",
-                    "--ingest-url",
-                    "http://localhost:8081",
-                    "--workspace-id",
-                    "ws1",
-                    "--agent-id",
-                    "a1",
-                ],
-                &mut out,
-                &mut err,
-            ),
-            2
-        );
-        let err_str = String::from_utf8_lossy(&err);
-        assert!(
-            err_str.contains("live mode is not allowed in the scryrs source repository"),
-            "must refuse live mode in source checkout, got: {err_str}"
-        );
-        assert!(
-            err_str.contains("configures a consumer project"),
-            "must explain live mode purpose, got: {err_str}"
-        );
-
-        // No scryrs.json written.
-        assert!(!dir.path().join("scryrs.json").exists());
-    });
-}
-
-#[test]
-fn init_pi_live_refused_in_source_checkout() {
-    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    // Create a fake scryrs source checkout.
-    std::fs::write(
-        dir.path().join("Cargo.toml"),
-        "[workspace]\nmembers = [\"crates/scryrs-cli\"]\n",
-    )
-    .unwrap_or_else(|e| panic!("write Cargo.toml: {e}"));
-    std::fs::create_dir_all(dir.path().join("hooks/claude-code"))
-        .unwrap_or_else(|e| panic!("create_dir: {e}"));
-
-    with_cwd(dir.path(), || {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        assert_eq!(
-            run_with_writers(
-                [
-                    "init",
-                    "--agent",
-                    "pi",
-                    "--mode",
-                    "live",
-                    "--ingest-url",
-                    "http://localhost:8081",
-                    "--workspace-id",
-                    "ws1",
-                    "--agent-id",
-                    "a1",
-                ],
-                &mut out,
-                &mut err,
-            ),
-            2
-        );
-        let err_str = String::from_utf8_lossy(&err);
-        assert!(
-            err_str.contains("live mode is not allowed in the scryrs source repository"),
-            "must refuse live mode in source checkout for pi agent, got: {err_str}"
-        );
-        // For pi, the refusal points to the local-mode dogfooding path.
-        assert!(
-            err_str.contains("scryrs init --agent pi --mode local"),
-            "must suggest --mode local for pi dogfooding, got: {err_str}"
-        );
-
-        // No scryrs.json written.
-        assert!(!dir.path().join("scryrs.json").exists());
-        // No Pi hook written.
-        assert!(!dir.path().join(".pi").exists());
-    });
-}
-
-// --- 7.21: invalid mode exits 2 ---
-
-#[test]
-fn init_invalid_mode_exits_2() {
-    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    with_cwd(dir.path(), || {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        assert_eq!(
-            run_with_writers(
-                ["init", "--agent", "pi", "--mode", "invalid"],
-                &mut out,
-                &mut err
-            ),
-            2
-        );
-        let err_str = String::from_utf8_lossy(&err);
-        assert!(err_str.contains("--mode must be local or live"));
-    });
-}
-
-// --- 7.22: live-mode init writes .scryrs/hooks/ but not .scryrs/scryrs.db in Pi ---
-
-#[test]
-fn init_pi_live_creates_dirs_not_db() {
-    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    with_cwd(dir.path(), || {
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        assert_eq!(
-            run_with_writers(
-                [
-                    "init",
-                    "--agent",
-                    "pi",
-                    "--mode",
-                    "live",
-                    "--ingest-url",
-                    "http://localhost:8081",
-                    "--workspace-id",
-                    "ws1",
-                    "--agent-id",
-                    "a1",
-                    "--repository-id",
-                    "repo1",
-                    "--docker-network",
-                    "agent-net",
-                ],
-                &mut out,
-                &mut err,
-            ),
-            0
-        );
-
-        assert!(dir.path().join(".scryrs").exists());
-        assert!(dir.path().join(".scryrs/.gitignore").exists());
-        assert!(dir.path().join(".scryrs/hooks").exists());
-        assert!(!dir.path().join(".scryrs/scryrs.db").exists());
-        assert!(dir.path().join(".pi/extensions/scryrs/index.ts").exists());
-    });
-}
+// --- regressions: other surfaces unaffected ---
 
 #[test]
 fn init_does_not_regress_help() {
-    // --help still works as before (init is additive)
     let mut out = Vec::new();
     let mut err = Vec::new();
 

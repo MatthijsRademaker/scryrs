@@ -4,8 +4,10 @@
 mod dashboard;
 mod doctor;
 mod init;
+mod init_prompt;
 mod live_bootstrap;
 mod server;
+mod setup;
 mod up;
 
 #[cfg(feature = "core")]
@@ -45,6 +47,8 @@ mod init_tests;
 mod proposals_tests;
 #[cfg(all(test, feature = "core"))]
 mod record_tests;
+#[cfg(test)]
+mod setup_tests;
 #[cfg(test)]
 mod smoke_tests;
 #[cfg(test)]

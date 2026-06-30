@@ -80,7 +80,7 @@ fn up_missing_scaffold_files_exits_2() {
         assert!(out.is_empty());
         let stderr = String::from_utf8_lossy(&err);
         assert!(stderr.contains("missing required scaffold file"));
-        assert!(stderr.contains("scryrs init --agent <NAME>"));
+        assert!(stderr.contains("scryrs setup live --with-compose"));
     });
 }
 

@@ -474,7 +474,7 @@ fn missing_store_finding(store_path: &Path, mode: ResolvedMode) -> DoctorFinding
         (
             Severity::Warn,
             format!(
-                "local store is not initialized at {}; run `scryrs init --agent <NAME>` or capture events first",
+                "local store is not initialized at {}; run `scryrs setup local` or capture events first",
                 store_path.display()
             ),
         )
