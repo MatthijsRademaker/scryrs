@@ -15,7 +15,7 @@ reqwest = { version = "0.12", default-features = false, features = [
   "rustls-tls-native-roots",
   "stream",
 ] }
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 rust-embed = "8"
 scryrs-types = { workspace = true }
 serde = { workspace = true }
