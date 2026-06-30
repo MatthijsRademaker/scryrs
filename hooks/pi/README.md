@@ -19,9 +19,9 @@ cleaned up after each invocation, regardless of success or failure.
 scryrs init --agent pi
 ```
 
-This installs the slimmed `index.ts` to `.pi/extensions/pi-trace/index.ts`. Then
+This installs the slimmed `index.ts` to `.pi/extensions/scryrs/index.ts`. Then
 reload Pi with `/reload` (or restart). You can also install globally by copying
-this directory to `~/.pi/agent/extensions/pi-trace/`.
+this directory to `~/.pi/agent/extensions/scryrs/`.
 
 Once installed, every invocation of a tracked Pi tool forwards its raw event to
 `scryrs hook pi`, which translates and persists it into `.scryrs/scryrs.db` in

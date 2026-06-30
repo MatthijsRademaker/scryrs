@@ -7,7 +7,7 @@
 //!   `scryrs hook claude-code`. No JavaScript / node runtime is involved.
 //! - **pi**: an in-process extension. The slimmed `hooks/pi/index.ts` is
 //!   embedded at compile time via `include_str!()` and written to
-//!   `.pi/extensions/pi-trace/index.ts`.
+//!   `.pi/extensions/scryrs/index.ts`.
 //!
 //! Two install modes:
 //!
@@ -61,10 +61,10 @@ const FILE_HARNESS_REGISTRY: &[HarnessEntry] = &[HarnessEntry {
     agent_name: "pi",
     // Path relative to this file: 3 levels up to repo root, then hooks/.
     source_asset: include_str!("../../../hooks/pi/index.ts"),
-    target_dir: ".pi/extensions/pi-trace",
+    target_dir: ".pi/extensions/scryrs",
     target_filename: "index.ts",
     next_steps: concat!(
-        "scryrs Pi trace hook installed to .pi/extensions/pi-trace/index.ts\n",
+        "scryrs Pi trace hook installed to .pi/extensions/scryrs/index.ts\n",
         "\n",
         "Next steps:\n",
         "  1. Ensure scryrs is on your PATH.\n",

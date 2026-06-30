@@ -577,7 +577,7 @@ fn claude_hook_finding(repo_root: &Path) -> DoctorFinding {
 }
 
 fn pi_hook_finding(repo_root: &Path) -> DoctorFinding {
-    let hook_path = repo_root.join(".pi/extensions/pi-trace/index.ts");
+    let hook_path = repo_root.join(".pi/extensions/scryrs/index.ts");
     match std::fs::read_to_string(&hook_path) {
         Ok(_) => DoctorFinding::new(
             "pi_hook",
@@ -1160,7 +1160,7 @@ mod tests {
     }
 
     fn install_pi_hook(repo_root: &Path) {
-        let pi_dir = repo_root.join(".pi/extensions/pi-trace");
+        let pi_dir = repo_root.join(".pi/extensions/scryrs");
         fs::create_dir_all(&pi_dir).unwrap_or_else(|error| panic!("create pi dir: {error}"));
         fs::write(pi_dir.join("index.ts"), "// installed")
             .unwrap_or_else(|error| panic!("write pi hook: {error}"));

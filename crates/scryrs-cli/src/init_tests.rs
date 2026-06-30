@@ -224,7 +224,7 @@ fn init_agent_pi_writes_hook_file() {
             String::from_utf8_lossy(&err)
         );
 
-        let hook_path = dir.path().join(".pi/extensions/pi-trace/index.ts");
+        let hook_path = dir.path().join(".pi/extensions/scryrs/index.ts");
         assert!(
             hook_path.exists(),
             "hook file must exist at {}",
@@ -333,10 +333,10 @@ fn init_claude_code_merges_existing_settings() {
 fn init_pi_hook_file_collision_exits_2() {
     let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
     // Create the target directory and file before running init
-    std::fs::create_dir_all(dir.path().join(".pi/extensions/pi-trace"))
+    std::fs::create_dir_all(dir.path().join(".pi/extensions/scryrs"))
         .unwrap_or_else(|e| panic!("create_dir: {e}"));
     std::fs::write(
-        dir.path().join(".pi/extensions/pi-trace/index.ts"),
+        dir.path().join(".pi/extensions/scryrs/index.ts"),
         "existing",
     )
     .unwrap_or_else(|e| panic!("write: {e}"));
@@ -436,7 +436,7 @@ fn init_self_install_pi_allowed_at_source_root() {
         );
 
         // File must be written at source root.
-        let hook_path = dir.path().join(".pi/extensions/pi-trace/index.ts");
+        let hook_path = dir.path().join(".pi/extensions/scryrs/index.ts");
         assert!(
             hook_path.exists(),
             "hook file must exist at {}",
@@ -489,7 +489,7 @@ fn init_self_install_pi_from_subdirectory_resolves_to_root() {
         );
 
         // File must be at checkout root, not at CWD.
-        let root_hook_path = dir.path().join(".pi/extensions/pi-trace/index.ts");
+        let root_hook_path = dir.path().join(".pi/extensions/scryrs/index.ts");
         assert!(
             root_hook_path.exists(),
             "hook file must exist at checkout root {}",
@@ -521,10 +521,10 @@ fn init_self_install_pi_collision_in_source_repo_exits_2() {
         .unwrap_or_else(|e| panic!("create_dir: {e}"));
 
     // Pre-create the target file to trigger collision.
-    std::fs::create_dir_all(dir.path().join(".pi/extensions/pi-trace"))
+    std::fs::create_dir_all(dir.path().join(".pi/extensions/scryrs"))
         .unwrap_or_else(|e| panic!("create_dir: {e}"));
     std::fs::write(
-        dir.path().join(".pi/extensions/pi-trace/index.ts"),
+        dir.path().join(".pi/extensions/scryrs/index.ts"),
         "existing",
     )
     .unwrap_or_else(|e| panic!("write: {e}"));
@@ -1375,7 +1375,7 @@ fn init_live_reuses_existing_workspace_bootstrap_for_second_harness() {
             manifest_before,
             snapshot_dir_or_file(&dir.path().join("scryrs.json"))
         );
-        assert!(dir.path().join(".pi/extensions/pi-trace/index.ts").exists());
+        assert!(dir.path().join(".pi/extensions/scryrs/index.ts").exists());
     });
 }
 
@@ -1477,7 +1477,7 @@ fn init_pi_identical_runtime_copy_is_noop() {
         );
         assert!(err.is_empty(), "stderr: {}", String::from_utf8_lossy(&err));
 
-        let hook_path = dir.path().join(".pi/extensions/pi-trace/index.ts");
+        let hook_path = dir.path().join(".pi/extensions/scryrs/index.ts");
         let before = snapshot_dir_or_file(&hook_path);
 
         out.clear();
@@ -1660,7 +1660,7 @@ fn init_pi_live_creates_dirs_not_db() {
         assert!(dir.path().join(".scryrs/.gitignore").exists());
         assert!(dir.path().join(".scryrs/hooks").exists());
         assert!(!dir.path().join(".scryrs/scryrs.db").exists());
-        assert!(dir.path().join(".pi/extensions/pi-trace/index.ts").exists());
+        assert!(dir.path().join(".pi/extensions/scryrs/index.ts").exists());
     });
 }
 

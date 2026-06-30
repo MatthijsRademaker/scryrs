@@ -218,12 +218,12 @@ function testPiInstalled() {
 			consumerDir,
 			".pi",
 			"extensions",
-			"pi-trace",
+			"scryrs",
 			"index.ts",
 		);
 		assert(
 			existsSync(hookPath),
-			"installed Pi hook exists at .pi/extensions/pi-trace/index.ts",
+			"installed Pi hook exists at .pi/extensions/scryrs/index.ts",
 		);
 		if (!existsSync(hookPath)) return;
 

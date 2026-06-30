@@ -36,7 +36,7 @@ Changes to `swarm-pi-default-setup/` will be overwritten by future `swarm init` 
 
 ## Scryrs-specific notes
 
-- `hooks/pi/index.ts` is the **only** canonical source for the Pi trace hook. The installed runtime copy at `extensions/pi-trace/index.ts` is a non-canonical artifact created by `scryrs init --agent pi` for local dogfooding. Do not edit it directly.
+- `hooks/pi/index.ts` is the **only** canonical source for the Pi trace hook. The installed runtime copy at `extensions/scryrs/index.ts` is a non-canonical artifact created by `scryrs init --agent pi` for local dogfooding. Do not edit it directly.
 - Agent model override fields (`modelEasy`, `modelModerate`, `modelComplex`) are active runtime configuration — do not remove them.
 - The `shadcn-vue` skill is a scryrs-specific dashboard UI capability.
 - `scripts/check`, `scripts/test`, `scripts/security`, and `scripts/precommit-run` are the authoritative verification surface for this Rust repository.

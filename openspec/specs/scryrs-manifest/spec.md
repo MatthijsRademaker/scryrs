@@ -147,7 +147,7 @@ Each harness entry SHALL include a `lifecycle` field that accurately describes t
 
 ### Requirement: Manifest does not include consumer-side install targets
 
-The manifest SHALL NOT include consumer-side installation target paths (such as `.claude/hooks/scryrs-hook.mjs` or `.pi/extensions/pi-trace/index.ts`). Repository reference paths SHALL describe source locations only. The installer's hardcoded registry in `crates/scryrs-cli/src/init.rs` remains the sole source of truth for install targets.
+The manifest SHALL NOT include consumer-side installation target paths (such as `.claude/hooks/scryrs-hook.mjs` or `.pi/extensions/scryrs/index.ts`). Repository reference paths SHALL describe source locations only. The installer's hardcoded registry in `crates/scryrs-cli/src/init.rs` remains the sole source of truth for install targets.
 
 #### Scenario: No consumer install paths in manifest
 

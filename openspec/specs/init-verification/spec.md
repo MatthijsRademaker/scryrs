@@ -53,7 +53,7 @@ The installed-hook e2e fixture SHALL run `scryrs init --agent claude-code` and `
 
 - **GIVEN** a temporary consumer project directory
 - **WHEN** `scryrs init --agent pi` is executed in that directory
-- **THEN** the installed Pi hook artifact exists at `.pi/extensions/pi-trace/index.ts`
+- **THEN** the installed Pi hook artifact exists at `.pi/extensions/scryrs/index.ts`
 - **AND** the installed artifact can be loaded (TypeScript transpiled via tsx) without errors
 - **AND** when exercised with a simulated `tool_result` event, the hook forwards the event to `scryrs record --stdin`
 - **AND** event persistence is confirmed via `scryrs hotspots .` showing `analyzedEventCount >= 1`
@@ -62,7 +62,7 @@ The installed-hook e2e fixture SHALL run `scryrs init --agent claude-code` and `
 
 - **GIVEN** the installed-hook e2e fixture is executing
 - **WHEN** the fixture loads hook artifacts
-- **THEN** artifacts are loaded from the temporary consumer project directory (`.claude/hooks/` or `.pi/extensions/pi-trace/`)
+- **THEN** artifacts are loaded from the temporary consumer project directory (`.claude/hooks/` or `.pi/extensions/scryrs/`)
 - **AND** artifacts are NOT loaded from `hooks/claude-code/` or `hooks/pi/` in the repository source tree
 
 #### Scenario: Failed init is detected by the e2e fixture

@@ -34,5 +34,5 @@ node_modules/
 .scryrs/
 
 # Pi: installed dogfooding trace hook (canonical source is hooks/pi/index.ts)
-.pi/extensions/pi-trace/
+.pi/extensions/scryrs/
 **/dist/

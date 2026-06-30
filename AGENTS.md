@@ -81,14 +81,14 @@ This repository carries two copies of the Pi trace hook. They are not equal-weig
 | Path | Role | Editable |
 | --- | --- | --- |
 | `hooks/pi/index.ts` | Canonical hook source | Yes — edit here |
-| `.pi/extensions/pi-trace/index.ts` | Installed runtime copy for local dogfooding | **No** — never edit directly |
+| `.pi/extensions/scryrs/index.ts` | Installed runtime copy for local dogfooding | **No** — never edit directly |
 
 ### Rules
 
 1. `hooks/pi/index.ts` is the **only** canonical source for the Pi trace hook.
-2. `.pi/extensions/pi-trace/index.ts` is a non-leading, non-canonical runtime artifact installed by `scryrs init --agent pi` for local dogfooding. It is gitignored.
-3. LLMs/agents **MUST NOT** edit `.pi/extensions/pi-trace/index.ts` directly.
+2. `.pi/extensions/scryrs/index.ts` is a non-leading, non-canonical runtime artifact installed by `scryrs init --agent pi` for local dogfooding. It is gitignored.
+3. LLMs/agents **MUST NOT** edit `.pi/extensions/scryrs/index.ts` directly.
 4. LLMs/agents **MUST NOT** treat the installed copy as the leading source or resolution target for hook logic.
-5. After editing `hooks/pi/index.ts`, refresh the installed copy by removing `.pi/extensions/pi-trace/index.ts` and re-running `scryrs init --agent pi`.
+5. After editing `hooks/pi/index.ts`, refresh the installed copy by removing `.pi/extensions/scryrs/index.ts` and re-running `scryrs init --agent pi`.
 
 **Important:** The frontmatter fields `modelEasy`, `modelModerate`, and `modelComplex` in `.pi/agents/*.md` are **live, active runtime configuration** — not dead code, not backwards-compat cruft, not stale config. They drive difficulty-based model routing at runtime, resolved by the vendored `@swarm/swarm-extension` package (see `.pi/extensions/README.md`). Do not remove them under Rules 7 or 9; those rules apply to code, not to active runtime configuration that controls which AI model executes tasks.
