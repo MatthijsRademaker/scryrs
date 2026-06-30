@@ -126,7 +126,7 @@ Two layers: (A) drives `scryrs hook pi --file <tmp>` with crafted raw Pi events,
 
 ### `installed-hook-e2e.mjs`
 
-Runs `scryrs init --agent claude-code --mode local` and `scryrs init --agent pi --mode local` in temporary consumer directories and proves the installed artifacts capture events.
+Runs the two-step install flow (`scryrs init --agent <name>` then `scryrs setup local`) for both Claude Code and Pi in temporary consumer directories and proves the installed artifacts capture events.
 
 ### `live-hotspots-e2e.mjs`
 
@@ -242,7 +242,8 @@ mkdir -p "$REPO_ROOT"
 cd "$REPO_ROOT"
 
 "$SCRYRS_BIN" --version
-"$SCRYRS_BIN" init --agent claude-code --mode local
+"$SCRYRS_BIN" init --agent claude-code
+"$SCRYRS_BIN" setup local
 "$SCRYRS_BIN" doctor --json
 
 cat > events.jsonl <<'JSONL'

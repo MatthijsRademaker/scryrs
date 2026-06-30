@@ -1,10 +1,10 @@
 /**
  * Installed-hook end-to-end verification.
  *
- * Runs `scryrs init --agent claude-code --mode local` and
- * `scryrs init --agent pi --mode local` in
- * temporary consumer project directories, then proves the installed artifacts
- * actually capture events against the real `scryrs` binary.
+ * Runs the two-step install flow in temporary consumer project directories —
+ * `scryrs init --agent <name>` (hook install only) followed by
+ * `scryrs setup local` (local trace-store scaffold) — then proves the installed
+ * artifacts actually capture events against the real `scryrs` binary.
  *
  *  - Claude Code: init create-or-merges `.claude/settings.json` with the native
  *    `scryrs hook claude-code` command hook (no `.mjs`, no node hook). The
@@ -118,16 +118,22 @@ function testClaudeCodeInstalled() {
 	console.log("\n\x1b[33m--- Claude Code: Installed-hook E2E ---\x1b[0m");
 	const consumerDir = tempDir();
 	try {
-		// 1. Run scryrs init.
+		// 1. Run scryrs init (hook install only), then scryrs setup local
+		//    (creates the local trace store the hook records into).
 		const initStdout = execFileSync(
 			SCRYRS_BIN,
-			["init", "--agent", "claude-code", "--mode", "local"],
+			["init", "--agent", "claude-code"],
 			{
 				cwd: consumerDir,
 				encoding: "utf-8",
 				timeout: 5000,
 			},
 		);
+		execFileSync(SCRYRS_BIN, ["setup", "local"], {
+			cwd: consumerDir,
+			encoding: "utf-8",
+			timeout: 5000,
+		});
 
 		// 2. settings.json has the native command hook; no .mjs file anywhere.
 		const settingsPath = join(consumerDir, ".claude", "settings.json");
@@ -202,16 +208,18 @@ function testPiInstalled() {
 	}
 	const consumerDir = tempDir();
 	try {
-		// 1. Run scryrs init.
-		const initStdout = execFileSync(
-			SCRYRS_BIN,
-			["init", "--agent", "pi", "--mode", "local"],
-			{
-				cwd: consumerDir,
-				encoding: "utf-8",
-				timeout: 5000,
-			},
-		);
+		// 1. Run scryrs init (hook install only), then scryrs setup local
+		//    (creates the local trace store the hook records into).
+		const initStdout = execFileSync(SCRYRS_BIN, ["init", "--agent", "pi"], {
+			cwd: consumerDir,
+			encoding: "utf-8",
+			timeout: 5000,
+		});
+		execFileSync(SCRYRS_BIN, ["setup", "local"], {
+			cwd: consumerDir,
+			encoding: "utf-8",
+			timeout: 5000,
+		});
 
 		// 2. Installed artifact exists at the expected path.
 		const hookPath = join(
