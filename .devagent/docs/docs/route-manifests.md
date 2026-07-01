@@ -88,7 +88,7 @@ Output rules:
 
 ## Route Hint Contract
 
-The route manifest is accompanied by a deterministic `RouteHintDocument` projection that downstream runtimes can consume directly. Each `RouteEntry` produces exactly one `RouteHintItem` preserving source identity (`routeId`, `target`, `label`), a 1-based ordinal `rank`, deferred `relevance` (`None`), a template-derived `reason`, and verbatim `evidence` copied from the source entry.
+The route manifest is accompanied by a deterministic `RouteHintDocument` projection that downstream runtimes can consume directly. Each `RouteEntry` produces exactly one `RouteHintItem` preserving source identity (`routeId`, `target`, `label`), a 1-based ordinal `rank`, explain-only `relevance`, a template-derived `reason`, and verbatim `evidence` copied from the source entry.
 
 **Schema version:** `HINT_SCHEMA_VERSION = "1.0.0"` (independent from `ROUTE_SCHEMA_VERSION`).
 
@@ -96,7 +96,7 @@ The route manifest is accompanied by a deterministic `RouteHintDocument` project
 
 **Rank semantics:** `rank` is a deterministic 1-based ordinal derived from manifest entry sort order (by `id` ascending). It is explicitly documented as a placeholder, not a frozen long-term ranking formula.
 
-**Relevance semantics:** `relevance` is `Option<u32>` with value `None` in the initial implementation — deferred for future enhancement. Serialized JSON omits the field entirely when absent.
+**Relevance semantics:** plain `hints_from_manifest` projection omits `relevance` entirely. `scryrs route explain` populates it for matched hints as `tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999)`. The packed value is a display-friendly derivative of the authoritative explain sort tuple, not the ordering key.
 
 **Producer:** `hints_from_manifest(manifest: &RouteManifestDocument) -> RouteHintDocument` in `crates/scryrs-runtime/src/lib.rs`. The function is a pure projection over the manifest — no filesystem I/O, no graph mutation, no model-based ranking.
 
@@ -111,7 +111,7 @@ scryrs route explain . --query "authentication"
 **Match fields:**
 
 | Field | Description |
-|-------|-------------|
+| ------- | ------------- |
 | `label` | Route entry human-readable label |
 | `subject` | Raw subject value from source node |
 | `id` | Source graph node identifier |
@@ -122,12 +122,12 @@ scryrs route explain . --query "authentication"
 **Match tiers (descending priority):**
 
 | Tier | Description |
-|------|-------------|
+| ------ | ------------- |
 | 3 | Exact string match (field equals query, case-insensitive) |
 | 2 | Prefix match (field starts with query, case-insensitive) |
 | 1 | Substring match (field contains query, case-insensitive) |
 
-Within each tier, entries follow manifest entry order (by `id` ascending). Only entries that match at least one field appear in output. Each matching hint's `reason` field appends `"; query match on {comma-separated field names}"`.
+Explain ordering is authoritative on `(tier DESC, score DESC, count DESC, manifest_index ASC, route_id ASC)`, where `score` is the saturating sum of evidence-link scores and `count` is evidence-link count. Only entries that match at least one field appear in output. Each matching hint's `reason` field appends `"; query match on {comma-separated field names}"`.
 
 **Zero-match contract:** No matches produces a valid `RouteHintDocument` with empty `hints` array and exit code 0.
 

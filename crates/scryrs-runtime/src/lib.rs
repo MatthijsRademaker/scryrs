@@ -60,6 +60,27 @@ enum MatchTier {
     Exact = 3,
 }
 
+impl MatchTier {
+    fn as_u32(self) -> u32 {
+        self as u32
+    }
+}
+
+const EXPLAIN_RELEVANCE_TIER_MULTIPLIER: u32 = 1_000_000_000;
+const EXPLAIN_RELEVANCE_SCORE_MULTIPLIER: u32 = 1_000;
+const EXPLAIN_RELEVANCE_SCORE_CAP: u32 = 999_999;
+const EXPLAIN_RELEVANCE_COUNT_CAP: u32 = 999;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExplainMatch {
+    manifest_index: usize,
+    route_id: String,
+    best_tier: MatchTier,
+    total_evidence_score: u32,
+    evidence_count: u32,
+    matched_fields: Vec<&'static str>,
+}
+
 /// Build a sorted, deduplicated, comma-separated list of matched field names.
 fn join_matched_fields(fields: &[&str]) -> String {
     let mut sorted: Vec<&str> = fields.to_vec();
@@ -71,35 +92,29 @@ fn join_matched_fields(fields: &[&str]) -> String {
 /// Project a route manifest into a query-filtered route hint document.
 ///
 /// Calls `hints_from_manifest` internally, then filters and re-orders by
-/// case-insensitive substring match against the query. Matched entries are
-/// tiered: exact match (tier 3) > prefix match (tier 2) > substring match (tier 1).
-/// Within each tier, manifest entry order (rank ascending) is the final tie-break.
-/// Only entries that match at least one field appear in the output.
+/// case-insensitive substring match against the query. Matched entries sort by
+/// `(tier DESC, score DESC, count DESC, manifest_index ASC, route_id ASC)`.
+/// `relevance` is populated only for explain matches using the documented packed
+/// `u32` formula, while plain `hints_from_manifest` output remains unchanged.
 /// Each hint's `reason` field is extended with `"; query match on {fields}"`.
 /// Zero matches produces a valid `RouteHintDocument` with an empty `hints` array.
 pub fn explain_hints(manifest: &RouteManifestDocument, query: &str) -> RouteHintDocument {
     let base = hints_from_manifest(manifest);
     let query_lower = query.to_lowercase();
+    let mut matches: Vec<ExplainMatch> = Vec::new();
 
-    // Collect (hint_index, tier, matched_fields) for each matching entry.
-    let mut matches: Vec<(usize, MatchTier, Vec<&str>)> = Vec::new();
-
-    for (i, _hint) in base.hints.iter().enumerate() {
-        // Find the source route entry by index.
-        let entry = &manifest.routes[i];
+    for (manifest_index, entry) in manifest.routes.iter().enumerate() {
         let mut best_tier = MatchTier::None;
-        let mut matched_fields: Vec<&str> = Vec::new();
+        let mut matched_fields: Vec<&'static str> = Vec::new();
 
-        // Check entry-level fields: label, subject, id, target, kind.
-        for (field_name, field_value) in &[
+        for (field_name, field_value) in [
             ("label", entry.label.as_str()),
             ("subject", entry.subject.as_str()),
             ("id", entry.id.as_str()),
             ("target", entry.target.as_str()),
             ("kind", entry.kind.as_str()),
         ] {
-            let lower = field_value.to_lowercase();
-            let tier = classify_match(&lower, &query_lower);
+            let tier = classify_match(&field_value.to_lowercase(), &query_lower);
             if tier > MatchTier::None {
                 matched_fields.push(field_name);
                 if tier > best_tier {
@@ -108,10 +123,8 @@ pub fn explain_hints(manifest: &RouteManifestDocument, query: &str) -> RouteHint
             }
         }
 
-        // Check evidence_links subject fields.
         for link in &entry.evidence_links {
-            let lower = link.subject.to_lowercase();
-            let tier = classify_match(&lower, &query_lower);
+            let tier = classify_match(&link.subject.to_lowercase(), &query_lower);
             if tier > MatchTier::None {
                 matched_fields.push("evidence.subject");
                 if tier > best_tier {
@@ -121,19 +134,39 @@ pub fn explain_hints(manifest: &RouteManifestDocument, query: &str) -> RouteHint
         }
 
         if best_tier > MatchTier::None {
-            matches.push((i, best_tier, matched_fields));
+            matches.push(ExplainMatch {
+                manifest_index,
+                route_id: entry.id.clone(),
+                best_tier,
+                total_evidence_score: total_evidence_score(entry),
+                evidence_count: saturating_evidence_count(entry.evidence_links.len()),
+                matched_fields,
+            });
         }
     }
 
-    // Stable sort: tier descending, then manifest order (index) ascending.
-    matches.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    matches.sort_by(|a, b| {
+        b.best_tier
+            .cmp(&a.best_tier)
+            .then_with(|| b.total_evidence_score.cmp(&a.total_evidence_score))
+            .then_with(|| b.evidence_count.cmp(&a.evidence_count))
+            .then_with(|| a.manifest_index.cmp(&b.manifest_index))
+            .then_with(|| a.route_id.cmp(&b.route_id))
+    });
 
-    // Build result hints from matching entries.
-    let hints: Vec<RouteHintItem> = matches
+    let hints = matches
         .into_iter()
-        .map(|(_idx, _tier, fields)| {
-            let mut hint = base.hints[_idx].clone();
-            let match_suffix = format!("; query match on {}", join_matched_fields(&fields));
+        .map(|matched| {
+            let mut hint = base.hints[matched.manifest_index].clone();
+            hint.relevance = Some(pack_explain_relevance(
+                matched.best_tier,
+                matched.total_evidence_score,
+                matched.evidence_count,
+            ));
+            let match_suffix = format!(
+                "; query match on {}",
+                join_matched_fields(&matched.matched_fields)
+            );
             hint.reason.push_str(&match_suffix);
             hint
         })
@@ -143,6 +176,26 @@ pub fn explain_hints(manifest: &RouteManifestDocument, query: &str) -> RouteHint
         schema_version: HINT_SCHEMA_VERSION.to_string(),
         hints,
     }
+}
+
+fn total_evidence_score(entry: &scryrs_types::RouteEntry) -> u32 {
+    entry.evidence_links.iter().fold(0u32, |score, link| {
+        score.saturating_add(link.score.unwrap_or(0))
+    })
+}
+
+fn saturating_evidence_count(count: usize) -> u32 {
+    count.min(u32::MAX as usize) as u32
+}
+
+fn pack_explain_relevance(
+    best_tier: MatchTier,
+    total_evidence_score: u32,
+    evidence_count: u32,
+) -> u32 {
+    best_tier.as_u32() * EXPLAIN_RELEVANCE_TIER_MULTIPLIER
+        + total_evidence_score.min(EXPLAIN_RELEVANCE_SCORE_CAP) * EXPLAIN_RELEVANCE_SCORE_MULTIPLIER
+        + evidence_count.min(EXPLAIN_RELEVANCE_COUNT_CAP)
 }
 
 /// Classify how `query_lower` matches `field_lower`.
@@ -168,13 +221,22 @@ mod tests {
         subject: &str,
         row_ids: Vec<u64>,
     ) -> EvidenceLink {
+        make_scored_evidence_link(source_kind, subject, row_ids, None)
+    }
+
+    fn make_scored_evidence_link(
+        source_kind: EvidenceSourceKind,
+        subject: &str,
+        row_ids: Vec<u64>,
+        score: Option<u32>,
+    ) -> EvidenceLink {
         EvidenceLink {
             source_kind,
             subject: subject.into(),
             row_ids,
             doc_ref: None,
             description: None,
-            score: None,
+            score,
             metadata: None,
         }
     }
@@ -446,6 +508,228 @@ mod tests {
         let doc = explain_hints(&manifest, "zzz_nonexistent");
         assert_eq!(doc.schema_version, HINT_SCHEMA_VERSION);
         assert!(doc.hints.is_empty());
+    }
+
+    #[test]
+    fn explain_hints_exact_outranks_higher_evidence_prefix_match() {
+        let manifest = make_manifest(vec![
+            make_route_entry(
+                "file:auth-prefix",
+                "auth-prefix",
+                "file:auth-prefix",
+                "file",
+                vec![make_scored_evidence_link(
+                    EvidenceSourceKind::LocalTraceRow,
+                    "auth-prefix",
+                    vec![1],
+                    Some(999),
+                )],
+            ),
+            make_route_entry("file:auth", "auth", "file:auth", "file", vec![]),
+        ]);
+
+        let doc = explain_hints(&manifest, "auth");
+        let ids: Vec<&str> = doc
+            .hints
+            .iter()
+            .map(|hint| hint.route_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["file:auth", "file:auth-prefix"]);
+    }
+
+    #[test]
+    fn explain_hints_higher_evidence_score_wins_within_same_tier() {
+        let manifest = make_manifest(vec![
+            make_route_entry(
+                "file:auth-low-score",
+                "auth-low-score",
+                "file:auth-low-score",
+                "file",
+                vec![make_scored_evidence_link(
+                    EvidenceSourceKind::LocalTraceRow,
+                    "auth-low-score",
+                    vec![1],
+                    Some(10),
+                )],
+            ),
+            make_route_entry(
+                "file:auth-high-score",
+                "auth-high-score",
+                "file:auth-high-score",
+                "file",
+                vec![
+                    make_scored_evidence_link(
+                        EvidenceSourceKind::LocalTraceRow,
+                        "auth-high-score-a",
+                        vec![2],
+                        Some(10),
+                    ),
+                    make_scored_evidence_link(
+                        EvidenceSourceKind::LocalTraceRow,
+                        "auth-high-score-b",
+                        vec![3],
+                        Some(5),
+                    ),
+                ],
+            ),
+        ]);
+
+        let doc = explain_hints(&manifest, "auth");
+        let ids: Vec<&str> = doc
+            .hints
+            .iter()
+            .map(|hint| hint.route_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["file:auth-high-score", "file:auth-low-score"]);
+    }
+
+    #[test]
+    fn explain_hints_higher_evidence_count_wins_when_score_ties() {
+        let manifest = make_manifest(vec![
+            make_route_entry(
+                "file:auth-one-link",
+                "auth-one-link",
+                "file:auth-one-link",
+                "file",
+                vec![make_scored_evidence_link(
+                    EvidenceSourceKind::LocalTraceRow,
+                    "auth-one-link",
+                    vec![1],
+                    Some(10),
+                )],
+            ),
+            make_route_entry(
+                "file:auth-two-links",
+                "auth-two-links",
+                "file:auth-two-links",
+                "file",
+                vec![
+                    make_scored_evidence_link(
+                        EvidenceSourceKind::LocalTraceRow,
+                        "auth-two-links-a",
+                        vec![2],
+                        Some(4),
+                    ),
+                    make_scored_evidence_link(
+                        EvidenceSourceKind::LocalTraceRow,
+                        "auth-two-links-b",
+                        vec![3],
+                        Some(6),
+                    ),
+                ],
+            ),
+        ]);
+
+        let doc = explain_hints(&manifest, "auth");
+        let ids: Vec<&str> = doc
+            .hints
+            .iter()
+            .map(|hint| hint.route_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["file:auth-two-links", "file:auth-one-link"]);
+    }
+
+    #[test]
+    fn explain_hints_manifest_order_breaks_full_ties() {
+        let manifest = make_manifest(vec![
+            make_route_entry(
+                "file:auth-first",
+                "auth-first",
+                "file:auth-first",
+                "file",
+                vec![make_scored_evidence_link(
+                    EvidenceSourceKind::LocalTraceRow,
+                    "auth-first",
+                    vec![1],
+                    Some(10),
+                )],
+            ),
+            make_route_entry(
+                "file:auth-second",
+                "auth-second",
+                "file:auth-second",
+                "file",
+                vec![make_scored_evidence_link(
+                    EvidenceSourceKind::LocalTraceRow,
+                    "auth-second",
+                    vec![2],
+                    Some(10),
+                )],
+            ),
+        ]);
+
+        let doc = explain_hints(&manifest, "auth");
+        let ids: Vec<&str> = doc
+            .hints
+            .iter()
+            .map(|hint| hint.route_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["file:auth-first", "file:auth-second"]);
+    }
+
+    #[test]
+    fn explain_hints_best_match_tier_across_fields_drives_ranking() {
+        let exact_id = RouteEntry {
+            id: "auth".into(),
+            subject_kind: "file".into(),
+            subject: "zzz auth zzz".into(),
+            label: "zzz auth zzz".into(),
+            target: "file:zzz-auth".into(),
+            kind: "file".into(),
+            evidence_links: vec![],
+            grouping: None,
+            metadata: None,
+        };
+        let prefix_subject = RouteEntry {
+            id: "file:zzz".into(),
+            subject_kind: "file".into(),
+            subject: "auth-prefix".into(),
+            label: "auth-prefix".into(),
+            target: "file:zzz".into(),
+            kind: "file".into(),
+            evidence_links: vec![],
+            grouping: None,
+            metadata: None,
+        };
+
+        let manifest = make_manifest(vec![prefix_subject, exact_id]);
+        let doc = explain_hints(&manifest, "auth");
+        let ids: Vec<&str> = doc
+            .hints
+            .iter()
+            .map(|hint| hint.route_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["auth", "file:zzz"]);
+    }
+
+    #[test]
+    fn explain_hints_populates_relevance_with_saturating_packed_score() {
+        let mut evidence_links = vec![make_scored_evidence_link(
+            EvidenceSourceKind::LocalTraceRow,
+            "auth-overflow",
+            vec![1],
+            Some(u32::MAX),
+        )];
+        evidence_links.extend((2..=1001).map(|row_id| {
+            make_scored_evidence_link(
+                EvidenceSourceKind::LocalTraceRow,
+                "auth-overflow",
+                vec![row_id],
+                Some(1),
+            )
+        }));
+
+        let manifest = make_manifest(vec![make_route_entry(
+            "file:auth-overflow",
+            "auth-overflow",
+            "file:auth-overflow",
+            "file",
+            evidence_links,
+        )]);
+
+        let doc = explain_hints(&manifest, "auth");
+        assert_eq!(doc.hints.len(), 1);
+        assert_eq!(doc.hints[0].relevance, Some(2_999_999_999));
     }
 
     #[test]

@@ -1538,6 +1538,12 @@ fn route_explain_help_flag_prints_help_and_exits_0() {
     let help = String::from_utf8_lossy(&out);
     assert!(help.contains("scryrs route explain"));
     assert!(help.contains("--query <TEXT>"));
+    assert!(help.contains("tier 3) > prefix match (tier 2) > substring match (tier 1)"));
+    assert!(help.contains("(tier DESC, score DESC, count DESC, manifest_index ASC, route_id ASC)"));
+    assert!(help.contains("tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999)"));
+    assert!(
+        help.contains("rank remains the manifest ordinal; explain relevance is the packed score")
+    );
     assert!(help.contains("EXIT CODES"));
 }
 
@@ -1778,6 +1784,7 @@ fn route_explain_successful_match_produces_hints() {
     let hints = doc["hints"].as_array().expect("hints must be array");
     assert_eq!(hints.len(), 1, "only authentication should match");
     assert_eq!(hints[0]["routeId"].as_str(), Some("file:authentication"));
+    assert_eq!(hints[0]["relevance"].as_u64(), Some(2_000_010_001));
 
     let reason = hints[0]["reason"].as_str().expect("reason must be string");
     assert!(reason.contains("query match on"));
@@ -1934,6 +1941,16 @@ fn route_explain_help_json_includes_explain_entry() {
         json_str.contains("\"flag\":\"--query\""),
         "--help-json explain entry must document --query flag, got:\n{json_str}"
     );
+    assert!(
+        json_str.contains(
+            "\"tieBreak\":\"(tier DESC, score DESC, count DESC, manifest_index ASC, route_id ASC)\""
+        ),
+        "--help-json explain entry must document the full tie-break chain, got:\n{json_str}"
+    );
+    assert!(
+        json_str.contains("tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999)"),
+        "--help-json must document packed explain relevance, got:\n{json_str}"
+    );
     // Must not contain "deferred" in explain subcommand description.
     let explain_start = json_str.find("\"name\":\"explain\"").unwrap();
     let explain_end = json_str[explain_start..]
@@ -1962,6 +1979,14 @@ fn route_explain_help_text_includes_explain_command() {
     assert!(
         help.contains("--query <TEXT>"),
         "--help must show --query argument, got:\n{help}"
+    );
+    assert!(
+        help.contains("score DESC, count DESC, manifest_index ASC, route_id ASC"),
+        "--help must document the full explain ranking chain, got:\n{help}"
+    );
+    assert!(
+        help.contains("plain route projection omits relevance"),
+        "--help must distinguish plain projection from explain relevance, got:\n{help}"
     );
     assert!(
         !help.contains("The `scryrs route explain` command is deferred"),

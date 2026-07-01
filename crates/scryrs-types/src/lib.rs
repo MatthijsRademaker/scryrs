@@ -952,7 +952,7 @@ pub struct RouteHintItem {
     pub label: String,
     /// 1-based ordinal rank derived from manifest entry sort order.
     pub rank: u32,
-    /// Optional relevance score, deferred for future enhancement.
+    /// Optional relevance score, omitted for plain projection and populated for explain matches.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relevance: Option<u32>,
     /// Deterministic template reason citing entry identity and evidence count.

@@ -31,7 +31,7 @@ Ingest JSONL trace events from stdin or a file. `--stdin` and `--file` are mutua
 Local mode is now an explicit opt-in. It is unchanged in behavior from prior releases.
 
 | Field | Value |
-|-------|-------|
+| ------- | ------- |
 | Selection | `--mode local` (explicit) |
 | Input | `--stdin` reads newline-delimited `TraceEvent` JSON from stdin; `--file <PATH>` reads from a JSONL file |
 | Output | Single-line JSON summary on stdout; one JSON rejection diagnostic per rejected non-empty line on stderr |
@@ -138,8 +138,8 @@ Transport asymmetry is intentional: Claude Code uses stdin because its `command`
 Materializes the hotspot artifact consumed by the rest of the CLI pipeline. Local mode is the default: it analyzes persisted trace events in `.scryrs/scryrs.db` and emits a deterministic `HotspotsReport`. Live mode is explicit: it queries `GET /v1/repositories/{repository_id}/hotspots?window=cumulative` and materializes that response into the same `HotspotsReport` envelope without merging local SQLite data.
 
 | Field | Value |
-|-------|-------|
-| Input | Required local directory `<PATH>`. Optional live flags: `--mode <local|live>`,`--server-url <URL>`,`--repository-id <ID>`. |
+| ------- | ------- |
+| Input | Required local directory `<PATH>`. Optional live flags: `--mode <local | live>`,`--server-url <URL>`,`--repository-id <ID>`. |
 | Output | `HotspotsReport` JSON on stdout; `.scryrs/hotspots.json` artifact file written to `<PATH>/.scryrs/` |
 | Exit 0 | Report written successfully (may have zero entries for empty stores) |
 | Exit 1 | I/O, storage, or artifact write failure |
@@ -204,7 +204,7 @@ Materializes the hotspot artifact consumed by the rest of the CLI pipeline. Loca
 **Scoring dimensions:**
 
 | Event type | Weight |
-|------------|--------|
+| ------------ | -------- |
 | `FileOpened` | 1 |
 | `SearchRun` | 2 |
 | `SymbolInspected` | 2 |
@@ -220,7 +220,7 @@ Per-subject score = sum of event weights multiplied by per-type counts. `FailedL
 Builds deterministic `KnowledgeGraphDocument` artifact from hotspot evidence and optional docs navigation metadata.
 
 | Field | Value |
-|-------|-------|
+| ------- | ------- |
 | Input | Required local directory `<PATH>` containing `.scryrs/hotspots.json`. Optional docs layer from `.devagent/docs/docs/_nav.json`. |
 | Output | Single-line `KnowledgeGraphDocument` JSON on stdout; `.scryrs/graph.json` artifact file written to `<PATH>/.scryrs/` |
 | Exit 0 | Graph written successfully |
@@ -238,7 +238,7 @@ Builds deterministic `KnowledgeGraphDocument` artifact from hotspot evidence and
 Projects `.scryrs/graph.json` into deterministic `RouteManifestDocument` artifact for downstream runtime retrieval. Also accepts `scryrs route explain <PATH> --query <TEXT>` subcommand (see below).
 
 | Field | Value |
-|-------|-------|
+| ------- | ------- |
 | Input | Required local directory `<PATH>` containing `.scryrs/graph.json` |
 | Output | Single-line `RouteManifestDocument` JSON on stdout; `.scryrs/routes.json` artifact file written to `<PATH>/.scryrs/` |
 | Exit 0 | Route manifest written successfully |
@@ -256,14 +256,14 @@ Projects `.scryrs/graph.json` into deterministic `RouteManifestDocument` artifac
 The route manifest is accompanied by a deterministic `RouteHintDocument` projection (schema version `HINT_SCHEMA_VERSION = 1.0.0`, independent from `ROUTE_SCHEMA_VERSION`). Each `RouteEntry` produces exactly one `RouteHintItem`:
 
 | Field | Type | Source | Description |
-|-------|------|--------|-------------|
+| ------- | ------ | -------- | ------------- |
 | `schemaVersion` | string | `HINT_SCHEMA_VERSION` | Always `"1.0.0"` |
 | `hints` | array | `RouteEntry[]` input | One `RouteHintItem` per route entry, deterministic order |
 | `hints[].routeId` | string | `RouteEntry.id` | Source route entry id |
 | `hints[].target` | string | `RouteEntry.target` | Normalized load target |
 | `hints[].label` | string | `RouteEntry.label` | Human-readable label |
 | `hints[].rank` | number (u32) | Ordinal index (1-based) | Deterministic placeholder — NOT a frozen long-term ranking formula |
-| `hints[].relevance` | number or absent | Always `None` | Deferred — use `scryrs route explain` for query-based filtering |
+| `hints[].relevance` | number or absent | Omitted by plain projection; populated for explain matches | Plain `hints_from_manifest` omits the field; `scryrs route explain` fills it with the packed deterministic score |
 | `hints[].reason` | string | Template: `"Route '{label}' ({id}): {N} evidence link(s), subject kind {subjectKind}"` | Evidence count and identity explanation |
 | `hints[].evidence` | array | `RouteEntry.evidenceLinks` (verbatim copy) | Provenance links for traceability |
 
@@ -305,16 +305,16 @@ The route manifest is accompanied by a deterministic `RouteHintDocument` project
 }
 ```
 
-**Ranking policy:** `rank` is a deterministic ordinal placeholder derived from manifest entry sort order (by `id` ascending). `relevance` is deferred (`None`) and explicitly does NOT represent a frozen long-term ranking formula. Use `scryrs route explain <PATH> --query <TEXT>` for query-based filtering and ranking (see below).
+**Ranking policy:** `rank` is a deterministic ordinal placeholder derived from manifest entry sort order (by `id` ascending). Plain projection omits `relevance`; `scryrs route explain <PATH> --query <TEXT>` populates it as `tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999)`. The packed value is not the sort key.
 
 ### `scryrs route explain <PATH> --query <TEXT>`
 
-Queries the route manifest artifact (`.scryrs/routes.json`) for entries matching a search term. Performs case-insensitive substring matching with tiered ordering — no model, no randomness, no graph inspection.
+Queries the route manifest artifact (`.scryrs/routes.json`) for entries matching a search term. Performs case-insensitive substring matching with deterministic ranking — no model, no randomness, no graph inspection.
 
 | Field | Value |
-|-------|-------|
+| ------- | ------- |
 | Input | Required local directory `<PATH>` containing `.scryrs/routes.json`. Required `--query <TEXT>` argument. |
-| Output | Single-line `RouteHintDocument` JSON on stdout. Each hint's `reason` appends `"; query match on <fields>"` suffix. Zero matches produces valid document with empty `hints` array. |
+| Output | Single-line `RouteHintDocument` JSON on stdout. Each hint's `reason` appends `"; query match on <fields>"` suffix and each matched hint carries populated numeric `relevance`. Zero matches produces valid document with empty `hints` array. |
 | Exit 0 | Query matched and results emitted (including zero-match results) |
 | Exit 1 | Serialization or stdout write failure |
 | Exit 2 | Missing PATH, missing `--query`, route artifact missing, malformed route artifact, or route schema version mismatch |
@@ -322,7 +322,7 @@ Queries the route manifest artifact (`.scryrs/routes.json`) for entries matching
 **Match fields** (case-insensitive substring match against each):
 
 | Field | Example match for query "auth" |
-|-------|-------------------------------|
+| ------- | ------------------------------- |
 | `label` | `"Authentication"` → match (substring) |
 | `subject` | `"auth_handler"` → match (substring) |
 | `id` | `"file:auth"` → match (substring) |
@@ -333,23 +333,23 @@ Queries the route manifest artifact (`.scryrs/routes.json`) for entries matching
 **Match tiers (descending priority):**
 
 | Tier | Description |
-|------|-------------|
+| ------ | ------------- |
 | 3 (exact) | Field equals query string exactly (case-insensitive) |
 | 2 (prefix) | Field starts with query string (case-insensitive) |
 | 1 (substring) | Field contains query string (case-insensitive) |
 
-**Tie-break:** Within each tier, entries follow manifest entry order (by `id` ascending).
+**Tie-break:** explain ordering is authoritative on `(tier DESC, score DESC, count DESC, manifest_index ASC, route_id ASC)`, where `score` is the saturating sum of `evidenceLinks[].score.unwrap_or(0)` and `count` is evidence-link count.
 
 **Example invocation:**
 
 ```bash
-scryrs route explain . --query "authentication"
+scryrs route explain . --query "auth"
 ```
 
 **Example output (successful match):**
 
 ```json
-{"schemaVersion":"1.0.0","hints":[{"routeId":"file:auth","target":"file:auth","label":"auth","rank":1,"reason":"Route 'auth' (file:auth): 1 evidence link(s), subject kind file; query match on id, label, subject, target","evidence":[{"sourceKind":"local_trace_row","subject":"auth","rowIds":[1]}]}]}
+{"schemaVersion":"1.0.0","hints":[{"routeId":"file:auth","target":"file:auth","label":"auth","rank":1,"relevance":3000000001,"reason":"Route 'auth' (file:auth): 1 evidence link(s), subject kind file; query match on id, label, subject, target","evidence":[{"sourceKind":"local_trace_row","subject":"auth","rowIds":[1]}]}]}
 ```
 
 **Example output (zero matches):**
@@ -365,7 +365,7 @@ scryrs route explain . --query "authentication"
 Generates validated review-only `ProposalDocument` inbox artifacts from hotspot and graph evidence.
 
 | Field | Value |
-|-------|-------|
+| ------- | ------- |
 | Input | Required local directory `<PATH>` containing `.scryrs/hotspots.json` and `.scryrs/graph.json` |
 | Output | Plain-text count on stdout; individual proposal JSON files under `<PATH>/.scryrs/proposals/` |
 | Exit 0 | Proposals generated and written successfully |
@@ -384,8 +384,8 @@ Generates validated review-only `ProposalDocument` inbox artifacts from hotspot 
 Reviews inbox proposal artifacts without mutating the inbox file itself.
 
 | Subcommand | Input | Output | Exit 0 | Exit 1 | Exit 2 |
-|-------|-------|-------|-------|-------|-------|
-| `proposals list <PATH> [--state pending|accepted|rejected|all]` | Repository path containing `.scryrs/proposals/` and optional `.scryrs/accepted/` / `.scryrs/rejected/` | Deterministic JSON array of proposal rows sorted by `proposalId` ascending | Rows emitted successfully | Serialization failure writing stdout | Invalid filter, invalid proposal/review artifact, conflicting accepted+rejected state, or unreadable/malformed input artifact |
+| ------- | ------- | ------- | ------- | ------- | ------- |
+| `proposals list <PATH> [--state pending | accepted | rejected | all]` | Repository path containing `.scryrs/proposals/` and optional `.scryrs/accepted/` / `.scryrs/rejected/` | Deterministic JSON array of proposal rows sorted by `proposalId` ascending | Rows emitted successfully | Serialization failure writing stdout | Invalid filter, invalid proposal/review artifact, conflicting accepted+rejected state, or unreadable/malformed input artifact |
 | `proposals accept <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>` | Valid proposal inbox file plus explicit review metadata | No stdout; writes `.scryrs/accepted/{proposalId}.json` | Accepted artifact written, or idempotent byte-identical rerun | Filesystem write or serialization failure | Unknown proposal ID, invalid proposal document, invalid metadata, conflicting opposite-outcome artifact, or same-outcome overwrite with different bytes |
 | `proposals reject <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>` | Valid proposal inbox file plus explicit review metadata | No stdout; writes `.scryrs/rejected/{proposalId}.json` | Rejected artifact written, or idempotent byte-identical rerun | Filesystem write or serialization failure | Unknown proposal ID, invalid proposal document, invalid metadata, conflicting opposite-outcome artifact, or same-outcome overwrite with different bytes |
 
@@ -402,7 +402,7 @@ Reviews inbox proposal artifacts without mutating the inbox file itself.
 Publishes accepted knowledge explicitly from reviewed `.scryrs/accepted/*.json` artifacts. Proposal review remains ledger-only: `scryrs proposals accept` and `scryrs proposals reject` do **not** write generic Markdown output, Rspress `accepted-knowledge/` pages, or `_nav.json` updates.
 
 | Subcommand | Input | Output | Exit 0 | Exit 1 | Exit 2 |
-|-------|-------|-------|-------|-------|-------|
+| ------- | ------- | ------- | ------- | ------- | ------- |
 | `publish markdown <PATH> --output <DIR>` | Repository path containing reviewed `.scryrs/accepted/*.json` decisions and caller-selected output root | Deterministic single-line JSON summary on stdout with `command`, `mode`, `schemaVersion`, `count`, and `paths` | Accepted Markdown-backed review decisions published successfully | Runtime or filesystem failure writing output | Missing/unknown subcommand or flag, malformed accepted artifact, or other publish-input validation failure |
 | `publish rspress <PATH> --docs-root <DIR>` | Repository path containing reviewed `.scryrs/accepted/*.json` decisions and Rspress docs root with optional `_nav.json` | Deterministic single-line JSON summary on stdout with `command`, `mode`, `schemaVersion`, `count`, and `entries` | Accepted Markdown-backed review decisions published successfully | Runtime or filesystem failure writing docs output | Missing/unknown subcommand or flag, malformed accepted artifact, malformed `_nav.json`, or other publish-input validation failure |
 
@@ -420,7 +420,7 @@ Publishes accepted knowledge explicitly from reviewed `.scryrs/accepted/*.json` 
 Install the scryrs trace hook for a supported agent harness into the current working directory. **Hook install only:** `init` is mode-independent, needs no configuration, is idempotent, never prompts, and cannot fail on missing ingest config. It never reads or writes `scryrs.json` or the `.scryrs/` scaffold — transport configuration is owned exclusively by `scryrs setup <mode>`.
 
 | Field | Value |
-|-------|-------|
+| ------- | ------- |
 | Input | Required `--agent <NAME>` argument. Supported harnesses: `claude-code`, `pi`. No other flags. |
 | Output | Deterministic, hook-focused next-step instructions on stdout (plain text): confirms the hook was installed and directs the operator to run `scryrs setup <mode>` and reload their agent harness. No remote ingest URL or `scryrs up` guidance. Error diagnostics on stderr. |
 | Exit 0 | Hook installed successfully |
@@ -441,7 +441,7 @@ Install the scryrs trace hook for a supported agent harness into the current wor
 Configure runtime trace transport. This is the **only** command that writes `scryrs.json` `remote` and the `.scryrs/` config scaffold; it is independent of `init` (it installs no hook and does not require one). `mode` is a required positional argument.
 
 | Field | Value |
-|-------|-------|
+| ------- | ------- |
 | Input | Required positional `mode` (`local` or `live`). Live flags: `--ingest-url`, `--workspace-id`, `--agent-id`, `--repository-id`, `--with-compose`, `--docker-network`, `--no-interactive`. |
 | Output | Deterministic next-step instructions on stdout (plain text). Error diagnostics on stderr. |
 | Exit 0 | Transport configured successfully |
@@ -474,7 +474,7 @@ Configure runtime trace transport. This is the **only** command that writes `scr
 Diagnose the current installation and readiness state for the working directory. The command uses the same local-vs-live resolution logic as `scryrs record`, never silently falls back from live to local, and reports findings with three severities: `ok`, `warn`, and `error`.
 
 | Field | Value |
-|-------|-------|
+| ------- | ------- |
 | Input | No required arguments. Optional `--json` flag for machine-readable output. |
 | Output | Human-readable summary on stdout by default, or versioned JSON on stdout when `--json` is used. |
 | Exit 0 | All findings are `ok` or `warn` |
@@ -539,7 +539,7 @@ Diagnose the current installation and readiness state for the working directory.
 Starts a long-lived HTTP server for central trace event ingest and live hotspot query/streaming. Accepts versioned trace-event batches at `POST /v1/trace-events/batch` with deterministic validation and first-writer-wins idempotency. Also serves read-only live hotspot rankings and a Server-Sent Events signal stream.
 
 | Field | Value |
-|-------|-------|
+| ------- | ------- |
 | Input | No required arguments. Optional flags: `--bind` (default `127.0.0.1`), `--port` (default `8081`), `--store` (default `.scryrs/server.db`) |
 | Output | HTTP server with three REST endpoints (see table below). Startup message written to stderr. |
 | Exit 0 | Server shut down cleanly (SIGINT/SIGTERM) |
@@ -549,7 +549,7 @@ Starts a long-lived HTTP server for central trace event ingest and live hotspot 
 **REST API contract:**
 
 | Endpoint | Method | Request Body / Params | Response |
-|----------|--------|-----------------------|----------|
+| ---------- | -------- | ----------------------- | ---------- |
 | `/v1/trace-events/batch` | POST | `ServerIngestEnvelope` (JSON) | `200 OK` with `BatchIngestResponse` (JSON) containing `accepted_count`, `duplicate_count`, `rejected_count`, `received_count`, per-item `events` array with status and diagnostics, and `received_at` timestamp. `400 Bad Request` for malformed envelope, unsupported version, or missing identity fields. |
 | `/v1/repositories/{repository_id}/hotspots` | GET | `?window=cumulative` (default, only supported value), optional `?session_id=<id>` | `200 OK` with `LiveHotspotsResponse` (JSON) containing `schemaVersion`, `repositoryId`, `cursor`, `generatedAt`, and ranked `entries`. `400 Bad Request` for unsupported `window` values. |
 | `/v1/repositories/{repository_id}/signals` | GET | Optional `?after=<signal_id>` (cursor for replay/resume) | `200 OK` with `text/event-stream` (SSE). Each event carries `id: <signal_id>` and `data: <HotspotSignal JSON>`. The stream replays persisted signals with `id > after`, then continues with live signals. Includes a 15-second `keep-alive` heartbeat. |
@@ -668,7 +668,7 @@ Starts the embedded Vue.js dashboard HTTP server in one of two explicit modes:
 - **Live mode:** proxies live hotspot rankings and hotspot-signal SSE from `scryrs server` when both `--server-url` and `--repository-id` are provided.
 
 | Field | Value |
-|-------|-------|
+| ------- | ------- |
 | Input | No required arguments. Optional flags: `--port` (default `8080`), `-p <PORT>`, `--bind` (default `127.0.0.1`), `-b <ADDR>`, `--server-url <URL>`, `--repository-id <ID>`, `--no-open` (flag, no value), `--dev` (flag, no value) |
 | Output | HTTP server with same-origin REST/SSE proxy endpoints. SPA served at `GET /` and `GET /assets/*`. Non-API, non-asset paths fall through to `index.html` for Vue Router push-state. |
 | Exit 0 | Server shut down cleanly (SIGINT/SIGTERM) |
@@ -682,14 +682,14 @@ Starts the embedded Vue.js dashboard HTTP server in one of two explicit modes:
 **REST/SSE API contract:**
 
 | Endpoint | Mode | Response |
-|----------|------|----------|
-| `GET /api/meta` | local + live | `200 OK` with `{ "mode": "local"|"live", "repositoryPath": "<absolute path>", "repositoryId": string|null }`. |
+| ---------- | ------ | ---------- |
+| `GET /api/meta` | local + live | `200 OK` with `{ "mode": "local" | "live", "repositoryPath": "<absolute path>", "repositoryId": string | null }`. |
 | `GET /api/hotspots` | local | `200 OK` with `.scryrs/hotspots.json` content as JSON. `404 Not Found` if no hotspot report exists. |
 | `GET /api/hotspots` | live | `200 OK` with the normalized live rankings payload from `GET /v1/repositories/{repository_id}/hotspots?window=cumulative`, preserving upstream `cursor`. `502 Bad Gateway` when the configured server is unreachable or returns a non-success response. |
 | `GET /api/signals?after=<id>` | live | `200 OK` with `text/event-stream`, proxied from `GET /v1/repositories/{repository_id}/signals?after=<id>`. The dashboard streams replayed and live events through without buffering the full upstream response. |
 | `GET /api/sessions` | local | `200 OK` with JSON array of session objects (`sessionId`, `startedAt`, `endedAt`, `eventCount`, `source`), ordered by `startedAt DESC`, default limit 50. `404 Not Found` if no `.scryrs/scryrs.db`. `502 Bad Gateway` if store is corrupt. |
 | `GET /api/sessions/:sessionId` | local | `200 OK` with `{ "session": { ... }, "events": [ ... ] }` — full session detail including all events. `404 Not Found` if session does not exist. `502 Bad Gateway` if store is corrupt. |
-| `GET /api/events` | local | `200 OK` with `{ events: [...], nextCursor: string|null }`, cursor-based pagination via`?limit=N&cursor=<token>&session_id=<id>`. |
+| `GET /api/events` | local | `200 OK` with `{ events: [...], nextCursor: string | null }`, cursor-based pagination via`?limit=N&cursor=<token>&session_id=<id>`. |
 | `GET /api/sessions`, `GET /api/sessions/:sessionId`, `GET /api/events` | live | `404 Not Found` with an explanation that the route is unavailable in live mode. |
 
 **SPA contract:** The SPA is a Vue 3 application built with Vite, Bun, Tailwind CSS v4, and shadcn-vue, then embedded in the binary via `rust-embed`. Local mode shows Hotspots, Sessions, Events, and About. Live mode shows Hotspots, Signals, and About, hides Sessions/Events from navigation, and renders readable unavailable views on direct navigation to local-only routes. The Signals view owns reconnect behavior in the browser: it starts at `/api/signals?after=0`, tracks the last seen SSE id in memory, reconnects with `?after=<last_seen_id>`, and ignores replay duplicates on resume.
@@ -697,7 +697,7 @@ Starts the embedded Vue.js dashboard HTTP server in one of two explicit modes:
 ## Global flags
 
 | Flag | Behavior | Exit code |
-|------|----------|-----------|
+| ------ | ---------- | ----------- |
 | `-h`, `--help` | Help text to stdout | 0 |
 | `-V`, `--version` | Version string to stdout | 0 |
 | `-hj`, `--help-json` | Machine-readable CLI surface document to stdout | 0 |
@@ -715,7 +715,7 @@ The `--help-json` flag emits a versioned JSON document describing the complete C
 **Top-level fields:**
 
 | Field | Type | Description |
-|-------|------|-------------|
+| ------- | ------ | ------------- |
 | `surfaceVersion` | string | Semver version of the surface document format (independent of output envelope `schemaVersion`) |
 | `binary` | string | Binary name (`"scryrs"`) |
 | `commands` | array | Command entries, each with `name`, `description`, `arguments`, and `output` metadata |
@@ -741,7 +741,7 @@ Agents should check `surfaceVersion` before parsing to detect format changes. Th
 ## Exit-code policy
 
 | Code | Meaning |
-|------|---------|
+| ------ | --------- |
 | 0 | Hotspots, graph, route, and route-explain artifacts written successfully (route explain includes zero-match results); proposals written successfully; publish completed successfully; record local accepted all events; record remote accepted all events (duplicates non-fatal); init installed hook; doctor reported only `ok`/`warn` findings; dashboard/server shut down cleanly; hook always fail-open; help/version/surface display. |
 | 1 | Hotspots/graph/route stdout or artifact write failure; record rejected one or more events or hit output I/O error; propose validation, directory creation, serialization, or file write failure; publish runtime/filesystem failure; init I/O error; doctor output write or serialization failure; dashboard/server startup or runtime I/O failure. |
 | 2 | Usage error. Also: hotspots missing/corrupt store; graph missing/malformed hotspots input; route missing/malformed/schema-mismatched graph input; route explain missing PATH, missing --query, or missing/malformed/schema-mismatched routes.json; propose missing/malformed hotspot or graph input; publish missing/unknown subcommand, missing required flag, malformed accepted artifact, or malformed `_nav.json`; record local fatal I/O error; record remote identity/transport failure; init unsupported harness or collision; doctor structural error findings (malformed config, unreadable store, unusable configured live mode, unreachable live server); dashboard invalid flags, invalid bind address, or partial live-mode configuration; server invalid port/bind/store or feature not compiled. |
@@ -796,7 +796,7 @@ All error messages and human-facing diagnostics are written to stderr.
 
 **Input:** Explicit local directory path containing `.scryrs/routes.json` and a required `--query <TEXT>` argument.
 
-**Output:** Parseable JSON `RouteHintDocument` on stdout. Each matching hint's `reason` appends `"; query match on <fields>"`. Zero matches produces a valid document with empty `hints` array.
+**Output:** Parseable JSON `RouteHintDocument` on stdout. Each matching hint appends `"; query match on <fields>"` to `reason` and populates numeric `relevance` as `tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999)`. Zero matches produces a valid document with empty `hints` array.
 
 **Exit codes:**
 
@@ -804,7 +804,7 @@ All error messages and human-facing diagnostics are written to stderr.
 - Exit 1: Serialization or stdout write failure.
 - Exit 2: Missing PATH, missing `--query`, missing `.scryrs/routes.json`, malformed route artifact, or route schema version mismatch.
 
-**Match algorithm:** Case-insensitive substring match against `label`, `subject`, `id`, `target`, `kind`, and `evidence_links[].subject`. Matches are tiered: exact (tier 3) > prefix (tier 2) > substring (tier 1). Within each tier, manifest entry sort order (by `id` ascending) is the final tie-break. Only entries that match at least one field appear in the output.
+**Match algorithm:** Case-insensitive substring match against `label`, `subject`, `id`, `target`, `kind`, and `evidence_links[].subject`. Matches are tiered: exact (tier 3) > prefix (tier 2) > substring (tier 1). Ordering is authoritative on `(tier DESC, score DESC, count DESC, manifest_index ASC, route_id ASC)`, where `score` is the saturating sum of `evidenceLinks[].score.unwrap_or(0)` and `count` is evidence-link count. The packed `relevance` value is a display-friendly derivative of that tuple, not the sort key. Only entries that match at least one field appear in the output.
 
 ### Propose command
 
