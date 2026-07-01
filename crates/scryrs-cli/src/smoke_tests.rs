@@ -9,6 +9,7 @@ fn public_run_entrypoint_no_panic() {
     // hotspots with no store exits 2 (missing store).
     assert_eq!(run(["hotspots", "/tmp"]), 2);
     assert_eq!(run(["record", "--file", "/nonexistent"]), 2);
+    assert_eq!(run(["publish"]), 2);
     assert_eq!(run(["up"]), 2);
     assert_eq!(run(Vec::<&str>::new()), 0);
     assert_eq!(run(["unknown"]), 2);

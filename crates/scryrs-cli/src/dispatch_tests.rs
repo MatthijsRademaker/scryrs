@@ -369,7 +369,7 @@ fn help_json_output_does_not_contain_placeholder_wording() {
 }
 
 #[test]
-fn doctor_appears_in_help_and_help_json_output() {
+fn doctor_and_publish_appear_in_help_and_help_json_output() {
     let mut help_out = Vec::new();
     let mut json_out = Vec::new();
     let mut err = Vec::new();
@@ -385,6 +385,14 @@ fn doctor_appears_in_help_and_help_json_output() {
         help.contains("installation and readiness diagnostic command"),
         "--help must describe doctor as installation/readiness diagnostic, got:\n{help}"
     );
+    assert!(
+        help.contains("scryrs publish markdown <PATH> --output <DIR>"),
+        "--help must list publish markdown, got:\n{help}"
+    );
+    assert!(
+        help.contains("scryrs publish rspress <PATH> --docs-root <DIR>"),
+        "--help must list publish rspress, got:\n{help}"
+    );
 
     assert_eq!(
         run_with_writers(["--help-json"], &mut json_out, &mut err),
@@ -395,6 +403,22 @@ fn doctor_appears_in_help_and_help_json_output() {
     assert!(
         help_json.contains("\"name\":\"doctor\""),
         "--help-json must list doctor command, got:\n{help_json}"
+    );
+    assert!(
+        help_json.contains("\"surfaceVersion\":\"0.14.0\""),
+        "--help-json must bump surfaceVersion to 0.14.0, got:\n{help_json}"
+    );
+    assert!(
+        help_json.contains("\"name\":\"publish\""),
+        "--help-json must list publish command, got:\n{help_json}"
+    );
+    assert!(
+        help_json.contains("\"name\":\"markdown\""),
+        "--help-json must list publish markdown subcommand, got:\n{help_json}"
+    );
+    assert!(
+        help_json.contains("\"name\":\"rspress\""),
+        "--help-json must list publish rspress subcommand, got:\n{help_json}"
     );
 }
 
@@ -492,6 +516,22 @@ fn dashboard_with_unknown_flag_exits_2() {
 }
 
 // --- Server command tests ---
+
+#[test]
+fn publish_help_exits_0_and_lists_modes() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(["publish", "--help"], &mut out, &mut err),
+        0
+    );
+    assert!(err.is_empty());
+    let help = String::from_utf8_lossy(&out);
+    assert!(help.contains("scryrs publish markdown <PATH> --output <DIR>"));
+    assert!(help.contains("scryrs publish rspress <PATH> --docs-root <DIR>"));
+    assert!(help.contains("Publishing reads .scryrs/accepted/ only"));
+}
 
 #[test]
 fn server_appears_in_help_json_output() {
@@ -1388,8 +1428,8 @@ fn help_json_contains_grouped_proposals_surface_and_bumped_version() {
     assert!(err.is_empty());
     let json_str = String::from_utf8_lossy(&out);
     assert!(
-        json_str.contains("\"surfaceVersion\":\"0.13.0\""),
-        "--help-json must bump surfaceVersion to 0.13.0, got:\n{json_str}"
+        json_str.contains("\"surfaceVersion\":\"0.14.0\""),
+        "--help-json must bump surfaceVersion to 0.14.0, got:\n{json_str}"
     );
     assert!(
         json_str.contains("\"name\":\"proposals\""),

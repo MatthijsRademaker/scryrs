@@ -20,6 +20,7 @@ mod hook;
 mod hotspots;
 mod proposals;
 mod propose;
+mod publish;
 mod record;
 #[cfg(feature = "core")]
 mod remote_config;
@@ -45,6 +46,8 @@ mod hotspot_integration_tests;
 mod init_tests;
 #[cfg(test)]
 mod proposals_tests;
+#[cfg(test)]
+mod publish_tests;
 #[cfg(all(test, feature = "core"))]
 mod record_tests;
 #[cfg(test)]

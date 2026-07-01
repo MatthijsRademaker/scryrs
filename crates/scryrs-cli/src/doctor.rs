@@ -724,11 +724,14 @@ fn available_commands() -> Vec<String> {
         "record",
         "hook",
         "init",
+        "setup",
+        "up",
         "doctor",
         "graph",
         "route",
         "propose",
         "proposals",
+        "publish",
         "dashboard",
         "server",
     ]
@@ -1209,6 +1212,26 @@ mod tests {
                 .unwrap_or_default()
                 .contains("not initialized")
         );
+    }
+
+    #[test]
+    fn doctor_command_surface_reports_setup_up_publish_and_rspress_in_default_binary() {
+        let temp = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let (exit, stdout, stderr) = run_doctor(&["doctor", "--json"], temp.path());
+
+        assert_eq!(exit, 0);
+        assert!(stderr.is_empty());
+        let report = read_json_report(&stdout);
+        let commands = report["commandSurface"]["commands"]
+            .as_array()
+            .unwrap_or_else(|| panic!("commands array: {report}"));
+        assert!(commands.iter().any(|value| value == "setup"));
+        assert!(commands.iter().any(|value| value == "up"));
+        assert!(commands.iter().any(|value| value == "publish"));
+        let features = report["commandSurface"]["features"]
+            .as_array()
+            .unwrap_or_else(|| panic!("features array: {report}"));
+        assert!(features.iter().any(|value| value == "rspress"));
     }
 
     #[test]

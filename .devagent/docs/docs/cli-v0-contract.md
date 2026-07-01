@@ -6,13 +6,13 @@ scryrs supports three current workflow paths:
 
 - **Central live-ingest flow (default):** `scryrs init --agent <NAME>` installs the harness hook, then `scryrs setup live` writes the committed live config (`ingest_url`, `workspace_id`) into `scryrs.json` `remote` — the single committed source of truth. The self-host opt-in `scryrs setup live --with-compose` additionally scaffolds `.scryrs/compose.yml` plus an overrides-only `.scryrs/.env` and records `remote.docker_network`; `scryrs up` starts that managed server scaffold on the external Docker network named by `remote.docker_network`. Then `scryrs record` or `scryrs hook` submits events to the configured live server endpoint — typically `http://scryrs:8081` for container-attached agents. The server provides live hotspot rankings and an SSE signal stream for real-time monitoring across multiple agent instances.
 - **Local observe → detect loop:** Run `scryrs init --agent <NAME>` then `scryrs setup local`, then `scryrs hook` / `scryrs record --mode local` to capture trace events locally, `scryrs hotspots` to score them, and `scryrs dashboard --mode local` to browse ranked hotspots, sessions, and events — all from `.scryrs/` in your project root.
-- **Promote → review artifact flow:** Run `scryrs graph`, `scryrs route`, and `scryrs propose` to produce machine-readable graph, route, and inbox proposal artifacts, then use `scryrs proposals list|accept|reject` to review those inbox proposals without mutating source-of-truth docs or graph/route artifacts.
+- **Promote → review → publish artifact flow:** Run `scryrs graph`, `scryrs route`, and `scryrs propose` to produce machine-readable graph, route, and inbox proposal artifacts, then use `scryrs proposals list|accept|reject` to review those inbox proposals without mutating source-of-truth docs or graph/route artifacts. Publish approved knowledge separately with `scryrs publish markdown` or `scryrs publish rspress`.
 
 For hotspot interpretation and scoring rationale, see [Hotspots](./hotspots.md). For harness integration rules and fail-open guarantees, see [Trace Hook Contract](./trace-hook-contract.md).
 
 ---
 
-The current public CLI surface provides twelve implemented root commands: `hotspots`, `record`, `hook`, `init`, `up`, `doctor`, `graph`, `route`, `propose`, `proposals`, `dashboard`, and `server`. This document serves agent integrators and follow-up feature developers.
+The current public CLI surface provides thirteen implemented root commands: `hotspots`, `record`, `hook`, `init`, `up`, `doctor`, `graph`, `route`, `propose`, `proposals`, `publish`, `dashboard`, and `server`. This document serves agent integrators and follow-up feature developers.
 
 ## Binary
 
@@ -391,7 +391,25 @@ Reviews inbox proposal artifacts without mutating the inbox file itself.
 - `accept` copies proposal `targetType`, `proposedContent`, and `evidence` into the accepted `ProposalReviewDecision`.
 - `reject` copies only proposal `evidence`; rejected decisions omit `targetType` and `acceptedContent`.
 - Review commands never mutate `.scryrs/proposals/{proposalId}.json`, `.devagent/docs/`, `.scryrs/graph.json`, or `.scryrs/routes.json`.
-- `--help-json` represents `proposals` as a grouped command with nested `list`, `accept`, and `reject` subcommands. `surfaceVersion` is now `0.11.0`.
+- `--help-json` represents `proposals` as a grouped command with nested `list`, `accept`, and `reject` subcommands. `surfaceVersion` is now `0.14.0`.
+
+### `scryrs publish markdown|rspress`
+
+Publishes accepted knowledge explicitly from reviewed `.scryrs/accepted/*.json` artifacts. Proposal review remains ledger-only: `scryrs proposals accept` and `scryrs proposals reject` do **not** write generic Markdown output, Rspress `accepted-knowledge/` pages, or `_nav.json` updates.
+
+| Subcommand | Input | Output | Exit 0 | Exit 1 | Exit 2 |
+|-------|-------|-------|-------|-------|-------|
+| `publish markdown <PATH> --output <DIR>` | Repository path containing reviewed `.scryrs/accepted/*.json` decisions and caller-selected output root | Deterministic single-line JSON summary on stdout with `command`, `mode`, `schemaVersion`, `count`, and `paths` | Accepted Markdown-backed review decisions published successfully | Runtime or filesystem failure writing output | Missing/unknown subcommand or flag, malformed accepted artifact, or other publish-input validation failure |
+| `publish rspress <PATH> --docs-root <DIR>` | Repository path containing reviewed `.scryrs/accepted/*.json` decisions and Rspress docs root with optional `_nav.json` | Deterministic single-line JSON summary on stdout with `command`, `mode`, `schemaVersion`, `count`, and `entries` | Accepted Markdown-backed review decisions published successfully | Runtime or filesystem failure writing docs output | Missing/unknown subcommand or flag, malformed accepted artifact, malformed `_nav.json`, or other publish-input validation failure |
+
+**Behavior notes:**
+
+- `publish markdown` delegates to `scryrs-adapter-markdown::publish_accepted_markdown()` and writes plain Markdown under `<DIR>/<target-type>/<proposal-id>.md`.
+- `publish markdown` never deletes stale generic Markdown files in the caller-selected output root.
+- `publish rspress` delegates to `scryrs-adapter-rspress::publish_accepted_rspress()` and writes `<DIR>/accepted-knowledge/...` pages plus deterministic `_nav.json` updates.
+- `publish rspress` validates `_nav.json` before clearing or rewriting `accepted-knowledge/`, so malformed nav input fails with exit `2` and no partial write.
+- Pending proposal inbox files under `.scryrs/proposals/` and rejected review decisions under `.scryrs/rejected/` never publish in either mode.
+- `--help-json` represents `publish` as a grouped command with nested `markdown` and `rspress` subcommands. `surfaceVersion` is now `0.14.0`.
 
 ### `scryrs init --agent <NAME>`
 
@@ -486,8 +504,8 @@ Diagnose the current installation and readiness state for the working directory.
   "mode": "local",
   "overallStatus": "warn",
   "commandSurface": {
-    "commands": ["hotspots", "record", "hook", "init", "doctor", "graph", "route", "propose", "proposals", "dashboard", "server"],
-    "features": ["core", "dashboard", "graph", "curator", "markdown", "runtime", "guardrails", "server"]
+    "commands": ["hotspots", "record", "hook", "init", "setup", "up", "doctor", "graph", "route", "propose", "proposals", "publish", "dashboard", "server"],
+    "features": ["core", "dashboard", "graph", "curator", "markdown", "runtime", "guardrails", "server", "rspress"]
   },
   "findings": [
     {
@@ -720,9 +738,9 @@ Agents should check `surfaceVersion` before parsing to detect format changes. Th
 
 | Code | Meaning |
 |------|---------|
-| 0 | Hotspots, graph, route, and route-explain artifacts written successfully (route explain includes zero-match results); proposals written successfully; record local accepted all events; record remote accepted all events (duplicates non-fatal); init installed hook; doctor reported only `ok`/`warn` findings; dashboard/server shut down cleanly; hook always fail-open; help/version/surface display. |
-| 1 | Hotspots/graph/route stdout or artifact write failure; record rejected one or more events or hit output I/O error; propose validation, directory creation, serialization, or file write failure; init I/O error; doctor output write or serialization failure; dashboard/server startup or runtime I/O failure. |
-| 2 | Usage error. Also: hotspots missing/corrupt store; graph missing/malformed hotspots input; route missing/malformed/schema-mismatched graph input; route explain missing PATH, missing --query, or missing/malformed/schema-mismatched routes.json; propose missing/malformed hotspot or graph input; record local fatal I/O error; record remote identity/transport failure; init unsupported harness or collision; doctor structural error findings (malformed config, unreadable store, unusable configured live mode, unreachable live server); dashboard invalid flags, invalid bind address, or partial live-mode configuration; server invalid port/bind/store or feature not compiled. |
+| 0 | Hotspots, graph, route, and route-explain artifacts written successfully (route explain includes zero-match results); proposals written successfully; publish completed successfully; record local accepted all events; record remote accepted all events (duplicates non-fatal); init installed hook; doctor reported only `ok`/`warn` findings; dashboard/server shut down cleanly; hook always fail-open; help/version/surface display. |
+| 1 | Hotspots/graph/route stdout or artifact write failure; record rejected one or more events or hit output I/O error; propose validation, directory creation, serialization, or file write failure; publish runtime/filesystem failure; init I/O error; doctor output write or serialization failure; dashboard/server startup or runtime I/O failure. |
+| 2 | Usage error. Also: hotspots missing/corrupt store; graph missing/malformed hotspots input; route missing/malformed/schema-mismatched graph input; route explain missing PATH, missing --query, or missing/malformed/schema-mismatched routes.json; propose missing/malformed hotspot or graph input; publish missing/unknown subcommand, missing required flag, malformed accepted artifact, or malformed `_nav.json`; record local fatal I/O error; record remote identity/transport failure; init unsupported harness or collision; doctor structural error findings (malformed config, unreadable store, unusable configured live mode, unreachable live server); dashboard invalid flags, invalid bind address, or partial live-mode configuration; server invalid port/bind/store or feature not compiled. |
 
 All error messages and human-facing diagnostics are written to stderr.
 
@@ -802,7 +820,7 @@ All error messages and human-facing diagnostics are written to stderr.
 
 ### Proposals command
 
-**When to call:** An agent should call `scryrs proposals list <PATH>` to inspect pending versus terminal review state, `scryrs proposals accept <PATH> <ID> ...` to publish an accepted `ProposalReviewDecision`, or `scryrs proposals reject <PATH> <ID> ...` to publish a rejected `ProposalReviewDecision`.
+**When to call:** An agent should call `scryrs proposals list <PATH>` to inspect pending versus terminal review state, `scryrs proposals accept <PATH> <ID> ...` to write an accepted `ProposalReviewDecision`, or `scryrs proposals reject <PATH> <ID> ...` to write a rejected `ProposalReviewDecision`. Publishing docs output remains a separate `scryrs publish ...` step.
 
 **Input:**
 
@@ -965,7 +983,7 @@ All error messages and human-facing diagnostics are written to stderr.
 
 ## Out of scope for v0
 
-Any command other than the twelve implemented root commands (`hotspots`, `record`, `hook`, `init`, `up`, `doctor`, `graph`, `route`, `propose`, `proposals`, `dashboard`, `server`) is unrecognized and exits 2 with a usage error.
+Any command other than the thirteen implemented root commands (`hotspots`, `record`, `hook`, `init`, `up`, `doctor`, `graph`, `route`, `propose`, `proposals`, `publish`, `dashboard`, `server`) is unrecognized and exits 2 with a usage error.
 
 ## Local Development Testing
 
