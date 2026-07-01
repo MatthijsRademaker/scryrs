@@ -199,12 +199,15 @@ MATCHING\n\
     score is the saturating sum of evidence link scores; count is evidence link count.\n\n\
 OUTPUT\n\
   Single-line JSON RouteHintDocument with schemaVersion and hints array.\n\
-  Each hint carries routeId, target, label, rank, relevance, reason, and evidence.\n\
+  Each hint carries routeId, stable target node id, optional loadTarget,\n\
+  label, rank, relevance, reason, and evidence. File loadTarget references are\n\
+  repository-relative paths, doc_page references are project-docs/<slug>, and\n\
+  search / symbol / domain_term / doc_group routes stay explicitly non_loadable.\n\
   rank remains the manifest ordinal; explain relevance is the packed score\n\
   tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999).\n\
-  plain route projection omits relevance. The reason field includes a\n\
-  \"; query match on <fields>\" suffix. Zero matches produces a valid\n\
-  document with an empty hints array.\n\n\
+  plain route projection omits relevance. The reason field includes load target\n\
+  kind and appends a \"; query match on <fields>\" suffix. Zero matches\n\
+  produces a valid document with an empty hints array.\n\n\
 EXIT CODES\n\
   0    Success (including zero-match results)\n\
   1    Serialization or stdout write failure\n\

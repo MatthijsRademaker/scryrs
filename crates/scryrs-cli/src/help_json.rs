@@ -4,7 +4,7 @@ use serde_json::json;
 
 /// Version of the `--help-json` surface document format, independent of
 /// `SCHEMA_VERSION` which governs command output envelopes.
-const SURFACE_VERSION: &str = "0.15.0";
+const SURFACE_VERSION: &str = "0.16.0";
 
 pub(crate) fn cli_surface_doc() -> String {
     let doc = json!({
@@ -469,7 +469,7 @@ pub(crate) fn cli_surface_doc() -> String {
                         },
                         "output": {
                             "mimeType": "application/json",
-                            "description": "Single-line RouteHintDocument JSON with schemaVersion and hints array. rank remains the manifest ordinal; explain relevance is the packed score tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999). The reason field appends '; query match on <fields>' suffix. Zero matches produces a valid document with empty hints array."
+                            "description": "Single-line RouteHintDocument JSON with schemaVersion and hints array. Each hint returns the stable target node id plus optional loadTarget (file, doc_page, or non_loadable). rank remains the manifest ordinal; explain relevance is the packed score tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999). The reason field includes load target kind and appends '; query match on <fields>' suffix. Zero matches produces a valid document with empty hints array."
                         },
                         "exitCodes": {
                             "0": "Success (including zero-match results)",
@@ -480,18 +480,19 @@ pub(crate) fn cli_surface_doc() -> String {
                 ],
                 "output": {
                     "mimeType": "application/json",
-                    "description": "Single-line RouteManifestDocument JSON written to stdout. Also persisted to .scryrs/routes.json."
+                    "description": "Single-line RouteManifestDocument JSON written to stdout. target remains the stable graph-node id; optional loadTarget carries file/doc_page/non_loadable retrieval context. Also persisted to .scryrs/routes.json."
                 },
                 "routeHintOutput": {
                     "mimeType": "application/json",
-                    "description": "Deterministic RouteHintDocument projection derived from the route manifest. Each route entry produces one RouteHintItem with identity, target, label, 1-based ordinal rank, evidence citations, and a template-derived reason. Plain route projection omits relevance; `scryrs route explain <PATH> --query <TEXT>` populates it with the packed explain score tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999).",
+                    "description": "Deterministic RouteHintDocument projection derived from the route manifest. Each route entry produces one RouteHintItem with identity, stable target node id, optional loadTarget, label, 1-based ordinal rank, evidence citations, and a template-derived reason that names the load target kind. Plain route projection omits relevance; `scryrs route explain <PATH> --query <TEXT>` populates it with the packed explain score tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999).",
                     "fields": [
                         {"name": "schemaVersion", "type": "string", "description": "Route hint schema version (always HINT_SCHEMA_VERSION = 1.0.0)", "optional": false},
                         {"name": "hints", "type": "array", "description": "Deterministically ordered array of RouteHintItem objects", "optional": false}
                     ],
                     "hintItemFields": [
                         {"name": "routeId", "type": "string", "description": "Source route entry id", "optional": false},
-                        {"name": "target", "type": "string", "description": "Normalized load target", "optional": false},
+                        {"name": "target", "type": "string", "description": "Stable graph-node identity string copied from RouteEntry.target", "optional": false},
+                        {"name": "loadTarget", "type": "object|null", "description": "Optional structured load target with kind file, doc_page, or non_loadable; file references are repository-relative paths and doc_page references are canonical project-docs/<slug> values", "optional": true},
                         {"name": "label", "type": "string", "description": "Human-readable label", "optional": false},
                         {"name": "rank", "type": "number", "description": "1-based ordinal rank from manifest entry sort order (deterministic ordinal, not final ranking)", "optional": false},
                         {"name": "relevance", "type": "number|null", "description": "Optional relevance score — omitted by plain route projection and populated for explain matches using the packed deterministic formula", "optional": true},
@@ -504,9 +505,10 @@ pub(crate) fn cli_surface_doc() -> String {
                             {
                                 "routeId": "file:src/main.rs",
                                 "target": "file:src/main.rs",
+                                "loadTarget": {"kind": "file", "reference": "src/main.rs"},
                                 "label": "src/main.rs",
                                 "rank": 1,
-                                "reason": "Route 'src/main.rs' (file:src/main.rs): 2 evidence link(s), subject kind file",
+                                "reason": "Route 'src/main.rs' (file:src/main.rs): 2 evidence link(s), subject kind file, load target file",
                                 "evidence": [
                                     {
                                         "sourceKind": "local_trace_row",
@@ -517,7 +519,7 @@ pub(crate) fn cli_surface_doc() -> String {
                             }
                         ]
                     },
-                    "rankingPolicy": "Rank is a deterministic 1-based ordinal derived from manifest entry sort order (by id ascending). Explain ordering uses (tier DESC, score DESC, count DESC, manifest_index ASC, route_id ASC); packed relevance is a display-friendly derivative of that tuple, not the sort key. Plain route projection still omits relevance."
+                    "rankingPolicy": "Rank is a deterministic 1-based ordinal derived from manifest entry sort order (by id ascending). Explain ordering uses (tier DESC, score DESC, count DESC, manifest_index ASC, route_id ASC); packed relevance is a display-friendly derivative of that tuple, not the sort key. Plain route projection still omits relevance, while reason strings mention load target kind."
                 }
             }
         ],

@@ -484,8 +484,8 @@ fn doctor_and_publish_appear_in_help_and_help_json_output() {
         "--help-json must list doctor command, got:\n{help_json}"
     );
     assert!(
-        help_json.contains("\"surfaceVersion\":\"0.15.0\""),
-        "--help-json must bump surfaceVersion to 0.15.0, got:\n{help_json}"
+        help_json.contains("\"surfaceVersion\":\"0.16.0\""),
+        "--help-json must bump surfaceVersion to 0.16.0, got:\n{help_json}"
     );
     assert!(
         help_json.contains("\"name\":\"publish\""),
@@ -1321,7 +1321,14 @@ fn route_hotspot_nodes_remain_ungrouped_in_v1() {
                 "kind": "doc_page",
                 "tags": [],
                 "aliases": [],
-                "evidenceLinks": []
+                "evidenceLinks": [
+                    {
+                        "sourceKind": "doc_reference",
+                        "subject": "graph",
+                        "rowIds": [],
+                        "docRef": "graph"
+                    }
+                ]
             }
         ],
         "edges": [
@@ -1369,6 +1376,11 @@ fn route_hotspot_nodes_remain_ungrouped_in_v1() {
         .find(|r| r["id"].as_str() == Some("doc_page:graph"))
         .expect("doc_page:graph route must exist");
     assert!(doc_entry.get("grouping").is_some());
+    assert_eq!(doc_entry["loadTarget"]["kind"].as_str(), Some("doc_page"));
+    assert_eq!(
+        doc_entry["loadTarget"]["reference"].as_str(),
+        Some("project-docs/graph")
+    );
 }
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
@@ -1421,6 +1433,57 @@ fn route_artifact_written_to_routes_json() {
         serde_json::from_str(&content).expect("routes.json must be valid JSON");
     assert_eq!(doc["schemaVersion"].as_str(), Some("1.0.0"));
     assert!(doc.get("routes").is_some());
+    assert_eq!(
+        doc["routes"][0]["loadTarget"]["kind"].as_str(),
+        Some("file")
+    );
+    assert_eq!(
+        doc["routes"][0]["loadTarget"]["reference"].as_str(),
+        Some("src/main.rs")
+    );
+}
+
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[test]
+fn route_file_kind_without_file_subject_prefix_fails_loudly() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let scryrs_dir = tmp.path().join(".scryrs");
+    fs::create_dir(&scryrs_dir).expect("create .scryrs");
+
+    let graph = serde_json::json!({
+        "schemaVersion": "1.0.0",
+        "metadata": {},
+        "nodes": [
+            {
+                "id": "broken",
+                "label": "src/main.rs",
+                "kind": "file",
+                "tags": [],
+                "aliases": [],
+                "evidenceLinks": []
+            }
+        ],
+        "edges": []
+    });
+    fs::write(
+        scryrs_dir.join("graph.json"),
+        serde_json::to_string(&graph).expect("serialize"),
+    )
+    .expect("write graph.json");
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_eq!(
+        run_with_writers(["route", tmp.path().to_str().unwrap()], &mut out, &mut err,),
+        2
+    );
+    assert!(out.is_empty());
+    assert!(String::from_utf8_lossy(&err).contains(
+        "file routes must resolve to a non-empty repository-relative path without parent traversal"
+    ));
 }
 
 // --- Propose command in help output ---
@@ -1507,8 +1570,8 @@ fn help_json_contains_grouped_proposals_surface_and_bumped_version() {
     assert!(err.is_empty());
     let json_str = String::from_utf8_lossy(&out);
     assert!(
-        json_str.contains("\"surfaceVersion\":\"0.15.0\""),
-        "--help-json must bump surfaceVersion to 0.15.0, got:\n{json_str}"
+        json_str.contains("\"surfaceVersion\":\"0.16.0\""),
+        "--help-json must bump surfaceVersion to 0.16.0, got:\n{json_str}"
     );
     assert!(
         json_str.contains("\"name\":\"proposals\""),
@@ -1541,6 +1604,9 @@ fn route_explain_help_flag_prints_help_and_exits_0() {
     assert!(help.contains("tier 3) > prefix match (tier 2) > substring match (tier 1)"));
     assert!(help.contains("(tier DESC, score DESC, count DESC, manifest_index ASC, route_id ASC)"));
     assert!(help.contains("tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999)"));
+    assert!(help.contains("optional loadTarget"));
+    assert!(help.contains("project-docs/<slug>"));
+    assert!(help.contains("The reason field includes load target"));
     assert!(
         help.contains("rank remains the manifest ordinal; explain relevance is the packed score")
     );
@@ -1732,6 +1798,7 @@ fn route_explain_successful_match_produces_hints() {
                 "subject": "authentication",
                 "label": "Authentication",
                 "target": "file:authentication",
+                "loadTarget": {"kind": "file", "reference": "authentication"},
                 "kind": "file",
                 "evidenceLinks": [
                     {
@@ -1748,6 +1815,7 @@ fn route_explain_successful_match_produces_hints() {
                 "subject": "unrelated",
                 "label": "unrelated",
                 "target": "file:unrelated",
+                "loadTarget": {"kind": "file", "reference": "unrelated"},
                 "kind": "file",
                 "evidenceLinks": []
             }
@@ -1785,9 +1853,14 @@ fn route_explain_successful_match_produces_hints() {
     assert_eq!(hints.len(), 1, "only authentication should match");
     assert_eq!(hints[0]["routeId"].as_str(), Some("file:authentication"));
     assert_eq!(hints[0]["relevance"].as_u64(), Some(2_000_010_001));
+    assert_eq!(hints[0]["loadTarget"]["kind"].as_str(), Some("file"));
+    assert_eq!(
+        hints[0]["loadTarget"]["reference"].as_str(),
+        Some("authentication")
+    );
 
     let reason = hints[0]["reason"].as_str().expect("reason must be string");
-    assert!(reason.contains("query match on"));
+    assert!(reason.contains("load target file; query match on"));
     assert!(!reason.contains("unrelated"));
 }
 
@@ -1811,6 +1884,7 @@ fn route_explain_deterministic_repeatability() {
                 "subject": "authentication",
                 "label": "Authentication",
                 "target": "file:authentication",
+                "loadTarget": {"kind": "file", "reference": "authentication"},
                 "kind": "file",
                 "evidenceLinks": []
             },
@@ -1820,6 +1894,7 @@ fn route_explain_deterministic_repeatability() {
                 "subject": "auth",
                 "label": "auth",
                 "target": "file:auth",
+                "loadTarget": {"kind": "file", "reference": "auth"},
                 "kind": "file",
                 "evidenceLinks": []
             }
@@ -1881,6 +1956,7 @@ fn route_explain_zero_match_emits_empty_hints_exits_0() {
                 "subject": "auth",
                 "label": "auth",
                 "target": "file:auth",
+                "loadTarget": {"kind": "file", "reference": "auth"},
                 "kind": "file",
                 "evidenceLinks": []
             }
@@ -1950,6 +2026,15 @@ fn route_explain_help_json_includes_explain_entry() {
     assert!(
         json_str.contains("tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999)"),
         "--help-json must document packed explain relevance, got:\n{json_str}"
+    );
+    assert!(
+        json_str.contains("\"name\": \"loadTarget\"")
+            || json_str.contains("\"name\":\"loadTarget\""),
+        "--help-json must document loadTarget field, got:\n{json_str}"
+    );
+    assert!(
+        json_str.contains("project-docs/<slug>"),
+        "--help-json must document canonical docs references, got:\n{json_str}"
     );
     // Must not contain "deferred" in explain subcommand description.
     let explain_start = json_str.find("\"name\":\"explain\"").unwrap();

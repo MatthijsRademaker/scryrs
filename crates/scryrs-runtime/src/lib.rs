@@ -1,7 +1,8 @@
 //! Agent-side routing and retrieval helper foundation.
 
 use scryrs_types::{
-    FeatureDescriptor, HINT_SCHEMA_VERSION, RouteHintDocument, RouteHintItem, RouteManifestDocument,
+    FeatureDescriptor, HINT_SCHEMA_VERSION, RouteHintDocument, RouteHintItem, RouteLoadTargetKind,
+    RouteManifestDocument,
 };
 
 pub fn descriptor() -> FeatureDescriptor {
@@ -27,15 +28,17 @@ pub fn hints_from_manifest(manifest: &RouteManifestDocument) -> RouteHintDocumen
         .map(|(i, entry)| {
             let rank = (i + 1) as u32;
             let reason = format!(
-                "Route '{}' ({}): {} evidence link(s), subject kind {}",
+                "Route '{}' ({}): {} evidence link(s), subject kind {}, load target {}",
                 entry.label,
                 entry.id,
                 entry.evidence_links.len(),
-                entry.subject_kind
+                entry.subject_kind,
+                load_target_kind_name(entry.load_target.as_ref())
             );
             RouteHintItem {
                 route_id: entry.id.clone(),
                 target: entry.target.clone(),
+                load_target: entry.load_target.clone(),
                 label: entry.label.clone(),
                 rank,
                 relevance: None,
@@ -48,6 +51,15 @@ pub fn hints_from_manifest(manifest: &RouteManifestDocument) -> RouteHintDocumen
     RouteHintDocument {
         schema_version: HINT_SCHEMA_VERSION.to_string(),
         hints,
+    }
+}
+
+fn load_target_kind_name(load_target: Option<&scryrs_types::RouteLoadTarget>) -> &'static str {
+    match load_target.map(|target| &target.kind) {
+        Some(RouteLoadTargetKind::File) => "file",
+        Some(RouteLoadTargetKind::DocPage) => "doc_page",
+        Some(RouteLoadTargetKind::NonLoadable) => "non_loadable",
+        None => "unknown",
     }
 }
 
@@ -214,7 +226,10 @@ fn classify_match(field_lower: &str, query_lower: &str) -> MatchTier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scryrs_types::{EvidenceLink, EvidenceSourceKind, GraphMetadata, RouteEntry};
+    use scryrs_types::{
+        EvidenceLink, EvidenceSourceKind, GraphMetadata, RouteEntry, RouteLoadTarget,
+        RouteLoadTargetKind,
+    };
 
     fn make_evidence_link(
         source_kind: EvidenceSourceKind,
@@ -254,10 +269,28 @@ mod tests {
             subject: label.into(),
             label: label.into(),
             target: target.into(),
+            load_target: Some(default_load_target(subject_kind, label)),
             kind: subject_kind.into(),
             evidence_links: evidence,
             grouping: None,
             metadata: None,
+        }
+    }
+
+    fn default_load_target(subject_kind: &str, label: &str) -> RouteLoadTarget {
+        match subject_kind {
+            "file" => RouteLoadTarget {
+                kind: RouteLoadTargetKind::File,
+                reference: Some(label.into()),
+            },
+            "doc_page" => RouteLoadTarget {
+                kind: RouteLoadTargetKind::DocPage,
+                reference: Some(format!("project-docs/{label}")),
+            },
+            _ => RouteLoadTarget {
+                kind: RouteLoadTargetKind::NonLoadable,
+                reference: None,
+            },
         }
     }
 
@@ -342,8 +375,45 @@ mod tests {
         assert_eq!(doc.hints.len(), 1);
         assert_eq!(
             doc.hints[0].reason,
-            "Route 'auth' (search:auth): 3 evidence link(s), subject kind search"
+            "Route 'auth' (search:auth): 3 evidence link(s), subject kind search, load target non_loadable"
         );
+    }
+
+    #[test]
+    fn hints_from_manifest_copies_load_target() {
+        let manifest = make_manifest(vec![make_route_entry(
+            "file:src/main.rs",
+            "src/main.rs",
+            "file:src/main.rs",
+            "file",
+            vec![],
+        )]);
+        let doc = hints_from_manifest(&manifest);
+        assert_eq!(doc.hints.len(), 1);
+        let Some(load_target) = doc.hints[0].load_target.as_ref() else {
+            panic!("load target");
+        };
+        assert_eq!(load_target.kind, RouteLoadTargetKind::File);
+        assert_eq!(load_target.reference.as_deref(), Some("src/main.rs"));
+    }
+
+    #[test]
+    fn hints_from_manifest_keeps_non_loadable_routes_explicit() {
+        let manifest = make_manifest(vec![make_route_entry(
+            "domain_term:auth",
+            "auth",
+            "domain_term:auth",
+            "domain_term",
+            vec![],
+        )]);
+        let doc = hints_from_manifest(&manifest);
+        assert_eq!(doc.hints.len(), 1);
+        let Some(load_target) = doc.hints[0].load_target.as_ref() else {
+            panic!("load target");
+        };
+        assert_eq!(load_target.kind, RouteLoadTargetKind::NonLoadable);
+        assert_eq!(load_target.reference, None);
+        assert!(doc.hints[0].reason.contains("load target non_loadable"));
     }
 
     #[test]
@@ -448,6 +518,10 @@ mod tests {
             subject: "zzz".into(),
             label: "zzz".into(),
             target: "file:config".into(),
+            load_target: Some(RouteLoadTarget {
+                kind: RouteLoadTargetKind::File,
+                reference: Some("config".into()),
+            }),
             kind: "file".into(),
             evidence_links: vec![],
             grouping: None,
@@ -508,6 +582,56 @@ mod tests {
         let doc = explain_hints(&manifest, "zzz_nonexistent");
         assert_eq!(doc.schema_version, HINT_SCHEMA_VERSION);
         assert!(doc.hints.is_empty());
+    }
+
+    #[test]
+    fn explain_hints_reason_mentions_doc_page_load_target() {
+        let manifest = make_manifest(vec![make_route_entry(
+            "doc_page:graph",
+            "graph",
+            "doc_page:graph",
+            "doc_page",
+            vec![make_evidence_link(
+                EvidenceSourceKind::DocReference,
+                "graph",
+                vec![],
+            )],
+        )]);
+        let doc = explain_hints(&manifest, "graph");
+        assert_eq!(doc.hints.len(), 1);
+        let Some(load_target) = doc.hints[0].load_target.as_ref() else {
+            panic!("load target");
+        };
+        assert_eq!(load_target.kind, RouteLoadTargetKind::DocPage);
+        assert_eq!(load_target.reference.as_deref(), Some("project-docs/graph"));
+        assert!(
+            doc.hints[0]
+                .reason
+                .contains("load target doc_page; query match on")
+        );
+    }
+
+    #[test]
+    fn explain_hints_reason_mentions_non_loadable_target() {
+        let manifest = make_manifest(vec![make_route_entry(
+            "domain_term:auth",
+            "auth",
+            "domain_term:auth",
+            "domain_term",
+            vec![],
+        )]);
+        let doc = explain_hints(&manifest, "auth");
+        assert_eq!(doc.hints.len(), 1);
+        let Some(load_target) = doc.hints[0].load_target.as_ref() else {
+            panic!("load target");
+        };
+        assert_eq!(load_target.kind, RouteLoadTargetKind::NonLoadable);
+        assert_eq!(load_target.reference, None);
+        assert!(
+            doc.hints[0]
+                .reason
+                .contains("load target non_loadable; query match on")
+        );
     }
 
     #[test]
@@ -675,6 +799,10 @@ mod tests {
             subject: "zzz auth zzz".into(),
             label: "zzz auth zzz".into(),
             target: "file:zzz-auth".into(),
+            load_target: Some(RouteLoadTarget {
+                kind: RouteLoadTargetKind::File,
+                reference: Some("zzz-auth".into()),
+            }),
             kind: "file".into(),
             evidence_links: vec![],
             grouping: None,
@@ -686,6 +814,10 @@ mod tests {
             subject: "auth-prefix".into(),
             label: "auth-prefix".into(),
             target: "file:zzz".into(),
+            load_target: Some(RouteLoadTarget {
+                kind: RouteLoadTargetKind::File,
+                reference: Some("zzz".into()),
+            }),
             kind: "file".into(),
             evidence_links: vec![],
             grouping: None,
@@ -904,7 +1036,7 @@ mod tests {
         assert_eq!(doc.hints.len(), 1);
         assert_eq!(
             doc.hints[0].reason,
-            "Route 'auth' (search:auth): 3 evidence link(s), subject kind search"
+            "Route 'auth' (search:auth): 3 evidence link(s), subject kind search, load target non_loadable"
         );
         // Ensure no query-match suffix leaked into hints_from_manifest.
         assert!(!doc.hints[0].reason.contains("query match on"));
