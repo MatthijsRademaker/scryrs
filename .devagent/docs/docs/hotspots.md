@@ -12,7 +12,7 @@ The core insight: **repeated agent effort around a subject indicates knowledge t
 
 ## How Hotspots Are Computed: the Local Batch Workflow
 
-scryrs hotspots operate on persisted trace evidence through a deterministic batch pipeline:
+`scryrs hotspots <PATH>` defaults to the local deterministic batch pipeline:
 
 ```
 Agent hook captures TraceEvent records
@@ -27,6 +27,31 @@ HotspotsReport emitted to stdout and written to .scryrs/hotspots.json
 Every `scryrs hotspots <PATH>` invocation produces the same output given the same `.scryrs/scryrs.db` — there is no randomness, no model inference, and no time-dependent behavior in scoring. The only wall-clock dependency is the `generatedAt` timestamp in the report envelope.
 
 For the full output contract — including the envelope schema, exit codes, store paths, and artifact file behavior — see the [CLI v0 Contract](./cli-v0-contract.md).
+
+## Explicit Live Artifact Export
+
+When hotspot state lives on `scryrs server`, `scryrs hotspots` can materialize that server-owned ranking into the same `.scryrs/hotspots.json` artifact shape consumed by `scryrs graph`, `scryrs route`, and `scryrs propose`:
+
+```text
+scryrs hotspots <PATH> --mode live
+        ↓
+resolve server-url + repository-id
+(flags → env → .scryrs/.env → scryrs.json remote)
+        ↓
+GET /v1/repositories/{repository_id}/hotspots?window=cumulative
+        ↓
+HotspotsReport emitted to stdout and written to .scryrs/hotspots.json
+```
+
+This live export path is deliberately strict:
+
+- It **never opens** `<PATH>/.scryrs/scryrs.db`.
+- It **never merges** local SQLite-only subjects into the exported entries.
+- It sets `storePath` to `live:<query_url>` so the artifact provenance is explicit.
+- It copies `generatedAt` from the server response and derives `runMetadata` from the returned live entries.
+- It writes `.scryrs/hotspots.json` atomically, so fetch or validation failures leave any existing artifact untouched.
+
+The purpose is compatibility, not a new downstream protocol: live mode materializes the existing `HotspotsReport` envelope so the rest of the artifact pipeline keeps working unchanged.
 
 ## Interpreting Hotspot Fields
 
@@ -114,7 +139,7 @@ To avoid misinterpreting the report, be clear about what hotspot scores are not:
 - **Not a correctness measure.** Correct code that agents reference often scores high; incorrect code that nobody touches scores zero.
 - **Not a priority list.** Use hotspot output as evidence for documentation investments, not as the sole input to roadmap ordering.
 
-**Related: Live Hotspot Server** — The live hotspot server (`scryrs server`) is a separate deployment mode that provides central ingestion, shared live state, and signal streaming for multi-agent teams. See [Live Hotspots](./live-hotspots.md) for the domain narrative and mode comparison.
+**Related: Live Hotspot Server** — The live hotspot server (`scryrs server`) is a separate deployment mode that provides central ingestion, shared live state, signal streaming, and explicit `scryrs hotspots --mode live` export for multi-agent teams. See [Live Hotspots](./live-hotspots.md) for the domain narrative and mode comparison.
 
 ## Related Pages
 

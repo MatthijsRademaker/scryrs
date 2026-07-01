@@ -4,7 +4,7 @@ use serde_json::json;
 
 /// Version of the `--help-json` surface document format, independent of
 /// `SCHEMA_VERSION` which governs command output envelopes.
-const SURFACE_VERSION: &str = "0.14.0";
+const SURFACE_VERSION: &str = "0.15.0";
 
 pub(crate) fn cli_surface_doc() -> String {
     let doc = json!({
@@ -13,7 +13,7 @@ pub(crate) fn cli_surface_doc() -> String {
         "commands": [
             {
                 "name": "hotspots",
-                "description": "Discover and analyze knowledge hotspots in a repository",
+                "description": "Discover and analyze knowledge hotspots in a repository. Local mode is the default and reads .scryrs/scryrs.db. Live mode materializes the same HotspotsReport artifact from GET /v1/repositories/{repository_id}/hotspots?window=cumulative and does not merge local SQLite data.",
                 "arguments": [
                     {
                         "name": "PATH",
@@ -22,16 +22,22 @@ pub(crate) fn cli_surface_doc() -> String {
                         "description": "Path to the repository root directory"
                     }
                 ],
+                "flags": [
+                    {"name": "mode", "flag": "--mode", "type": "string", "values": ["local", "live"], "default": "local", "description": "Source mode: local (default) or live"},
+                    {"name": "server-url", "flag": "--server-url", "type": "string", "description": "Live-mode scryrs server base URL (overrides .scryrs/.env SCRYRS_REMOTE_INGEST_URL)"},
+                    {"name": "repository-id", "flag": "--repository-id", "type": "string", "description": "Live-mode repository identity (overrides .scryrs/.env SCRYRS_REPOSITORY_ID)"}
+                ],
+                "liveConfigPrecedence": ["1. CLI flags", "2. Environment variables (SCRYRS_REMOTE_INGEST_URL, SCRYRS_REPOSITORY_ID)", "3. .scryrs/.env", "4. scryrs.json `remote` section"],
                 "output": {
                     "mimeType": "application/json",
                     "fields": [
                         {"name": "schemaVersion", "type": "string", "description": "Version of the hotspot report output format (independent of trace event version)", "optional": false},
                         {"name": "command", "type": "string", "description": "Name of the executed command", "optional": false},
                         {"name": "repositoryPath", "type": "string", "description": "Resolved absolute path to the repository root", "optional": false},
-                        {"name": "storePath", "type": "string", "description": "Resolved absolute path to .scryrs/scryrs.db", "optional": false},
-                        {"name": "runMetadata", "type": "object", "description": "Deterministic metadata from store state (storeSchemaVersion, analyzedEventCount, analyzedSubjectCount, firstEventId, lastEventId)", "optional": false},
-                        {"name": "generatedAt", "type": "string", "description": "ISO 8601 wall-clock timestamp", "optional": false},
-                        {"name": "entries", "type": "array", "description": "Array of ranked HotspotEntry objects (empty for stores with no subject-bearing events)", "optional": false}
+                        {"name": "storePath", "type": "string", "description": "Local mode: absolute path to .scryrs/scryrs.db. Live mode: live:<query_url> descriptor for the cumulative server query.", "optional": false},
+                        {"name": "runMetadata", "type": "object", "description": "Local mode: store-derived metadata. Live mode: derived from live entries (subject count, evidence-row count, sentinel store fields).", "optional": false},
+                        {"name": "generatedAt", "type": "string", "description": "Local mode: export-time timestamp. Live mode: generatedAt copied from the server response.", "optional": false},
+                        {"name": "entries", "type": "array", "description": "Array of ranked HotspotEntry objects. Live mode preserves the response entries unchanged.", "optional": false}
                     ]
                 }
             },
