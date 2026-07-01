@@ -134,9 +134,61 @@ fn hotspots_with_extra_args_exits_2_with_error() {
     assert!(out.is_empty());
     let err_str = String::from_utf8_lossy(&err);
     assert!(err_str.contains("unexpected argument after PATH"));
-    assert!(err_str.contains("Usage: scryrs hotspots <PATH>"));
+    assert!(err_str.contains("Usage: scryrs hotspots <PATH> [--mode <local|live>] [--server-url <URL>] [--repository-id <ID>]"));
     assert!(err_str.contains("See `scryrs --help`"));
     assert!(!err_str.contains("unknown command"));
+}
+
+#[test]
+fn hotspots_help_exits_0_and_lists_live_flags() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(["hotspots", "--help"], &mut out, &mut err),
+        0
+    );
+    assert!(err.is_empty());
+    let help = String::from_utf8_lossy(&out);
+    assert!(help.contains("scryrs hotspots <PATH>"));
+    assert!(help.contains("--mode <local|live>"));
+    assert!(help.contains("--server-url <URL>"));
+    assert!(help.contains("--repository-id <ID>"));
+    assert!(help.contains("does not merge local SQLite data"));
+}
+
+#[test]
+fn hotspots_live_flags_are_accepted_by_dispatch() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(
+            [
+                "hotspots",
+                &dir.path().to_string_lossy(),
+                "--mode",
+                "live",
+                "--server-url",
+                "http://127.0.0.1:1",
+                "--repository-id",
+                "repo-a",
+            ],
+            &mut out,
+            &mut err,
+        ),
+        2
+    );
+    assert!(out.is_empty());
+    let err_str = String::from_utf8_lossy(&err);
+    assert!(
+        err_str.contains("cannot reach live hotspot server")
+            || err_str.contains("live hotspot export timed out")
+            || err_str.contains("returned HTTP"),
+        "expected live fetch failure after successful flag parsing, got: {err_str}"
+    );
+    assert!(!err_str.contains("unexpected argument"));
 }
 
 #[test]
@@ -369,6 +421,33 @@ fn help_json_output_does_not_contain_placeholder_wording() {
 }
 
 #[test]
+fn root_help_and_help_json_describe_hotspots_live_export() {
+    let mut help_out = Vec::new();
+    let mut json_out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(run_with_writers(["--help"], &mut help_out, &mut err), 0);
+    assert!(err.is_empty());
+    let help = String::from_utf8_lossy(&help_out);
+    assert!(help.contains("scryrs hotspots <PATH> [--mode <local|live>]"));
+    assert!(help.contains("--server-url <URL>"));
+    assert!(help.contains("--repository-id <ID>"));
+    assert!(help.contains("without merging local SQLite data"));
+
+    assert_eq!(
+        run_with_writers(["--help-json"], &mut json_out, &mut err),
+        0
+    );
+    assert!(err.is_empty());
+    let help_json = String::from_utf8_lossy(&json_out);
+    assert!(help_json.contains("\"name\":\"hotspots\""));
+    assert!(help_json.contains("\"flag\":\"--mode\""));
+    assert!(help_json.contains("\"flag\":\"--server-url\""));
+    assert!(help_json.contains("\"flag\":\"--repository-id\""));
+    assert!(help_json.contains("does not merge local SQLite data"));
+}
+
+#[test]
 fn doctor_and_publish_appear_in_help_and_help_json_output() {
     let mut help_out = Vec::new();
     let mut json_out = Vec::new();
@@ -405,8 +484,8 @@ fn doctor_and_publish_appear_in_help_and_help_json_output() {
         "--help-json must list doctor command, got:\n{help_json}"
     );
     assert!(
-        help_json.contains("\"surfaceVersion\":\"0.14.0\""),
-        "--help-json must bump surfaceVersion to 0.14.0, got:\n{help_json}"
+        help_json.contains("\"surfaceVersion\":\"0.15.0\""),
+        "--help-json must bump surfaceVersion to 0.15.0, got:\n{help_json}"
     );
     assert!(
         help_json.contains("\"name\":\"publish\""),
@@ -1428,8 +1507,8 @@ fn help_json_contains_grouped_proposals_surface_and_bumped_version() {
     assert!(err.is_empty());
     let json_str = String::from_utf8_lossy(&out);
     assert!(
-        json_str.contains("\"surfaceVersion\":\"0.14.0\""),
-        "--help-json must bump surfaceVersion to 0.14.0, got:\n{json_str}"
+        json_str.contains("\"surfaceVersion\":\"0.15.0\""),
+        "--help-json must bump surfaceVersion to 0.15.0, got:\n{json_str}"
     );
     assert!(
         json_str.contains("\"name\":\"proposals\""),

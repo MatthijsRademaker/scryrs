@@ -61,6 +61,20 @@ Client streams: GET /v1/repositories/{id}/signals  (SSE threshold-crossing signa
 
 Live mode and local batch mode are **exclusive deployment choices**, not additive layers. A repository operates in one mode at a time, and the server-owned state does not merge with any pre-existing local `.scryrs/scryrs.db`.
 
+### Live export as source materialization
+
+`scryrs hotspots <PATH> --mode live` is the bridge between the live server and the existing artifact-driven CLI loop. It does not invent a second downstream contract; it materializes the server-owned cumulative ranking into the existing `.scryrs/hotspots.json` `HotspotsReport` shape.
+
+That materialization path is intentionally explicit:
+
+- Resolve `--server-url` / `--repository-id` by precedence: CLI flags, process environment, `.scryrs/.env`, then `scryrs.json` `remote`.
+- Query `GET /v1/repositories/{repository_id}/hotspots?window=cumulative`.
+- Write `<PATH>/.scryrs/hotspots.json` atomically.
+- Set `storePath` to `live:<query_url>` and copy `generatedAt` from the live response.
+- Derive `runMetadata` from the returned live entries rather than pretending a local SQLite store participated.
+
+Most importantly: **live export does not read `.scryrs/scryrs.db` and does not merge local-only subjects into the exported artifact**. If you choose live export, the resulting artifact is entirely server-owned state rendered into the local file expected by downstream commands.
+
 | Dimension | Local batch (`scryrs hotspots`) | Live server (`scryrs server`) |
 |-----------|----------------------------------|-------------------------------|
 | **Source of truth** | `.scryrs/scryrs.db` on the local machine | Server-owned SQLite (`scryrs/server.db`) |
@@ -68,6 +82,7 @@ Live mode and local batch mode are **exclusive deployment choices**, not additiv
 | **State model** | Deterministic batch re-scoring of all stored events on every `scryrs hotspots` invocation | Incremental cumulative accumulators updated per accepted event |
 | **Deduplication** | Not applicable (single-writer filesystem) | First-writer-wins on `(repo, workspace, agent, producer_event_id)` |
 | **Query** | CLI invocation reads SQLite, emits `HotspotsReport` to stdout | `GET /v1/repositories/{id}/hotspots` returns `LiveHotspotsResponse` |
+| **Artifact materialization** | Native output of `scryrs hotspots <PATH>` | Explicit via `scryrs hotspots <PATH> --mode live`; writes the same `HotspotsReport` shape without local/live merge |
 | **Session scoping** | Not supported (full-store batch only) | Optional `?session_id` recomputes rankings from matching raw events |
 | **Signals** | Not applicable (batch output only) | SSE stream of `HotspotSignal` records with `?after=` cursor replay |
 | **Multi-agent sharing** | Manual — each machine runs its own `scryrs hotspots` | Automatic — all agents feed one server; one source of truth |

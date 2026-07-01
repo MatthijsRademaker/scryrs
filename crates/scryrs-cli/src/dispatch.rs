@@ -8,7 +8,9 @@ use crate::graph::write_graph_json;
 use crate::help_json::write_cli_surface;
 use crate::help_text::write_help;
 use crate::hook::execute_hook;
-use crate::hotspots::write_hotspots_json;
+use crate::hotspots::{
+    HOTSPOTS_USAGE, HotspotsOptions, parse_hotspots_mode, write_hotspots_help, write_hotspots_json,
+};
 use crate::init;
 use crate::proposals::execute_proposals_cli;
 use crate::propose::write_proposals;
@@ -55,6 +57,10 @@ where
     // D5: Pre-clap --help-json handling (not a clap flag)
     if args.len() == 1 && args[0] == "--help-json" {
         return write_cli_surface(&mut out).map_or(1, |_| 0);
+    }
+
+    if args.len() == 2 && args[0] == "hotspots" && (args[1] == "--help" || args[1] == "-h") {
+        return write_hotspots_help(&mut out).map_or(1, |_| 0);
     }
 
     if args.len() == 2 && args[0] == "dashboard" && (args[1] == "--help" || args[1] == "-h") {
@@ -148,7 +154,31 @@ where
             Command::new("hotspots")
                 .disable_help_flag(true)
                 .disable_version_flag(true)
-                .arg(Arg::new("PATH").required(true).value_name("PATH")),
+                .arg(Arg::new("PATH").required(true).value_name("PATH"))
+                .arg(
+                    Arg::new("mode")
+                        .long("mode")
+                        .value_name("MODE")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Source mode: local (default) or live"),
+                )
+                .arg(
+                    Arg::new("server-url")
+                        .long("server-url")
+                        .value_name("URL")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Live-mode scryrs server base URL (overrides .scryrs/.env SCRYRS_REMOTE_INGEST_URL)"),
+                )
+                .arg(
+                    Arg::new("repository-id")
+                        .long("repository-id")
+                        .value_name("ID")
+                        .num_args(1)
+                        .action(ArgAction::Set)
+                        .help("Live-mode repository identity (overrides .scryrs/.env SCRYRS_REPOSITORY_ID)"),
+                ),
         )
         .subcommand(
             Command::new("record")
@@ -464,7 +494,35 @@ where
                         .get_one::<String>("PATH")
                         .map(|s| s.as_str())
                         .unwrap_or(".");
-                    write_hotspots_json(&mut out, &mut err, path)
+                    let mode_str = m
+                        .get_one::<String>("mode")
+                        .map(|s| s.as_str())
+                        .unwrap_or("local");
+                    let mode = match parse_hotspots_mode(mode_str) {
+                        Some(mode) => mode,
+                        None => {
+                            return if writeln!(err, "scryrs hotspots: unknown mode '{mode_str}'").is_err()
+                                || writeln!(err, "Usage: {HOTSPOTS_USAGE}").is_err()
+                                || writeln!(err, "See `scryrs --help`").is_err()
+                            {
+                                1
+                            } else {
+                                2
+                            };
+                        }
+                    };
+                    write_hotspots_json(
+                        &mut out,
+                        &mut err,
+                        HotspotsOptions {
+                            path,
+                            mode,
+                            server_url: m.get_one::<String>("server-url").map(|s| s.as_str()),
+                            repository_id: m
+                                .get_one::<String>("repository-id")
+                                .map(|s| s.as_str()),
+                        },
+                    )
                 }
                 Some(("record", m)) => execute_record(&mut out, &mut err, &mut stdin, m),
                 Some(("hook", m)) => {
@@ -670,7 +728,7 @@ where
                 }
                 _ => {
                     if writeln!(err, "scryrs hotspots: missing required PATH argument").is_err()
-                        || writeln!(err, "Usage: scryrs hotspots <PATH>").is_err()
+                        || writeln!(err, "Usage: {HOTSPOTS_USAGE}").is_err()
                         || writeln!(err, "See `scryrs --help`").is_err()
                     {
                         1
@@ -785,7 +843,7 @@ where
                     }
                     _ => {
                         if writeln!(err, "scryrs hotspots: unexpected argument after PATH").is_err()
-                            || writeln!(err, "Usage: scryrs hotspots <PATH>").is_err()
+                            || writeln!(err, "Usage: {HOTSPOTS_USAGE}").is_err()
                             || writeln!(err, "See `scryrs --help`").is_err()
                         {
                             1

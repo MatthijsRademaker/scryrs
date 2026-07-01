@@ -7,8 +7,9 @@ scryrs — context intelligence for AI-assisted codebases
 Discover, analyze, and navigate hotspots in your codebase.
 
 COMMANDS
-scryrs hotspots <PATH>
-Emit a versioned JSON hotspot report from recorded trace events.
+scryrs hotspots <PATH> [--mode <local|live>] [--server-url <URL>] [--repository-id <ID>]
+Emit a versioned JSON hotspot report from local SQLite (default) or from
+the live hotspot server without merging local SQLite data.
 scryrs record --stdin
 Ingest JSONL trace events from stdin.
 scryrs record --file <PATH>
@@ -130,7 +131,7 @@ A single-line JSON envelope on stdout:
 "schemaVersion": "1.0.0",
 "command": "hotspots",
 "repositoryPath": "<absolute path>",
-"storePath": "<absolute path to .scryrs/scryrs.db>",
+"storePath": "<absolute path to .scryrs/scryrs.db | live:<query_url>>",
 "runMetadata": {
 "storeSchemaVersion": <integer>,
 "analyzedEventCount": <count>,
@@ -145,10 +146,19 @@ Each entry carries rank, subjectKind, subject, score,
 per-event-type counts, per-outcome counts, sessionCount,
 firstSeen/lastSeen timestamps, and evidence rowIds.
 Empty stores produce entries: [].
+Local mode sets generatedAt from the export clock and storePath to the local
+.scryrs/scryrs.db path.
+Live mode resolves server-url and repository-id by precedence — flags, then
+environment, then .scryrs/.env, then scryrs.json `remote` — queries
+GET /v1/repositories/<repository_id>/hotspots?window=cumulative, sets
+storePath to live:<query_url>, copies generatedAt from the server response,
+derives runMetadata from live entries, writes .scryrs/hotspots.json
+atomically, and exports the artifact without merging local SQLite data.
 On success, the report is also written to .scryrs/hotspots.json.
 EXAMPLES
 scryrs hotspots /path/to/repo
 scryrs hotspots .
+scryrs hotspots . --mode live --server-url http://127.0.0.1:8081 --repository-id repo-a
 scryrs record --stdin < events.jsonl
 scryrs record --file session.jsonl
 scryrs hook claude-code < pre-tool-use.json
@@ -176,5 +186,5 @@ OPTIONS
 
 EXIT CODES
 0    Success (hotspots: JSON written; record local: all events accepted; record remote: no rejections or failures; init: hook installed; up: workspace-managed compose stack started; doctor: only ok/warn findings; propose/proposals: artifacts written or listed successfully; publish: accepted knowledge published successfully; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)
-1    Hotspots: storage error. Record: rejected events or I/O error (local or server rejections). Init: I/O error. Up: docker invocation failure. Doctor: output write failure. Proposals: serialization or filesystem write failure. Publish: runtime or filesystem failure. Dashboard: port in use or artifact read error. Server: port in use or store error.
-2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, or self-install refusal; setup: unknown/missing mode, source-checkout refusal (live), or missing/invalid/conflicting live configuration; up: missing scaffold files, missing external network, or unexpected arguments; doctor: one or more structural error findings; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; publish: usage error or publish-input validation failure (invalid accepted artifacts, malformed _nav.json); route explain: missing PATH, missing --query, missing/malformed/schema-mismatched routes.json; dashboard: invalid flags, bind failure, or partial live-mode configuration; server: invalid flags or bind failure
+1    Hotspots: storage error or artifact write failure. Record: rejected events or I/O error (local or server rejections). Init: I/O error. Up: docker invocation failure. Doctor: output write failure. Proposals: serialization or filesystem write failure. Publish: runtime or filesystem failure. Dashboard: port in use or artifact read error. Server: port in use or store error.
+2    Usage error; hotspots: missing/unsupported local store, unknown mode, missing live identity, live timeout/connection failure, non-2xx response, malformed live response, or live schema/repository mismatch; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, or self-install refusal; setup: unknown/missing mode, source-checkout refusal (live), or missing/invalid/conflicting live configuration; up: missing scaffold files, missing external network, or unexpected arguments; doctor: one or more structural error findings; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; publish: usage error or publish-input validation failure (invalid accepted artifacts, malformed _nav.json); route explain: missing PATH, missing --query, missing/malformed/schema-mismatched routes.json; dashboard: invalid flags, bind failure, or partial live-mode configuration; server: invalid flags or bind failure

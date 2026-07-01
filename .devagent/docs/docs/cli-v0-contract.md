@@ -133,17 +133,17 @@ Transport asymmetry is intentional: Claude Code uses stdin because its `command`
 |------|---------|
 | 0 | Always — fail-open, never blocks the harness |
 
-### `scryrs hotspots <PATH>`
+### `scryrs hotspots <PATH> [--mode <local|live>] [--server-url <URL>] [--repository-id <ID>]`
 
-Analyzes persisted trace events in `.scryrs/scryrs.db` and emits a deterministic `HotspotsReport` to stdout (JSON) and `.scryrs/hotspots.json` (artifact file).
+Materializes the hotspot artifact consumed by the rest of the CLI pipeline. Local mode is the default: it analyzes persisted trace events in `.scryrs/scryrs.db` and emits a deterministic `HotspotsReport`. Live mode is explicit: it queries `GET /v1/repositories/{repository_id}/hotspots?window=cumulative` and materializes that response into the same `HotspotsReport` envelope without merging local SQLite data.
 
 | Field | Value |
 |-------|-------|
-| Input | Required local directory `<PATH>` containing `.scryrs/scryrs.db` |
+| Input | Required local directory `<PATH>`. Optional live flags: `--mode <local|live>`,`--server-url <URL>`,`--repository-id <ID>`. |
 | Output | `HotspotsReport` JSON on stdout; `.scryrs/hotspots.json` artifact file written to `<PATH>/.scryrs/` |
 | Exit 0 | Report written successfully (may have zero entries for empty stores) |
-| Exit 1 | I/O or storage error (stdout write failure, artifact write failure) |
-| Exit 2 | PATH argument omitted, directory does not contain `.scryrs/scryrs.db`, or corrupt/unreadable store (usage/fatal error on stderr) |
+| Exit 1 | I/O, storage, or artifact write failure |
+| Exit 2 | PATH argument omitted, unknown mode, missing/unsupported local store, missing live identity, live timeout/connection failure, non-2xx response, malformed live response, or live schema/repository mismatch |
 
 **JSON envelope (HotspotsReport):**
 
@@ -190,12 +190,16 @@ Analyzes persisted trace events in `.scryrs/scryrs.db` and emits a deterministic
 
 - `schemaVersion` is `"1.0.0"` — independent of the `record` envelope `schemaVersion`.
 - `command` is always `"hotspots"`.
-- `repositoryPath` and `storePath` are absolute paths.
-- `runMetadata` carries `storeSchemaVersion` (SQLite user version, integer), `analyzedEventCount` (total subject-bearing events analyzed, integer), `analyzedSubjectCount` (distinct subjects, integer), `firstEventId` (earliest event row ID, integer), and `lastEventId` (latest event row ID, integer). All are `0` when the store is empty.
+- `repositoryPath` is always the resolved absolute repo path.
+- `storePath` is mode-dependent: local mode uses the absolute path to `<PATH>/.scryrs/scryrs.db`; live mode uses `live:<server_url>/v1/repositories/<repository_id>/hotspots?window=cumulative`.
+- `runMetadata` is mode-dependent. Local mode carries `storeSchemaVersion` (SQLite user version, integer), `analyzedEventCount` (total subject-bearing events analyzed, integer), `analyzedSubjectCount` (distinct subjects, integer), `firstEventId` (earliest event row ID, integer), and `lastEventId` (latest event row ID, integer). All are `0` when the store is empty. Live mode derives `analyzedSubjectCount = entries.len()`, `analyzedEventCount = sum(evidence.rowIds.len())`, and uses sentinel values `storeSchemaVersion = 0`, `firstEventId = 0`, `lastEventId = 0`.
 - `entries` is sorted by score descending with a deterministic six-key tie-break: `score DESC, sessionCount DESC, lastSeen DESC, subjectKind ASC, subject ASC, firstEventId ASC`.
 - Each entry's `counts` contains two sub-objects: `eventType` maps each trace event type name to its per-subject occurrence count, and `outcome` maps `success`/`failure` to per-subject outcome counts. Only non-zero counts are included.
 - Each entry's `evidence.rowIds` is an ordered list of SQLite row IDs identifying the trace events that contributed to this hotspot entry.
 - `subjectKind` uses short category tags: `file`, `search`, `symbol`, `command`, or `document`.
+- Local mode sets `generatedAt` from export time. Live mode copies `generatedAt` from the `LiveHotspotsResponse`.
+- Live mode resolves `server-url` and `repository-id` by precedence: CLI flags, then process environment (`SCRYRS_REMOTE_INGEST_URL`, `SCRYRS_REPOSITORY_ID`), then `.scryrs/.env`, then `scryrs.json` `remote`. It never opens `.scryrs/scryrs.db` and never merges local-only subjects into the exported artifact.
+- Live mode writes `.scryrs/hotspots.json` via temp file plus atomic rename; validation failures leave any existing artifact untouched.
 
 **Scoring dimensions:**
 
