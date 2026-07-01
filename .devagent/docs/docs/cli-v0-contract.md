@@ -248,6 +248,10 @@ Projects `.scryrs/graph.json` into deterministic `RouteManifestDocument` artifac
 **Behavior notes:**
 
 - Every graph node becomes exactly one route entry.
+- `target` remains the stable graph-node id; optional `loadTarget` adds retrieval context without changing the route schema version.
+- `file` routes emit repository-relative `loadTarget.reference` values after syntax-only validation (non-empty, not absolute, no parent traversal). The command does not check file existence.
+- `doc_page` routes emit canonical `project-docs/<slug>` `loadTarget.reference` values derived from the first usable `doc_reference` evidence link.
+- `search`, `symbol`, `domain_term`, and `doc_group` routes emit `loadTarget.kind = "non_loadable"` with no fake `reference`.
 - `grouping` is present only when explicit `contains` edge from parent group node exists.
 - Output is deterministic: routes sort by node `id` ascending and carry no wall-clock generation fields.
 
@@ -260,11 +264,12 @@ The route manifest is accompanied by a deterministic `RouteHintDocument` project
 | `schemaVersion` | string | `HINT_SCHEMA_VERSION` | Always `"1.0.0"` |
 | `hints` | array | `RouteEntry[]` input | One `RouteHintItem` per route entry, deterministic order |
 | `hints[].routeId` | string | `RouteEntry.id` | Source route entry id |
-| `hints[].target` | string | `RouteEntry.target` | Normalized load target |
+| `hints[].target` | string | `RouteEntry.target` | Stable graph-node identity string |
+| `hints[].loadTarget` | object or absent | `RouteEntry.loadTarget` | Optional structured retrieval context: `file`, `doc_page`, or `non_loadable` |
 | `hints[].label` | string | `RouteEntry.label` | Human-readable label |
 | `hints[].rank` | number (u32) | Ordinal index (1-based) | Deterministic placeholder — NOT a frozen long-term ranking formula |
 | `hints[].relevance` | number or absent | Omitted by plain projection; populated for explain matches | Plain `hints_from_manifest` omits the field; `scryrs route explain` fills it with the packed deterministic score |
-| `hints[].reason` | string | Template: `"Route '{label}' ({id}): {N} evidence link(s), subject kind {subjectKind}"` | Evidence count and identity explanation |
+| `hints[].reason` | string | Template: `"Route '{label}' ({id}): {N} evidence link(s), subject kind {subjectKind}, load target {loadTarget.kind}"` | Evidence count, identity, and load-target explanation |
 | `hints[].evidence` | array | `RouteEntry.evidenceLinks` (verbatim copy) | Provenance links for traceability |
 
 **Example JSON:**
@@ -276,9 +281,10 @@ The route manifest is accompanied by a deterministic `RouteHintDocument` project
     {
       "routeId": "file:src/main.rs",
       "target": "file:src/main.rs",
+      "loadTarget": {"kind": "file", "reference": "src/main.rs"},
       "label": "src/main.rs",
       "rank": 1,
-      "reason": "Route 'src/main.rs' (file:src/main.rs): 2 evidence link(s), subject kind file",
+      "reason": "Route 'src/main.rs' (file:src/main.rs): 2 evidence link(s), subject kind file, load target file",
       "evidence": [
         {
           "sourceKind": "local_trace_row",
@@ -290,9 +296,10 @@ The route manifest is accompanied by a deterministic `RouteHintDocument` project
     {
       "routeId": "search:routing",
       "target": "search:routing",
+      "loadTarget": {"kind": "non_loadable"},
       "label": "routing",
       "rank": 2,
-      "reason": "Route 'routing' (search:routing): 3 evidence link(s), subject kind search",
+      "reason": "Route 'routing' (search:routing): 3 evidence link(s), subject kind search, load target non_loadable",
       "evidence": [
         {
           "sourceKind": "local_trace_row",
@@ -314,7 +321,7 @@ Queries the route manifest artifact (`.scryrs/routes.json`) for entries matching
 | Field | Value |
 | ------- | ------- |
 | Input | Required local directory `<PATH>` containing `.scryrs/routes.json`. Required `--query <TEXT>` argument. |
-| Output | Single-line `RouteHintDocument` JSON on stdout. Each hint's `reason` appends `"; query match on <fields>"` suffix and each matched hint carries populated numeric `relevance`. Zero matches produces valid document with empty `hints` array. |
+| Output | Single-line `RouteHintDocument` JSON on stdout. Each hint preserves stable `target`, copies optional `loadTarget`, appends `"; query match on <fields>"` to the base reason text, and carries populated numeric `relevance` only for matches. Zero matches produces valid document with empty `hints` array. |
 | Exit 0 | Query matched and results emitted (including zero-match results) |
 | Exit 1 | Serialization or stdout write failure |
 | Exit 2 | Missing PATH, missing `--query`, route artifact missing, malformed route artifact, or route schema version mismatch |
@@ -349,7 +356,7 @@ scryrs route explain . --query "auth"
 **Example output (successful match):**
 
 ```json
-{"schemaVersion":"1.0.0","hints":[{"routeId":"file:auth","target":"file:auth","label":"auth","rank":1,"relevance":3000000001,"reason":"Route 'auth' (file:auth): 1 evidence link(s), subject kind file; query match on id, label, subject, target","evidence":[{"sourceKind":"local_trace_row","subject":"auth","rowIds":[1]}]}]}
+{"schemaVersion":"1.0.0","hints":[{"routeId":"file:auth","target":"file:auth","loadTarget":{"kind":"file","reference":"auth"},"label":"auth","rank":1,"relevance":3000000001,"reason":"Route 'auth' (file:auth): 1 evidence link(s), subject kind file, load target file; query match on id, label, subject, target","evidence":[{"sourceKind":"local_trace_row","subject":"auth","rowIds":[1]}]}]}
 ```
 
 **Example output (zero matches):**

@@ -896,6 +896,26 @@ pub struct RouteGrouping {
     pub group_label: String,
 }
 
+/// Supported load-target kinds for route and hint consumers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RouteLoadTargetKind {
+    File,
+    DocPage,
+    NonLoadable,
+}
+
+/// Structured load-target context for a route or hint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteLoadTarget {
+    /// Load-target kind.
+    pub kind: RouteLoadTargetKind,
+    /// Loadable reference for `file` and `doc_page` targets.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+}
+
 /// A single route entry with identity, target, and evidence backlinks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -908,8 +928,11 @@ pub struct RouteEntry {
     pub subject: String,
     /// Human-readable label for display and filtering.
     pub label: String,
-    /// Normalized load target (equals source graph node `id`).
+    /// Stable graph-node identity string preserved for matching.
     pub target: String,
+    /// Optional structured load-target context for retrieval.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub load_target: Option<RouteLoadTarget>,
     /// String-backed kind for additive adapter evolution.
     pub kind: String,
     /// Evidence provenance links for this route.
@@ -946,8 +969,11 @@ pub struct RouteManifestDocument {
 pub struct RouteHintItem {
     /// Source route entry id.
     pub route_id: String,
-    /// Normalized load target.
+    /// Stable graph-node identity string copied from the source route.
     pub target: String,
+    /// Optional structured load-target context copied from the source route.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub load_target: Option<RouteLoadTarget>,
     /// Human-readable label for display and filtering.
     pub label: String,
     /// 1-based ordinal rank derived from manifest entry sort order.
@@ -2702,6 +2728,10 @@ mod tests {
                 subject: "src/main.rs".into(),
                 label: "src/main.rs".into(),
                 target: "file:src/main.rs".into(),
+                load_target: Some(RouteLoadTarget {
+                    kind: RouteLoadTargetKind::File,
+                    reference: Some("src/main.rs".into()),
+                }),
                 kind: "file".into(),
                 evidence_links: vec![EvidenceLink {
                     source_kind: EvidenceSourceKind::LocalTraceRow,
@@ -2721,6 +2751,9 @@ mod tests {
         assert!(json.contains("\"schemaVersion\":\"1.0.0\""));
         assert!(json.contains("\"id\":\"file:src/main.rs\""));
         assert!(json.contains("\"subjectKind\":\"file\""));
+        assert!(json.contains("\"loadTarget\""));
+        assert!(json.contains("\"kind\":\"file\""));
+        assert!(json.contains("\"reference\":\"src/main.rs\""));
         assert!(json.contains("\"evidenceLinks\""));
         assert!(!json.contains("\"grouping\""));
 
@@ -2736,6 +2769,10 @@ mod tests {
             subject: "graph".into(),
             label: "graph".into(),
             target: "doc_page:graph".into(),
+            load_target: Some(RouteLoadTarget {
+                kind: RouteLoadTargetKind::DocPage,
+                reference: Some("project-docs/graph".into()),
+            }),
             kind: "doc_page".into(),
             evidence_links: vec![EvidenceLink {
                 source_kind: EvidenceSourceKind::DocReference,
@@ -2771,6 +2808,10 @@ mod tests {
             subject: "routing".into(),
             label: "routing".into(),
             target: "search:routing".into(),
+            load_target: Some(RouteLoadTarget {
+                kind: RouteLoadTargetKind::NonLoadable,
+                reference: None,
+            }),
             kind: "search".into(),
             evidence_links: vec![],
             grouping: None,
@@ -2792,6 +2833,10 @@ mod tests {
             subject: "MyStruct".into(),
             label: "MyStruct".into(),
             target: "symbol:MyStruct".into(),
+            load_target: Some(RouteLoadTarget {
+                kind: RouteLoadTargetKind::NonLoadable,
+                reference: None,
+            }),
             kind: "symbol".into(),
             evidence_links: vec![],
             grouping: None,
@@ -2826,6 +2871,10 @@ mod tests {
                     subject: "aaa.rs".into(),
                     label: "aaa.rs".into(),
                     target: "file:aaa.rs".into(),
+                    load_target: Some(RouteLoadTarget {
+                        kind: RouteLoadTargetKind::File,
+                        reference: Some("aaa.rs".into()),
+                    }),
                     kind: "file".into(),
                     evidence_links: vec![],
                     grouping: None,
@@ -2837,6 +2886,10 @@ mod tests {
                     subject: "routing".into(),
                     label: "routing".into(),
                     target: "search:routing".into(),
+                    load_target: Some(RouteLoadTarget {
+                        kind: RouteLoadTargetKind::NonLoadable,
+                        reference: None,
+                    }),
                     kind: "search".into(),
                     evidence_links: vec![EvidenceLink {
                         source_kind: EvidenceSourceKind::HotspotSubject,
@@ -3677,10 +3730,14 @@ mod tests {
         let item = RouteHintItem {
             route_id: "file:src/main.rs".into(),
             target: "file:src/main.rs".into(),
+            load_target: Some(RouteLoadTarget {
+                kind: RouteLoadTargetKind::File,
+                reference: Some("src/main.rs".into()),
+            }),
             label: "src/main.rs".into(),
             rank: 1,
             relevance: None,
-            reason: "Route 'src/main.rs' (file:src/main.rs): 2 evidence link(s), subject kind file"
+            reason: "Route 'src/main.rs' (file:src/main.rs): 2 evidence link(s), subject kind file, load target file"
                 .into(),
             evidence: vec![make_hint_evidence_link(
                 EvidenceSourceKind::LocalTraceRow,
@@ -3697,6 +3754,10 @@ mod tests {
         let item = RouteHintItem {
             route_id: "file:auth".into(),
             target: "file:auth".into(),
+            load_target: Some(RouteLoadTarget {
+                kind: RouteLoadTargetKind::File,
+                reference: Some("auth".into()),
+            }),
             label: "auth".into(),
             rank: 2,
             relevance: Some(42),
@@ -3706,6 +3767,9 @@ mod tests {
         let json = serialize_json(&item);
         assert!(json.contains("\"routeId\""));
         assert!(!json.contains("\"route_id\""));
+        assert!(json.contains("\"loadTarget\""));
+        assert!(json.contains("\"kind\":\"file\""));
+        assert!(json.contains("\"reference\":\"auth\""));
         assert!(json.contains("\"rank\":2"));
         assert!(json.contains("\"relevance\":42"));
     }
@@ -3715,6 +3779,10 @@ mod tests {
         let item = RouteHintItem {
             route_id: "search:foo".into(),
             target: "search:foo".into(),
+            load_target: Some(RouteLoadTarget {
+                kind: RouteLoadTargetKind::NonLoadable,
+                reference: None,
+            }),
             label: "foo".into(),
             rank: 1,
             relevance: None,
@@ -3730,6 +3798,10 @@ mod tests {
         let item = RouteHintItem {
             route_id: "symbol:bar".into(),
             target: "symbol:bar".into(),
+            load_target: Some(RouteLoadTarget {
+                kind: RouteLoadTargetKind::NonLoadable,
+                reference: None,
+            }),
             label: "bar".into(),
             rank: 1,
             relevance: None,
@@ -3746,10 +3818,14 @@ mod tests {
             RouteHintItem {
                 route_id: "file:auth".into(),
                 target: "file:auth".into(),
+                load_target: Some(RouteLoadTarget {
+                    kind: RouteLoadTargetKind::File,
+                    reference: Some("auth".into()),
+                }),
                 label: "auth".into(),
                 rank: 1,
                 relevance: None,
-                reason: "Route 'auth' (file:auth): 1 evidence link(s), subject kind file".into(),
+                reason: "Route 'auth' (file:auth): 1 evidence link(s), subject kind file, load target file".into(),
                 evidence: vec![make_hint_evidence_link(
                     EvidenceSourceKind::LocalTraceRow,
                     "auth",
@@ -3758,10 +3834,14 @@ mod tests {
             RouteHintItem {
                 route_id: "search:auth".into(),
                 target: "search:auth".into(),
+                load_target: Some(RouteLoadTarget {
+                    kind: RouteLoadTargetKind::NonLoadable,
+                    reference: None,
+                }),
                 label: "auth".into(),
                 rank: 2,
                 relevance: None,
-                reason: "Route 'auth' (search:auth): 2 evidence link(s), subject kind search"
+                reason: "Route 'auth' (search:auth): 2 evidence link(s), subject kind search, load target non_loadable"
                     .into(),
                 evidence: vec![
                     make_hint_evidence_link(EvidenceSourceKind::LocalTraceRow, "auth-search"),

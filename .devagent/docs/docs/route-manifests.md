@@ -4,7 +4,7 @@ Route manifests are scryrs' machine-readable loading map. They flatten graph nod
 
 ## What a Route Manifest Represents
 
-A **route manifest** is not ranking logic and not retrieval output. It is stable artifact derived from `.scryrs/graph.json` that preserves node identity, normalized load target, optional doc grouping, and evidence backlinks. Later runtime code can use that artifact to decide what context to load and explain why.
+A **route manifest** is not ranking logic and not retrieval output. It is a stable artifact derived from `.scryrs/graph.json` that preserves node identity in `target`, adds optional structured `loadTarget` retrieval context, carries optional doc grouping, and copies evidence backlinks. Later runtime code can use that artifact to decide what context to load and explain why without reinterpreting the graph.
 
 ## Core Concepts
 
@@ -28,7 +28,8 @@ Each **route entry** is one graph node rendered as one route target.
 | `subjectKind` | Source node kind such as `file`, `search`, or `doc_page`. |
 | `subject` | Raw subject value from source node. |
 | `label` | Human-readable display label. |
-| `target` | Normalized load target. In v1 this equals source graph node `id`. |
+| `target` | Stable graph node ID preserved for identity and explain matching. In v1 this still equals source graph node `id`. |
+| `loadTarget` | Optional structured retrieval context. `file` uses repository-relative `reference`, `doc_page` uses canonical `project-docs/<slug>`, and `non_loadable` carries no fake reference. |
 | `kind` | Repeated node kind for additive downstream evolution. |
 | `evidenceLinks` | Provenance backlinks copied from source graph node. |
 | `grouping` | Optional parent grouping, only from explicit `contains` edge. |
@@ -69,8 +70,12 @@ Output rules:
 
 - `routes` sort by `id` ascending.
 - `evidenceLinks` within each route sort by `(sourceKind, subject, docRef, description, rowIds, score)` ascending.
+- `file` routes derive `loadTarget.reference` from the `file:` subject using syntax-only validation: non-empty, not absolute, and no parent traversal. The command does **not** check on-disk existence.
+- `doc_page` routes derive `loadTarget.reference` from the first usable `doc_reference` evidence link and normalize both `graph` and `project-docs/graph` to canonical `project-docs/<slug>`.
+- `search`, `symbol`, `domain_term`, and `doc_group` routes stay explicit via `loadTarget.kind = "non_loadable"` with no fake `reference`.
 - Output contains no wall-clock timestamps, random IDs, or hidden ranking fields.
 - Missing, malformed, or schema-mismatched `.scryrs/graph.json` fails fast with exit code `2`.
+- Invalid promised load targets also fail fast with exit code `2` — malformed `file:` subjects report that routes must resolve to a non-empty repository-relative path without parent traversal, and `doc_page` routes without a usable docs reference report that they must provide a canonical docs reference.
 
 ## Current Implementation Boundary
 
@@ -88,7 +93,7 @@ Output rules:
 
 ## Route Hint Contract
 
-The route manifest is accompanied by a deterministic `RouteHintDocument` projection that downstream runtimes can consume directly. Each `RouteEntry` produces exactly one `RouteHintItem` preserving source identity (`routeId`, `target`, `label`), a 1-based ordinal `rank`, explain-only `relevance`, a template-derived `reason`, and verbatim `evidence` copied from the source entry.
+The route manifest is accompanied by a deterministic `RouteHintDocument` projection that downstream runtimes can consume directly. Each `RouteEntry` produces exactly one `RouteHintItem` preserving source identity (`routeId`, stable `target`, `label`), copying optional `loadTarget`, carrying a 1-based ordinal `rank`, explain-only `relevance`, a template-derived `reason`, and verbatim `evidence` copied from the source entry.
 
 **Schema version:** `HINT_SCHEMA_VERSION = "1.0.0"` (independent from `ROUTE_SCHEMA_VERSION`).
 
@@ -100,7 +105,7 @@ The route manifest is accompanied by a deterministic `RouteHintDocument` project
 
 **Producer:** `hints_from_manifest(manifest: &RouteManifestDocument) -> RouteHintDocument` in `crates/scryrs-runtime/src/lib.rs`. The function is a pure projection over the manifest — no filesystem I/O, no graph mutation, no model-based ranking.
 
-**CLI command:** `scryrs route explain <PATH> --query <TEXT>` reads the route manifest artifact, performs case-insensitive substring matching against `label`, `subject`, `id`, `target`, `kind`, and `evidence_links[].subject`, and returns a filtered, tiered `RouteHintDocument`.
+**CLI command:** `scryrs route explain <PATH> --query <TEXT>` reads the route manifest artifact, performs case-insensitive substring matching against `label`, `subject`, `id`, `target`, `kind`, and `evidence_links[].subject`, and returns a filtered, tiered `RouteHintDocument`. `loadTarget` is copied through unchanged; it is consumer context, not a match field.
 
 **Example:**
 
@@ -115,7 +120,7 @@ scryrs route explain . --query "authentication"
 | `label` | Route entry human-readable label |
 | `subject` | Raw subject value from source node |
 | `id` | Source graph node identifier |
-| `target` | Normalized load target |
+| `target` | Stable graph-node identity string preserved for matching |
 | `kind` | String-backed node kind |
 | `evidence_links[].subject` | Evidence provenance subject |
 
@@ -127,7 +132,7 @@ scryrs route explain . --query "authentication"
 | 2 | Prefix match (field starts with query, case-insensitive) |
 | 1 | Substring match (field contains query, case-insensitive) |
 
-Explain ordering is authoritative on `(tier DESC, score DESC, count DESC, manifest_index ASC, route_id ASC)`, where `score` is the saturating sum of evidence-link scores and `count` is evidence-link count. Only entries that match at least one field appear in output. Each matching hint's `reason` field appends `"; query match on {comma-separated field names}"`.
+Explain ordering is authoritative on `(tier DESC, score DESC, count DESC, manifest_index ASC, route_id ASC)`, where `score` is the saturating sum of evidence-link scores and `count` is evidence-link count. Only entries that match at least one field appear in output. Plain `hints_from_manifest` uses the base reason template `Route '<label>' (<route_id>): <count> evidence link(s), subject kind <subject_kind>, load target <load_target_kind>`. Explain output preserves that base template and appends `"; query match on {comma-separated field names}"`.
 
 **Zero-match contract:** No matches produces a valid `RouteHintDocument` with empty `hints` array and exit code 0.
 

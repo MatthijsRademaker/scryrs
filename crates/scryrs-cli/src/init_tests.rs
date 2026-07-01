@@ -705,7 +705,7 @@ fn init_appears_in_help_json() {
     let doc: serde_json::Value =
         serde_json::from_str(&json_str).unwrap_or_else(|e| panic!("parse help-json: {e}"));
 
-    assert_eq!(doc["surfaceVersion"], "0.15.0");
+    assert_eq!(doc["surfaceVersion"], "0.16.0");
 
     let commands = doc["commands"]
         .as_array()
