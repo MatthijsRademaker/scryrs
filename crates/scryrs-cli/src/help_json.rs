@@ -4,7 +4,7 @@ use serde_json::json;
 
 /// Version of the `--help-json` surface document format, independent of
 /// `SCHEMA_VERSION` which governs command output envelopes.
-const SURFACE_VERSION: &str = "0.13.0";
+const SURFACE_VERSION: &str = "0.14.0";
 
 pub(crate) fn cli_surface_doc() -> String {
     let doc = json!({
@@ -308,6 +308,69 @@ pub(crate) fn cli_surface_doc() -> String {
                 ]
             },
             {
+                "name": "publish",
+                "description": "Publish accepted knowledge explicitly through adapter-backed markdown or Rspress surfaces",
+                "subcommands": [
+                    {
+                        "name": "markdown",
+                        "description": "Publish accepted Markdown-backed review decisions to generic Markdown output",
+                        "arguments": [
+                            {"name": "PATH", "type": "string", "required": true, "description": "Path to the repository root directory"}
+                        ],
+                        "flags": [
+                            {"name": "output", "long": "--output", "type": "string", "required": true, "description": "Output directory for generic Markdown files"}
+                        ],
+                        "output": {
+                            "mimeType": "application/json",
+                            "fields": [
+                                {"name": "command", "type": "string", "description": "Name of the executed command (always \"publish\")", "optional": false},
+                                {"name": "mode", "type": "string", "description": "Publish mode (always \"markdown\")", "optional": false},
+                                {"name": "schemaVersion", "type": "string", "description": "Version of the output envelope format", "optional": false},
+                                {"name": "count", "type": "number", "description": "Count of published Markdown files", "optional": false},
+                                {"name": "paths", "type": "array", "description": "Deterministically ordered output file paths", "optional": false}
+                            ]
+                        },
+                        "exitCodes": {
+                            "0": "Accepted knowledge published successfully",
+                            "1": "Runtime or filesystem failure",
+                            "2": "Usage error or publish-input validation failure"
+                        }
+                    },
+                    {
+                        "name": "rspress",
+                        "description": "Publish accepted Markdown-backed review decisions into an Rspress docs tree",
+                        "arguments": [
+                            {"name": "PATH", "type": "string", "required": true, "description": "Path to the repository root directory"}
+                        ],
+                        "flags": [
+                            {"name": "docs-root", "long": "--docs-root", "type": "string", "required": true, "description": "Rspress docs root containing _nav.json and accepted-knowledge/"}
+                        ],
+                        "output": {
+                            "mimeType": "application/json",
+                            "fields": [
+                                {"name": "command", "type": "string", "description": "Name of the executed command (always \"publish\")", "optional": false},
+                                {"name": "mode", "type": "string", "description": "Publish mode (always \"rspress\")", "optional": false},
+                                {"name": "schemaVersion", "type": "string", "description": "Version of the output envelope format", "optional": false},
+                                {"name": "count", "type": "number", "description": "Count of published Rspress pages", "optional": false},
+                                {"name": "entries", "type": "array", "description": "Deterministically ordered published entry metadata", "optional": false}
+                            ],
+                            "entryFields": [
+                                {"name": "path", "type": "string", "description": "Relative accepted-knowledge page path under the docs root", "optional": false},
+                                {"name": "proposalId", "type": "string", "description": "Accepted proposal identifier", "optional": false},
+                                {"name": "targetType", "type": "string", "description": "Accepted target type slug", "optional": false},
+                                {"name": "navText", "type": "string", "description": "Navigation label inserted into _nav.json", "optional": false},
+                                {"name": "navLink", "type": "string", "description": "Navigation link inserted into _nav.json", "optional": false}
+                            ]
+                        },
+                        "exitCodes": {
+                            "0": "Accepted knowledge published successfully",
+                            "1": "Runtime or filesystem failure",
+                            "2": "Usage error or publish-input validation failure"
+                        }
+                    }
+                ]
+            },
+            {
                 "name": "dashboard",
                 "description": "Start dashboard server and open the browser dashboard. Live is the default source mode (proxies a scryrs server); use --mode local to read local .scryrs artifacts. Live targets resolve from flags, then env, then .scryrs/.env, then scryrs.json `remote`; unresolved live config fails fast (exit 2) with guidance.",
                 "flags": [
@@ -459,9 +522,9 @@ pub(crate) fn cli_surface_doc() -> String {
         ],
         "rootBehavior": {"action": "help", "exitCode": 0},
         "exitCodes": {
-            "0": "Success (hotspots: JSON written, including empty entries; record local: all events accepted; record remote: no rejections or failures; init: hook installed; up: workspace-managed compose stack started; doctor: only ok/warn findings; propose/proposals: artifacts written or listed successfully; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)",
-            "1": "Hotspots: storage error. Record: one or more events rejected (local or server), or I/O error writing output. Init: I/O error. Up: docker invocation failure. Doctor: output write failure. Proposals: serialization or filesystem write failure. Dashboard: port in use or artifact read error. Server: port in use or store error.",
-            "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, or self-install refusal; setup: unknown/missing mode, source-checkout refusal (live), or missing/invalid/conflicting live configuration; up: missing scaffold files, missing external network, or unexpected arguments; doctor: one or more structural error findings; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; dashboard: invalid flags or partial live-mode configuration; server: invalid flags or bind failure."
+            "0": "Success (hotspots: JSON written, including empty entries; record local: all events accepted; record remote: no rejections or failures; init: hook installed; up: workspace-managed compose stack started; doctor: only ok/warn findings; propose/proposals: artifacts written or listed successfully; publish: accepted knowledge published successfully; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)",
+            "1": "Hotspots: storage error. Record: one or more events rejected (local or server), or I/O error writing output. Init: I/O error. Up: docker invocation failure. Doctor: output write failure. Proposals: serialization or filesystem write failure. Publish: runtime or filesystem failure. Dashboard: port in use or artifact read error. Server: port in use or store error.",
+            "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, or self-install refusal; setup: unknown/missing mode, source-checkout refusal (live), or missing/invalid/conflicting live configuration; up: missing scaffold files, missing external network, or unexpected arguments; doctor: one or more structural error findings; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; publish: usage error or publish-input validation failure; dashboard: invalid flags or partial live-mode configuration; server: invalid flags or bind failure."
         }
     });
     serde_json::to_string(&doc).unwrap_or_else(|_| "{}".into())

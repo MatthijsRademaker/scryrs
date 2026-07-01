@@ -12,6 +12,7 @@ use crate::hotspots::write_hotspots_json;
 use crate::init;
 use crate::proposals::execute_proposals_cli;
 use crate::propose::write_proposals;
+use crate::publish::execute_publish_cli;
 use crate::record::execute_record;
 use crate::route::write_route_json;
 use crate::server::{execute_server, write_server_help};
@@ -68,6 +69,10 @@ where
         return execute_proposals_cli(&mut out, &mut err, &args[1..]);
     }
 
+    if !args.is_empty() && args[0] == "publish" {
+        return execute_publish_cli(&mut out, &mut err, &args[1..]);
+    }
+
     if !args.is_empty() && args[0] == "doctor" {
         return execute_doctor_cli(&mut out, &mut err, &args[1..]);
     }
@@ -93,6 +98,7 @@ where
             && first != "route"
             && first != "propose"
             && first != "proposals"
+            && first != "publish"
             && first != "up"
             && first != "--help"
             && first != "-h"
@@ -122,6 +128,7 @@ where
             || args[0] == "graph"
             || args[0] == "route"
             || args[0] == "propose"
+            || args[0] == "publish"
             || args[0] == "up")
     {
         Some(args[0].as_str())
@@ -412,6 +419,41 @@ where
                 .disable_help_flag(true)
                 .disable_version_flag(true)
                 .arg(Arg::new("PATH").required(true).value_name("PATH")),
+        )
+        .subcommand(
+            Command::new("publish")
+                .about("Publish accepted knowledge explicitly through markdown or Rspress surfaces")
+                .disable_help_flag(true)
+                .disable_version_flag(true)
+                .subcommand_required(false)
+                .subcommand(
+                    Command::new("markdown")
+                        .disable_help_flag(true)
+                        .disable_version_flag(true)
+                        .arg(Arg::new("PATH").required(true).value_name("PATH"))
+                        .arg(
+                            Arg::new("output")
+                                .long("output")
+                                .value_name("DIR")
+                                .required(true)
+                                .num_args(1)
+                                .action(ArgAction::Set),
+                        ),
+                )
+                .subcommand(
+                    Command::new("rspress")
+                        .disable_help_flag(true)
+                        .disable_version_flag(true)
+                        .arg(Arg::new("PATH").required(true).value_name("PATH"))
+                        .arg(
+                            Arg::new("docs-root")
+                                .long("docs-root")
+                                .value_name("DIR")
+                                .required(true)
+                                .num_args(1)
+                                .action(ArgAction::Set),
+                        ),
+                ),
         );
 
     match cmd.try_get_matches_from(&args) {

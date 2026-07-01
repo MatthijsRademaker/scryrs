@@ -78,6 +78,13 @@ COMMANDS\n\
       Accept a validated proposal without mutating the proposal inbox artifact.\n\
   scryrs proposals reject <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>\n\
       Reject a validated proposal without mutating the proposal inbox artifact.\n\
+  scryrs publish markdown <PATH> --output <DIR>\n\
+      Publish accepted Markdown-backed review decisions to generic Markdown only.\n\
+      Reads .scryrs/accepted/ only and never deletes stale generic Markdown output.\n\
+  scryrs publish rspress <PATH> --docs-root <DIR>\n\
+      Publish accepted Markdown-backed review decisions to Rspress accepted-knowledge pages.\n\
+      Updates accepted-knowledge/ and _nav.json deterministically after validating nav input.\n\
+      Publishing remains explicit: `scryrs proposals accept` does not publish automatically.\n\
   scryrs dashboard [--mode live|local] [--port <PORT>] [--bind <ADDR>] [--server-url <URL>] [--repository-id <ID>] [--no-open] [--dev]\n\
       Start dashboard server and open the browser dashboard (live by default).\n\
   scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]\n\
@@ -155,6 +162,8 @@ EXAMPLES\n\
   scryrs dashboard --port 9090 --no-open\n\
   scryrs server\n\
   scryrs server --port 9091\n\
+  scryrs publish markdown . --output ./published-markdown\n\
+  scryrs publish rspress . --docs-root ./.devagent/docs/docs\n\
   scryrs graph .
   scryrs route .
   scryrs route explain . --query \"authentication\"\n\n\
@@ -163,9 +172,9 @@ OPTIONS\n\
   -V, --version    Print version and exit\n\
   -hj, --help-json Print machine-readable CLI surface description and exit\n\n\
 EXIT CODES\n\
-  0    Success (hotspots: JSON written; record local: all events accepted; record remote: no rejections or failures; init: hook installed; up: workspace-managed compose stack started; doctor: only ok/warn findings; propose/proposals: artifacts written or listed successfully; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)\n\
-  1    Hotspots: storage error. Record: rejected events or I/O error (local or server rejections). Init: I/O error. Up: docker invocation failure. Doctor: output write failure. Proposals: serialization or filesystem write failure. Dashboard: port in use or artifact read error. Server: port in use or store error.\n\
-  2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, or self-install refusal; setup: unknown/missing mode, source-checkout refusal (live), or missing/invalid/conflicting live configuration; up: missing scaffold files, missing external network, or unexpected arguments; doctor: one or more structural error findings; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; route explain: missing PATH, missing --query, missing/malformed/schema-mismatched routes.json; dashboard: invalid flags, bind failure, or partial live-mode configuration; server: invalid flags or bind failure",
+  0    Success (hotspots: JSON written; record local: all events accepted; record remote: no rejections or failures; init: hook installed; up: workspace-managed compose stack started; doctor: only ok/warn findings; propose/proposals: artifacts written or listed successfully; publish: accepted knowledge published successfully; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)\n\
+  1    Hotspots: storage error. Record: rejected events or I/O error (local or server rejections). Init: I/O error. Up: docker invocation failure. Doctor: output write failure. Proposals: serialization or filesystem write failure. Publish: runtime or filesystem failure. Dashboard: port in use or artifact read error. Server: port in use or store error.\n\
+  2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, or self-install refusal; setup: unknown/missing mode, source-checkout refusal (live), or missing/invalid/conflicting live configuration; up: missing scaffold files, missing external network, or unexpected arguments; doctor: one or more structural error findings; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; publish: usage error or publish-input validation failure (invalid accepted artifacts, malformed _nav.json); route explain: missing PATH, missing --query, missing/malformed/schema-mismatched routes.json; dashboard: invalid flags, bind failure, or partial live-mode configuration; server: invalid flags or bind failure",
         SCHEMA_VERSION, SCHEMA_VERSION, HOTSPOT_SCHEMA_VERSION
     )
 }
