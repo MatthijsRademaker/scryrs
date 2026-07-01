@@ -92,7 +92,8 @@ The CLI help (`--help`), CLI machine-readable surface (`--help-json`), route-man
 - **WHEN** the user runs `scryrs --help-json`
 - **THEN** the JSON output describes the full explain ranking chain
 - **AND** the route-hint field description states that plain projection omits `relevance`
-- **AND** the explain command description states that query matches populate it
+- **AND** the explain command description states that query matches populate it with the packed deterministic score
+- **AND** it states that the packed score is not the authoritative sort key
 
 #### Scenario: Consumer docs no longer describe explain ranking as ordinal only
 

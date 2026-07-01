@@ -56,17 +56,20 @@ COMMANDS\n\
   scryrs route explain <PATH> --query <TEXT>\n\
       Query the route manifest for matching entries.\n\
       Case-insensitive substring match against label, subject, id, target, kind,\n\
-      and evidence_links[].subject. Match tier (exact > prefix > substring) orders\n\
-      results. Returns single-line RouteHintDocument JSON. Zero matches produces\n\
-      valid document with empty hints array.\n\
-      Example: scryrs route explain . --query \"authentication\"\n\
+      and evidence_links[].subject. Match tiers are exact > prefix > substring,\n\
+      then the authoritative explain ranking chain is\n\
+      (tier DESC, score DESC, count DESC, manifest_index ASC, route_id ASC).\n\
+      Returns single-line RouteHintDocument JSON. Zero matches produces valid\n\
+      document with empty hints array. Example: scryrs route explain . --query\n\
+      \"authentication\"\n\
 \n\
       Route hint contract: Each route entry projects to a RouteHintItem\n\
       (HINT_SCHEMA_VERSION 1.0.0) with routeId, target, label, 1-based\n\
-      ordinal rank, evidence citations, and a template-derived reason.\n\
-      The reason field appends \"; query match on <fields>\" for explain results.\n\
-      Rank is a deterministic ordinal derived from manifest entry order;\n\
-      relevance is deferred (None).\n\
+      ordinal rank, evidence citations, and a template-derived reason. The\n\
+      reason field appends \"; query match on <fields>\" for explain results.\n\
+      rank remains the manifest ordinal; explain relevance is the packed score\n\
+      tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 +\n\
+      min(evidence_count, 999). plain route projection omits relevance.\n\
   scryrs propose <PATH>\n\
       Generate reviewable knowledge proposals from hotspot and graph evidence.\n\
       Writes validated ProposalDocument files under .scryrs/proposals/.\n\

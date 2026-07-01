@@ -23,17 +23,17 @@ The system SHALL define a `RouteHintDocument` wire contract with an independent 
 
 ### Requirement: Route hint items carry structured identity, target, rank, and evidence
 
-Each `RouteHintItem` SHALL include `routeId` (the source route entry id), `target` (normalized load target), `label` (human-readable label), `rank` (1-based ordinal from manifest sort order), `relevance` (optional, deferred for future enhancement), `reason` (deterministic template text), and `evidence` (provenance links copied from the source `RouteEntry`).
+Each `RouteHintItem` SHALL include `routeId` (the source route entry id), `target` (normalized load target), `label` (human-readable label), `rank` (1-based ordinal from manifest sort order), `relevance` (optional; omitted by plain `hints_from_manifest` projection and populated for `scryrs route explain` query matches), `reason` (deterministic template text, with explain-specific query-match suffix when applicable), and `evidence` (provenance links copied from the source `RouteEntry`).
 
-#### Scenario: Route hint fields match the source route entry
+#### Scenario: Route hint fields match the source route entry for plain projection
 
 - **GIVEN** a `RouteManifestDocument` with one route entry: `id = "file:src/main.rs"`, `label = "src/main.rs"`, `target = "file:src/main.rs"`, `subjectKind = "file"`, and one `EvidenceLink` with `sourceKind = "local_trace_row"`
-- **WHEN** the hint producer projects this entry
+- **WHEN** `hints_from_manifest` projects this entry
 - **THEN** the hint item's `routeId` is `"file:src/main.rs"`
 - **AND** `target` is `"file:src/main.rs"`
 - **AND** `label` is `"src/main.rs"`
 - **AND** `rank` is `1`
-- **AND** `relevance` is absent (null in JSON)
+- **AND** `relevance` is absent from the serialized JSON
 - **AND** `reason` contains `"Route 'src/main.rs' (file:src/main.rs): 1 evidence link(s), subject kind file"`
 - **AND** `evidence` contains the same evidence link with `sourceKind = "local_trace_row"`
 
@@ -45,17 +45,24 @@ Each `RouteHintItem` SHALL include `routeId` (the source route entry id), `targe
 - **AND** the hint for `"file:zzz.rs"` has `rank = 2`
 - **AND** the hint for `"search:routing"` has `rank = 3`
 
-#### Scenario: Relevance is deferred and absent in initial implementation
+#### Scenario: Plain projection omits relevance
 
 - **GIVEN** any valid route manifest
-- **WHEN** the hint producer projects hints
+- **WHEN** `hints_from_manifest` projects hints
 - **THEN** every `RouteHintItem.relevance` is `None`
 - **AND** the serialized JSON excludes the `relevance` field entirely
+
+#### Scenario: Explain matches populate deterministic relevance
+
+- **GIVEN** a route entry matched by `scryrs route explain`
+- **WHEN** the explain handler serializes the matched hint
+- **THEN** `RouteHintItem.relevance` is present as a numeric `u32`
+- **AND** the value equals `tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999)`
 
 #### Scenario: Reason is a deterministic template citing entry identity and evidence count
 
 - **GIVEN** a route entry with `label = "auth"`, `id = "search:auth"`, `subjectKind = "search"`, and 3 `evidenceLinks`
-- **WHEN** the hint producer generates the reason
+- **WHEN** the plain hint producer generates the reason
 - **THEN** `reason` equals `"Route 'auth' (search:auth): 3 evidence link(s), subject kind search"`
 
 ### Requirement: Hint generation preserves subject identity boundaries
@@ -107,27 +114,28 @@ The hint producer SHALL consume `RouteManifestDocument` as a read-only input. It
 
 ### Requirement: Route-hint contract is documented for consumers
 
-The CLI help surface (`--help` and `--help-json`), the CLI contract documentation (`cli-v0-contract.md`), and the route-manifest documentation (`route-manifests.md`) SHALL document the route-hint schema shape, its evidence sources, and that ranking behavior is deterministic and deferred rather than a final ranking policy.
+The CLI help surface (`--help` and `--help-json`), the CLI contract documentation (`cli-v0-contract.md`), and the route-manifest documentation (`route-manifests.md`) SHALL document the route-hint schema shape, its evidence sources, `rank` as the manifest ordinal, plain-projection `relevance` omission, and explain-match `relevance` population. Those surfaces SHALL NOT describe explain `relevance` as always deferred/`None` or explain ranking as manifest-order only.
 
-#### Scenario: Help text mentions the route-hint contract
+#### Scenario: Help text scopes relevance by context
 
 - **GIVEN** the route-hint contract is defined
 - **WHEN** the user runs `scryrs --help`
-- **THEN** the help output under `scryrs route <PATH>` includes a note about the route-hint schema
-- **AND** it states that `scryrs route explain` is deferred
+- **THEN** the help output explains that `rank` is the manifest ordinal
+- **AND** it explains that plain route-hint projection omits `relevance`
+- **AND** it explains that `scryrs route explain` populates deterministic `relevance` for matches
 
-#### Scenario: Help JSON documents the route-hint output shape
+#### Scenario: Help JSON documents conditional relevance population
 
 - **GIVEN** the route-hint contract is defined
 - **WHEN** the user runs `scryrs --help-json`
-- **THEN** the JSON output includes a `routeHintOutput` section under the `route` command entry
-- **AND** it describes the `RouteHintDocument` fields and deferred-ranking policy
+- **THEN** the JSON output documents the `RouteHintDocument` fields
+- **AND** the `relevance` field description distinguishes plain projection from explain output
 
-#### Scenario: Consumer documentation explains deferred ranking
+#### Scenario: Consumer documentation distinguishes rank from relevance
 
 - **GIVEN** the route-hint contract documentation exists
 - **WHEN** a consumer reads `cli-v0-contract.md` or `route-manifests.md`
-- **THEN** the documentation explicitly states that `rank` is a deterministic ordinal placeholder
-- **AND** `relevance` is deferred for future enhancement
-- **AND** neither field represents a frozen long-term ranking formula
+- **THEN** the documentation states that `rank` is the deterministic manifest ordinal
+- **AND** it states that explain `relevance` is a deterministic packed score for matched hints
+- **AND** it states that plain projection still omits `relevance`
 

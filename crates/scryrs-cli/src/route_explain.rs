@@ -195,12 +195,16 @@ MATCHING\n\
     label, subject, id, target, kind, evidence_links[].subject\n\n\
   Matches are tiered:\n\
     Exact match (tier 3) > prefix match (tier 2) > substring match (tier 1)\n\
-    Within a tier, entries follow manifest order (by id ascending).\n\n\
+    Authoritative order: (tier DESC, score DESC, count DESC, manifest_index ASC, route_id ASC)\n\
+    score is the saturating sum of evidence link scores; count is evidence link count.\n\n\
 OUTPUT\n\
   Single-line JSON RouteHintDocument with schemaVersion and hints array.\n\
-  Each hint carries routeId, target, label, rank, reason, and evidence.\n\
-  The reason field includes a \"; query match on <fields>\" suffix.\n\
-  Zero matches produces a valid document with an empty hints array.\n\n\
+  Each hint carries routeId, target, label, rank, relevance, reason, and evidence.\n\
+  rank remains the manifest ordinal; explain relevance is the packed score\n\
+  tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999).\n\
+  plain route projection omits relevance. The reason field includes a\n\
+  \"; query match on <fields>\" suffix. Zero matches produces a valid\n\
+  document with an empty hints array.\n\n\
 EXIT CODES\n\
   0    Success (including zero-match results)\n\
   1    Serialization or stdout write failure\n\

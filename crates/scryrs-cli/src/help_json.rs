@@ -465,11 +465,11 @@ pub(crate) fn cli_surface_doc() -> String {
                                 {"tier": 2, "description": "Prefix match"},
                                 {"tier": 1, "description": "Substring match"}
                             ],
-                            "tieBreak": "Manifest entry order (by id ascending) within each tier"
+                            "tieBreak": "(tier DESC, score DESC, count DESC, manifest_index ASC, route_id ASC)"
                         },
                         "output": {
                             "mimeType": "application/json",
-                            "description": "Single-line RouteHintDocument JSON with schemaVersion and hints array. The reason field appends '; query match on <fields>' suffix. Zero matches produces a valid document with empty hints array."
+                            "description": "Single-line RouteHintDocument JSON with schemaVersion and hints array. rank remains the manifest ordinal; explain relevance is the packed score tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999). The reason field appends '; query match on <fields>' suffix. Zero matches produces a valid document with empty hints array."
                         },
                         "exitCodes": {
                             "0": "Success (including zero-match results)",
@@ -484,7 +484,7 @@ pub(crate) fn cli_surface_doc() -> String {
                 },
                 "routeHintOutput": {
                     "mimeType": "application/json",
-                    "description": "Deterministic RouteHintDocument projection derived from the route manifest. Each route entry produces one RouteHintItem with identity, target, label, 1-based ordinal rank, evidence citations, and a template-derived reason. Rank is a deterministic ordinal derived from manifest entry sort order; relevance is deferred (None). Use `scryrs route explain <PATH> --query <TEXT>` to filter and rank hints by query match.",
+                    "description": "Deterministic RouteHintDocument projection derived from the route manifest. Each route entry produces one RouteHintItem with identity, target, label, 1-based ordinal rank, evidence citations, and a template-derived reason. Plain route projection omits relevance; `scryrs route explain <PATH> --query <TEXT>` populates it with the packed explain score tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999).",
                     "fields": [
                         {"name": "schemaVersion", "type": "string", "description": "Route hint schema version (always HINT_SCHEMA_VERSION = 1.0.0)", "optional": false},
                         {"name": "hints", "type": "array", "description": "Deterministically ordered array of RouteHintItem objects", "optional": false}
@@ -494,7 +494,7 @@ pub(crate) fn cli_surface_doc() -> String {
                         {"name": "target", "type": "string", "description": "Normalized load target", "optional": false},
                         {"name": "label", "type": "string", "description": "Human-readable label", "optional": false},
                         {"name": "rank", "type": "number", "description": "1-based ordinal rank from manifest entry sort order (deterministic ordinal, not final ranking)", "optional": false},
-                        {"name": "relevance", "type": "number|null", "description": "Optional relevance score — deferred for future enhancement (always null in current version)", "optional": true},
+                        {"name": "relevance", "type": "number|null", "description": "Optional relevance score — omitted by plain route projection and populated for explain matches using the packed deterministic formula", "optional": true},
                         {"name": "reason", "type": "string", "description": "Deterministic template reason citing route entry identity and evidence count", "optional": false},
                         {"name": "evidence", "type": "array", "description": "Evidence provenance links copied from source route entry", "optional": true}
                     ],
@@ -517,7 +517,7 @@ pub(crate) fn cli_surface_doc() -> String {
                             }
                         ]
                     },
-                    "rankingPolicy": "Rank is a deterministic 1-based ordinal derived from manifest entry sort order (by id ascending). Relevance is deferred (None) and does not represent a frozen long-term ranking formula. Both fields are explicitly documented as deferred or ordinal."
+                    "rankingPolicy": "Rank is a deterministic 1-based ordinal derived from manifest entry sort order (by id ascending). Explain ordering uses (tier DESC, score DESC, count DESC, manifest_index ASC, route_id ASC); packed relevance is a display-friendly derivative of that tuple, not the sort key. Plain route projection still omits relevance."
                 }
             }
         ],

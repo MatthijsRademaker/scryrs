@@ -36,7 +36,7 @@ Each `RouteHintItem` SHALL include `routeId` (the source route entry id), `targe
 - **GIVEN** a route entry matched by `scryrs route explain`
 - **WHEN** the explain handler serializes the matched hint
 - **THEN** `RouteHintItem.relevance` is present as a numeric `u32`
-- **AND** the value is derived from match tier, total evidence score, and evidence count
+- **AND** the value equals `tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999)`
 
 #### Scenario: Reason is a deterministic template citing entry identity and evidence count
 
