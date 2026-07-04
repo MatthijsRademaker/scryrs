@@ -1,35 +1,3 @@
-## ADDED Requirements
-
-### Requirement: Repeated FailedLookup evidence generates debugging playbook proposals
-
-The curator engine SHALL generate a `debugging_playbook` proposal for hotspot entries where `counts.eventType["FailedLookup"] >= 2`. The generated proposal SHALL use `ProposedContent::Markdown` with a deterministic template that includes a subject header, an Observed Failure Signal section citing the FailedLookup count and score, a Likely Causes section with placeholder bullets, and an Evidence section referencing row IDs. `debugging_playbook` proposals SHALL be additive with `skill` and `memory_patch` proposals — a hotspot crossing multiple thresholds SHALL generate all qualifying proposal types.
-
-#### Scenario: Repeated FailedLookup events generate a playbook proposal
-
-- **GIVEN** a hotspot entry with `counts.eventType["FailedLookup"] >= 2`
-- **WHEN** the curator engine processes it
-- **THEN** a `debugging_playbook` proposal is generated with `targetType = debugging_playbook`
-- **AND** `proposedContent` is non-empty markdown containing a subject header
-- **AND** the markdown includes an "Observed Failure Signal" section citing the FailedLookup count and score
-- **AND** the markdown includes a "Likely Causes" section with placeholder bullets
-- **AND** the markdown includes an "Evidence" section referencing row IDs
-- **AND** the proposal's evidence links use `sourceKind = hotspot_subject` and carry the hotspot entry's `rowIds`
-- **AND** the proposal validates as a `ProposalDocument`
-
-#### Scenario: Below threshold generates no debugging_playbook
-
-- **GIVEN** a hotspot entry with `counts.eventType["FailedLookup"]` equal to 0 or 1
-- **WHEN** the curator engine processes it
-- **THEN** no `debugging_playbook` proposal is generated
-- **AND** single low-signal failed lookups do not spam the proposal inbox
-
-#### Scenario: debugging_playbook is additive with skill and memory_patch
-
-- **GIVEN** a hotspot entry with `counts.eventType["FailedLookup"] >= 2`, at least one failure outcome, and a score crossing the memory_patch threshold
-- **WHEN** the curator engine processes it
-- **THEN** a `debugging_playbook` proposal, a `skill` proposal, and a `memory_patch` proposal SHALL all be generated for the same hotspot subject
-- **AND** the additive overlap is intentional v1 behavior — different target types serve different consumption paths
-
 ## MODIFIED Requirements
 
 ### Requirement: V1 deterministic rules map evidence to target types

@@ -30,7 +30,7 @@ The contract supports six target types:
 | `docs_note` | Non-empty markdown | Generated |
 | `adr` | Non-empty markdown | Generated |
 | `skill` | Non-empty markdown | Generated |
-| `debugging_playbook` | Non-empty markdown | Not generated in v1 |
+| `debugging_playbook` | Non-empty markdown | Generated (requires FailedLookup count >= 2) |
 | `memory_patch` | Structured JSON object | Generated |
 | `semantic_graph_grouping` | Structured grouping object | Generated only when graph input already carries qualifying hotspot-backed node families |
 
@@ -85,8 +85,9 @@ Behavior:
 | Memory patch | `score >= 4` and failure ratio `>= 0.5` | `memory_patch` proposal |
 | ADR | Same subject appears across `>= 2` subject kinds with aggregate score `>= 10` | `adr` proposal |
 | Semantic grouping | Cross-kind graph node family shares subject stem and already carries qualifying hotspot-backed evidence | `semantic_graph_grouping` proposal |
+| Debugging playbook | `counts.eventType["FailedLookup"] >= 2` | `debugging_playbook` proposal |
 
-`debugging_playbook` is intentionally excluded from deterministic generation in v1.
+`debugging_playbook` proposals are additive with `skill` and `memory_patch` — a hotspot crossing the FailedLookup threshold and also meeting the failure-outcome or memory-patch thresholds generates all qualifying proposal types. This additive overlap is intentional v1 behavior: different target types serve different consumption paths (skill for agent context, playbook for human debugging, patch for memory augmentation).
 
 ### Semantic grouping boundary
 

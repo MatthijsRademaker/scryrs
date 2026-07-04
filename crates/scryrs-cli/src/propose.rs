@@ -194,6 +194,7 @@ mod tests {
         .expect("write vision.md");
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn make_hotspot(
         subject_kind: &str,
         subject: &str,
@@ -202,6 +203,7 @@ mod tests {
         row_ids: Vec<u64>,
         outcome_failure: u32,
         outcome_success: u32,
+        event_type_failed_lookup: u32,
     ) -> HotspotEntry {
         let mut outcome = HashMap::new();
         if outcome_success > 0 {
@@ -210,13 +212,17 @@ mod tests {
         if outcome_failure > 0 {
             outcome.insert("failure".to_string(), outcome_failure);
         }
+        let mut event_type = HashMap::new();
+        if event_type_failed_lookup > 0 {
+            event_type.insert("FailedLookup".to_string(), event_type_failed_lookup);
+        }
         HotspotEntry {
             rank,
             subjectKind: subject_kind.to_string(),
             subject: subject.to_string(),
             score,
             counts: HotspotCounts {
-                eventType: HashMap::new(),
+                eventType: event_type,
                 outcome,
             },
             sessionCount: 1,
@@ -234,8 +240,8 @@ mod tests {
 
         let tmp = TempDir::new().expect("tempdir");
         let entries = vec![
-            make_hotspot("file", "src/main.rs", 10, 1, vec![1], 0, 5),
-            make_hotspot("search", "routing", 5, 2, vec![2], 0, 3),
+            make_hotspot("file", "src/main.rs", 10, 1, vec![1], 0, 5, 0),
+            make_hotspot("search", "routing", 5, 2, vec![2], 0, 3, 0),
         ];
         write_test_hotspots(tmp.path(), &entries, "2026-06-27T12:00:00Z");
         let graph = make_graph_doc(vec![], vec![]);
@@ -321,7 +327,7 @@ mod tests {
         use tempfile::TempDir;
 
         let tmp = TempDir::new().expect("tempdir");
-        let entries = vec![make_hotspot("file", "src/main.rs", 10, 1, vec![1], 0, 5)];
+        let entries = vec![make_hotspot("file", "src/main.rs", 10, 1, vec![1], 0, 5, 0)];
         write_test_hotspots(tmp.path(), &entries, "2026-06-27T12:00:00Z");
 
         let mut out = Vec::new();
@@ -343,7 +349,7 @@ mod tests {
         use tempfile::TempDir;
 
         let tmp = TempDir::new().expect("tempdir");
-        let entries = vec![make_hotspot("file", "src/main.rs", 10, 1, vec![1], 0, 5)];
+        let entries = vec![make_hotspot("file", "src/main.rs", 10, 1, vec![1], 0, 5, 0)];
         write_test_hotspots(tmp.path(), &entries, "2026-06-27T12:00:00Z");
         let scryrs_dir = tmp.path().join(".scryrs");
         std::fs::write(scryrs_dir.join("graph.json"), "not json").expect("write");
@@ -365,8 +371,8 @@ mod tests {
 
         let tmp = TempDir::new().expect("tempdir");
         let entries = vec![
-            make_hotspot("file", "src/main.rs", 10, 1, vec![1], 0, 5),
-            make_hotspot("search", "routing", 5, 2, vec![2], 0, 3),
+            make_hotspot("file", "src/main.rs", 10, 1, vec![1], 0, 5, 0),
+            make_hotspot("search", "routing", 5, 2, vec![2], 0, 3, 0),
         ];
         write_test_hotspots(tmp.path(), &entries, "2026-06-27T12:00:00Z");
         let graph = make_graph_doc(vec![], vec![]);
@@ -410,7 +416,7 @@ mod tests {
         let tmp = TempDir::new().expect("tempdir");
 
         // Seed input artifacts.
-        let entries = vec![make_hotspot("file", "src/main.rs", 10, 1, vec![1], 0, 5)];
+        let entries = vec![make_hotspot("file", "src/main.rs", 10, 1, vec![1], 0, 5, 0)];
         write_test_hotspots(tmp.path(), &entries, "2026-06-27T12:00:00Z");
         let graph = make_graph_doc(vec![], vec![]);
         write_test_graph(tmp.path(), &graph);
@@ -441,7 +447,7 @@ mod tests {
         use tempfile::TempDir;
 
         let tmp = TempDir::new().expect("tempdir");
-        let entries = vec![make_hotspot("file", "src/main.rs", 10, 1, vec![1], 0, 5)];
+        let entries = vec![make_hotspot("file", "src/main.rs", 10, 1, vec![1], 0, 5, 0)];
         write_test_hotspots(tmp.path(), &entries, "2026-06-27T12:00:00Z");
         let graph = make_graph_doc(vec![], vec![]);
         write_test_graph(tmp.path(), &graph);
@@ -486,7 +492,7 @@ mod tests {
         let tmp = TempDir::new().expect("tempdir");
 
         // First run: one entry.
-        let entries1 = vec![make_hotspot("file", "src/a.rs", 10, 1, vec![1], 0, 5)];
+        let entries1 = vec![make_hotspot("file", "src/a.rs", 10, 1, vec![1], 0, 5, 0)];
         write_test_hotspots(tmp.path(), &entries1, "2026-06-27T12:00:00Z");
         let graph = make_graph_doc(vec![], vec![]);
         write_test_graph(tmp.path(), &graph);
@@ -504,7 +510,7 @@ mod tests {
             .collect();
 
         // Second run: different entry.
-        let entries2 = vec![make_hotspot("file", "src/b.rs", 10, 1, vec![2], 0, 5)];
+        let entries2 = vec![make_hotspot("file", "src/b.rs", 10, 1, vec![2], 0, 5, 0)];
         write_test_hotspots(tmp.path(), &entries2, "2026-06-27T12:00:00Z");
 
         let mut out2 = Vec::new();
@@ -534,7 +540,7 @@ mod tests {
         use tempfile::TempDir;
 
         let tmp = TempDir::new().expect("tempdir");
-        let entries = vec![make_hotspot("file", "auth", 10, 1, vec![1], 0, 5)];
+        let entries = vec![make_hotspot("file", "auth", 10, 1, vec![1], 0, 5, 0)];
         write_test_hotspots(tmp.path(), &entries, "2026-06-27T12:00:00Z");
 
         let graph = make_graph_doc(
@@ -604,5 +610,90 @@ mod tests {
             }
         }
         assert!(found, "semantic_graph_grouping proposal must exist");
+    }
+
+    // --- debugging_playbook integration tests ---
+
+    #[test]
+    fn debugging_playbook_proposal_files_generated_at_threshold_2() {
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().expect("tempdir");
+        let entries = vec![make_hotspot(
+            "symbol",
+            "SomeType",
+            12,
+            1,
+            vec![100, 200],
+            2,
+            0,
+            2,
+        )];
+        write_test_hotspots(tmp.path(), &entries, "2026-06-27T12:00:00Z");
+        let graph = make_graph_doc(vec![], vec![]);
+        write_test_graph(tmp.path(), &graph);
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        assert_eq!(
+            write_proposals(&mut out, &mut err, tmp.path().to_str().unwrap()),
+            0
+        );
+
+        let proposals_dir = tmp.path().join(".scryrs/proposals");
+        let mut found_playbook = false;
+        for entry in std::fs::read_dir(&proposals_dir)
+            .expect("read dir")
+            .flatten()
+        {
+            let content = std::fs::read_to_string(entry.path()).expect("read proposal");
+            let doc: ProposalDocument =
+                serde_json::from_str(&content).expect("valid ProposalDocument");
+            if doc.target_type == ProposalTargetType::DebuggingPlaybook {
+                found_playbook = true;
+                assert_eq!(doc.target_type, ProposalTargetType::DebuggingPlaybook);
+                assert!(!doc.title.is_empty());
+                assert!(!doc.rationale.is_empty());
+                assert!(!doc.evidence.is_empty());
+                doc.validate().expect("playbook must validate");
+            }
+        }
+        assert!(
+            found_playbook,
+            "debugging_playbook proposal must exist when FailedLookup >= 2"
+        );
+    }
+
+    #[test]
+    fn debugging_playbook_not_generated_at_threshold_1() {
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().expect("tempdir");
+        let entries = vec![make_hotspot("symbol", "SomeType", 6, 1, vec![100], 1, 0, 1)];
+        write_test_hotspots(tmp.path(), &entries, "2026-06-27T12:00:00Z");
+        let graph = make_graph_doc(vec![], vec![]);
+        write_test_graph(tmp.path(), &graph);
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        assert_eq!(
+            write_proposals(&mut out, &mut err, tmp.path().to_str().unwrap()),
+            0
+        );
+
+        let proposals_dir = tmp.path().join(".scryrs/proposals");
+        for entry in std::fs::read_dir(&proposals_dir)
+            .expect("read dir")
+            .flatten()
+        {
+            let content = std::fs::read_to_string(entry.path()).expect("read proposal");
+            let doc: ProposalDocument =
+                serde_json::from_str(&content).expect("valid ProposalDocument");
+            assert_ne!(
+                doc.target_type,
+                ProposalTargetType::DebuggingPlaybook,
+                "must not generate debugging_playbook when FailedLookup = 1"
+            );
+        }
     }
 }
