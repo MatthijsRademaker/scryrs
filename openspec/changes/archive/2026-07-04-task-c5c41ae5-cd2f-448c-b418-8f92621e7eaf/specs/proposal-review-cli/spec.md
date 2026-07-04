@@ -1,8 +1,5 @@
-# proposal-review-cli Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change task-6548f8e5-91fe-433e-84fe-68bfa926b90d. Update Purpose after archive.
-## Requirements
 ### Requirement: Proposal review commands are registered and discoverable
 
 The CLI SHALL register a grouped `proposals` root command with `list`, `accept`, and `reject` subcommands. The final review command surface SHALL be:
@@ -166,4 +163,3 @@ Repeated `accept` or `reject` operations for the same proposal ID SHALL succeed 
 - **WHEN** a caller invokes `scryrs proposals list <PATH>`
 - **THEN** the command exits with code `2`
 - **AND** stderr reports that `acceptedContent` does not match the proposal
-

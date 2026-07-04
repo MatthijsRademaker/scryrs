@@ -84,8 +84,10 @@ COMMANDS\n\
   scryrs proposals list <PATH> [--state pending|accepted|rejected|all]\n\
       List pending and reviewed proposal states from .scryrs/proposals/,\n\
       .scryrs/accepted/, and .scryrs/rejected/ as deterministic JSON.\n\
-  scryrs proposals accept <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>\n\
+  scryrs proposals accept <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339> [--content-file <PATH> | --content-stdin]\n\
       Accept a validated proposal without mutating the proposal inbox artifact.\n\
+      Optional --content-file <PATH> or --content-stdin overrides accepted\n\
+      Markdown content (accept-only, mutually exclusive, Markdown targets only).\n\
   scryrs proposals reject <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>\n\
       Reject a validated proposal without mutating the proposal inbox artifact.\n\
   scryrs publish markdown <PATH> --output <DIR>\n\

@@ -1,17 +1,18 @@
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use scryrs_types::{
-    ProposalDocument, ProposalReviewDecision, ProposalTargetType, REVIEW_DECISION_SCHEMA_VERSION,
-    ReviewOutcome,
+    ProposalDocument, ProposalReviewDecision, ProposalTargetType, ProposedContent,
+    REVIEW_DECISION_SCHEMA_VERSION, ReviewOutcome,
 };
 
 pub(crate) fn execute_proposals_cli(
     out: &mut impl Write,
     err: &mut impl Write,
     args: &[String],
+    stdin: &mut impl Read,
 ) -> i32 {
     if args.is_empty() {
         return write_usage_error(
@@ -24,8 +25,8 @@ pub(crate) fn execute_proposals_cli(
     match args[0].as_str() {
         "--help" | "-h" => write_proposals_help(out).map_or(1, |_| 0),
         "list" => execute_list_cli(out, err, &args[1..]),
-        "accept" => execute_review_cli(out, err, &args[1..], ReviewOutcome::Accepted),
-        "reject" => execute_review_cli(out, err, &args[1..], ReviewOutcome::Rejected),
+        "accept" => execute_review_cli(out, err, &args[1..], ReviewOutcome::Accepted, stdin),
+        "reject" => execute_review_cli(out, err, &args[1..], ReviewOutcome::Rejected, stdin),
         other => write_usage_error(
             err,
             &format!("scryrs proposals: unknown subcommand '{other}'"),
@@ -40,13 +41,14 @@ pub(crate) fn write_proposals_help(out: &mut impl Write) -> io::Result<()> {
         "scryrs proposals — review proposal inbox artifacts\n\n\
 USAGE\n\
   scryrs proposals list <PATH> [--state pending|accepted|rejected|all]\n\
-  scryrs proposals accept <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>\n\
+  scryrs proposals accept <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339> [--content-file <PATH> | --content-stdin]\n\
   scryrs proposals reject <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>\n\n\
 SUBCOMMANDS\n\
   list\n\
       Emit deterministic JSON describing pending, accepted, and rejected proposal states.\n\
   accept\n\
       Write .scryrs/accepted/{{proposalId}}.json as a validated ProposalReviewDecision.\n\
+      Optional --content-file or --content-stdin overrides accepted Markdown content.\n\
   reject\n\
       Write .scryrs/rejected/{{proposalId}}.json as a validated ProposalReviewDecision.\n\n\
 REQUIRED REVIEW METADATA\n\
@@ -56,7 +58,8 @@ REQUIRED REVIEW METADATA\n\
 NOTES\n\
   singular `propose` generates proposals; plural `proposals` reviews them.\n\
   Review commands preserve .scryrs/proposals/{{proposalId}}.json unchanged.\n\
-  Review commands write only under .scryrs/accepted/ and .scryrs/rejected/.\n\n\
+  Review commands write only under .scryrs/accepted/ and .scryrs/rejected/.\n\
+  --content-file and --content-stdin are accept-only and mutually exclusive.\n\n\
 EXIT CODES\n\
   0    Success\n\
   1    Serialization or filesystem write failure\n\
@@ -76,9 +79,14 @@ State defaults to all."
 fn write_review_help(out: &mut impl Write, outcome: ReviewOutcome) -> io::Result<()> {
     let command = review_command_name(&outcome);
     let target_dir = review_dir_name(&outcome);
+    let content_override_flags = if outcome == ReviewOutcome::Accepted {
+        " [--content-file <PATH> | --content-stdin]"
+    } else {
+        ""
+    };
     writeln!(
         out,
-        "Usage: scryrs proposals {command} <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>\n\
+        "Usage: scryrs proposals {command} <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>{content_override_flags}\n\
 Writes .scryrs/{target_dir}/{{proposalId}}.json and preserves the source proposal inbox file."
     )
 }
@@ -171,6 +179,7 @@ fn execute_review_cli(
     err: &mut impl Write,
     args: &[String],
     outcome: ReviewOutcome,
+    stdin: &mut impl Read,
 ) -> i32 {
     if args.len() == 1 && (args[0] == "--help" || args[0] == "-h") {
         return write_review_help(out, outcome).map_or(1, |_| 0);
@@ -186,6 +195,8 @@ fn execute_review_cli(
     let mut reviewer: Option<&str> = None;
     let mut rationale: Option<&str> = None;
     let mut decided_at: Option<&str> = None;
+    let mut content_file: Option<&str> = None;
+    let mut content_stdin = false;
 
     let mut index = 0;
     while index < args.len() {
@@ -225,6 +236,70 @@ fn execute_review_cli(
                     );
                 }
                 rationale = Some(value.as_str());
+            }
+            "--content-file" => {
+                if outcome == ReviewOutcome::Rejected {
+                    return write_usage_error(
+                        err,
+                        &format!(
+                            "scryrs proposals {command}: --content-file is only supported on the accept subcommand",
+                        ),
+                        &[usage.as_str()],
+                    );
+                }
+                if content_stdin {
+                    return write_usage_error(
+                        err,
+                        &format!(
+                            "scryrs proposals {command}: --content-file and --content-stdin are mutually exclusive",
+                        ),
+                        &[usage.as_str()],
+                    );
+                }
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return write_usage_error(
+                        err,
+                        &format!("scryrs proposals {command}: missing value for --content-file"),
+                        &[usage.as_str()],
+                    );
+                };
+                if content_file.is_some() {
+                    return write_usage_error(
+                        err,
+                        &format!("scryrs proposals {command}: duplicate --content-file argument"),
+                        &[usage.as_str()],
+                    );
+                }
+                content_file = Some(value.as_str());
+            }
+            "--content-stdin" => {
+                if outcome == ReviewOutcome::Rejected {
+                    return write_usage_error(
+                        err,
+                        &format!(
+                            "scryrs proposals {command}: --content-stdin is only supported on the accept subcommand",
+                        ),
+                        &[usage.as_str()],
+                    );
+                }
+                if content_file.is_some() {
+                    return write_usage_error(
+                        err,
+                        &format!(
+                            "scryrs proposals {command}: --content-file and --content-stdin are mutually exclusive",
+                        ),
+                        &[usage.as_str()],
+                    );
+                }
+                if content_stdin {
+                    return write_usage_error(
+                        err,
+                        &format!("scryrs proposals {command}: duplicate --content-stdin argument"),
+                        &[usage.as_str()],
+                    );
+                }
+                content_stdin = true;
             }
             "--decided-at" => {
                 index += 1;
@@ -310,7 +385,63 @@ fn execute_review_cli(
         decided_at,
     };
 
-    match write_review_decision(path, proposal_id, outcome, metadata) {
+    let override_content = match (content_file, content_stdin) {
+        (Some(file_path), _) => {
+            let bytes = match std::fs::read(file_path) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    return write_usage_error(
+                        err,
+                        &format!(
+                            "scryrs proposals {command}: cannot read --content-file '{file_path}': {error}",
+                        ),
+                        &[usage.as_str()],
+                    );
+                }
+            };
+            if bytes.is_empty() {
+                return write_usage_error(
+                    err,
+                    &format!("scryrs proposals {command}: --content-file '{file_path}' is empty",),
+                    &[usage.as_str()],
+                );
+            }
+            let content = match String::from_utf8(bytes) {
+                Ok(s) => s,
+                Err(error) => {
+                    return write_usage_error(
+                        err,
+                        &format!(
+                            "scryrs proposals {command}: --content-file '{file_path}' is not valid UTF-8: {error}",
+                        ),
+                        &[usage.as_str()],
+                    );
+                }
+            };
+            Some(ProposedContent::Markdown(content))
+        }
+        (None, true) => {
+            let mut buf = String::new();
+            if stdin.read_to_string(&mut buf).is_err() {
+                return write_usage_error(
+                    err,
+                    &format!("scryrs proposals {command}: cannot read content from stdin"),
+                    &[usage.as_str()],
+                );
+            }
+            if buf.is_empty() {
+                return write_usage_error(
+                    err,
+                    &format!("scryrs proposals {command}: no content received on stdin"),
+                    &[usage.as_str()],
+                );
+            }
+            Some(ProposedContent::Markdown(buf))
+        }
+        (None, false) => None,
+    };
+
+    match write_review_decision(path, proposal_id, outcome, metadata, override_content) {
         Ok(()) => {
             let _ = out.flush();
             0
@@ -460,6 +591,7 @@ fn write_review_decision(
     proposal_id: &str,
     outcome: ReviewOutcome,
     metadata: ReviewMetadata<'_>,
+    override_content: Option<ProposedContent>,
 ) -> Result<(), CommandError> {
     let command_name = format!("scryrs proposals {}", review_command_name(&outcome));
     validate_rfc3339(metadata.decided_at).map_err(|message| {
@@ -490,7 +622,15 @@ fn write_review_decision(
     })?;
     validate_proposal_document(&command_name, &proposal_path, &proposal)?;
 
-    let decision = build_review_decision(&proposal, &outcome, metadata);
+    if override_content.is_some() && !is_markdown_target_type(&proposal.target_type) {
+        return Err(CommandError::input(format!(
+            "{command_name}: --content-file and --content-stdin are not supported for target type '{}'",
+            serde_json::to_string(&proposal.target_type)
+                .unwrap_or_else(|_| format!("{:?}", proposal.target_type))
+        )));
+    }
+
+    let decision = build_review_decision(&proposal, &outcome, metadata, override_content);
     decision.validate().map_err(|error| {
         CommandError::input(format!("{command_name}: invalid review metadata: {error}"))
     })?;
@@ -649,7 +789,9 @@ fn validate_review_decision_matches_proposal(
                     proposal.id
                 )));
             }
-            if decision.accepted_content.as_ref() != Some(&proposal.proposed_content) {
+            if !is_markdown_target_type(&proposal.target_type)
+                && decision.accepted_content.as_ref() != Some(&proposal.proposed_content)
+            {
                 return Err(CommandError::input(format!(
                     "{command_name}: reviewed artifact for proposal ID '{}' does not preserve acceptedContent",
                     proposal.id
@@ -661,16 +803,32 @@ fn validate_review_decision_matches_proposal(
     Ok(())
 }
 
+fn is_markdown_target_type(target_type: &ProposalTargetType) -> bool {
+    matches!(
+        target_type,
+        ProposalTargetType::DocsNote
+            | ProposalTargetType::Adr
+            | ProposalTargetType::Skill
+            | ProposalTargetType::DebuggingPlaybook
+    )
+}
+
 fn build_review_decision(
     proposal: &ProposalDocument,
     outcome: &ReviewOutcome,
     metadata: ReviewMetadata<'_>,
+    override_content: Option<ProposedContent>,
 ) -> ProposalReviewDecision {
     let (target_type, accepted_content) = match outcome {
-        ReviewOutcome::Accepted => (
-            Some(proposal.target_type.clone()),
-            Some(proposal.proposed_content.clone()),
-        ),
+        ReviewOutcome::Accepted => {
+            let content = match override_content {
+                Some(overridden) if is_markdown_target_type(&proposal.target_type) => {
+                    Some(overridden)
+                }
+                _ => Some(proposal.proposed_content.clone()),
+            };
+            (Some(proposal.target_type.clone()), content)
+        }
         ReviewOutcome::Rejected => (None, None),
     };
 

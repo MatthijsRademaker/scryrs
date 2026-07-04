@@ -39,6 +39,22 @@ fn make_markdown_proposal(subject: &str, title: &str, created_at: &str) -> Propo
     }
 }
 
+fn make_memory_patch_proposal(subject: &str, title: &str, created_at: &str) -> ProposalDocument {
+    let target_type = ProposalTargetType::MemoryPatch;
+    let proposed_content = ProposedContent::MemoryPatch(serde_json::json!({"patch": subject}));
+    let id = ProposalDocument::compute_id(&target_type, &proposed_content).expect("compute id");
+    ProposalDocument {
+        schema_version: PROPOSAL_SCHEMA_VERSION.into(),
+        id,
+        target_type,
+        title: title.to_string(),
+        rationale: format!("Memory patch for {subject}"),
+        proposed_content,
+        evidence: make_evidence(subject, 1),
+        created_at: created_at.to_string(),
+    }
+}
+
 fn write_proposal(root: &Path, proposal: &ProposalDocument) {
     let proposals_dir = root.join(".scryrs/proposals");
     fs::create_dir_all(&proposals_dir).expect("create proposals dir");
@@ -272,7 +288,7 @@ fn proposals_list_conflicting_terminal_state_exits_2() {
 #[test]
 fn proposals_list_invalid_review_artifact_exits_2() {
     let tmp = TempDir::new().expect("tempdir");
-    let proposal = make_markdown_proposal("alpha", "Alpha", "2026-06-28T10:00:00Z");
+    let proposal = make_memory_patch_proposal("alpha", "Alpha", "2026-06-28T10:00:00Z");
     write_proposal(tmp.path(), &proposal);
 
     let mut decision = make_review_decision(
@@ -282,7 +298,9 @@ fn proposals_list_invalid_review_artifact_exits_2() {
         "approved",
         "2026-06-28T12:00:00Z",
     );
-    decision.accepted_content = Some(ProposedContent::Markdown("different bytes".into()));
+    decision.accepted_content = Some(ProposedContent::MemoryPatch(
+        serde_json::json!({"different": "bytes"}),
+    ));
     write_review_decision(tmp.path(), &decision);
 
     let mut out = Vec::new();
@@ -724,4 +742,389 @@ fn proposals_commands_do_not_mutate_protected_paths() {
             )
         },
     );
+}
+
+#[test]
+fn proposals_accept_content_file_success() {
+    let tmp = TempDir::new().expect("tempdir");
+    let proposal = make_markdown_proposal("alpha", "Alpha", "2026-06-28T10:00:00Z");
+    write_proposal(tmp.path(), &proposal);
+
+    let content_file = tmp.path().join("reviewed.md");
+    fs::write(&content_file, "# Reviewed content\n").expect("write content file");
+
+    let proposal_path = tmp
+        .path()
+        .join(".scryrs/proposals")
+        .join(proposal.inbox_filename());
+    let proposal_before = fs::read(&proposal_path).expect("read proposal before");
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_eq!(
+        run_with_writers(
+            [
+                "proposals",
+                "accept",
+                tmp.path().to_str().unwrap(),
+                proposal.id.as_str(),
+                "--content-file",
+                content_file.to_str().unwrap(),
+                "--reviewer",
+                "alice",
+                "--rationale",
+                "edited",
+                "--decided-at",
+                "2026-06-28T12:00:00Z",
+            ],
+            &mut out,
+            &mut err,
+        ),
+        0
+    );
+    assert!(out.is_empty());
+    assert!(err.is_empty());
+
+    let decision_path = tmp
+        .path()
+        .join(".scryrs/accepted")
+        .join(format!("{}.json", proposal.id));
+    let decision_json = fs::read_to_string(&decision_path).expect("read decision");
+    let decision: ProposalReviewDecision =
+        serde_json::from_str(&decision_json).expect("decision json");
+    assert_eq!(decision.outcome, ReviewOutcome::Accepted);
+    assert_eq!(decision.target_type, Some(proposal.target_type.clone()));
+    assert_eq!(
+        decision.accepted_content,
+        Some(ProposedContent::Markdown("# Reviewed content\n".into()))
+    );
+    assert_eq!(decision.source_evidence, proposal.evidence);
+    assert_eq!(
+        fs::read(&proposal_path).expect("read proposal after"),
+        proposal_before
+    );
+}
+
+#[test]
+fn proposals_accept_content_stdin_success() {
+    let tmp = TempDir::new().expect("tempdir");
+    let proposal = make_markdown_proposal("alpha", "Alpha", "2026-06-28T10:00:00Z");
+    write_proposal(tmp.path(), &proposal);
+
+    let proposal_path = tmp
+        .path()
+        .join(".scryrs/proposals")
+        .join(proposal.inbox_filename());
+    let proposal_before = fs::read(&proposal_path).expect("read proposal before");
+
+    let stdin_content = "# Stdin reviewed\n".to_string();
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_eq!(
+        crate::run_with_io(
+            [
+                "proposals",
+                "accept",
+                tmp.path().to_str().unwrap(),
+                proposal.id.as_str(),
+                "--content-stdin",
+                "--reviewer",
+                "alice",
+                "--rationale",
+                "edited",
+                "--decided-at",
+                "2026-06-28T12:00:00Z",
+            ],
+            &mut out,
+            &mut err,
+            std::io::Cursor::new(stdin_content.clone()),
+        ),
+        0
+    );
+    assert!(out.is_empty());
+    assert!(err.is_empty());
+
+    let decision_path = tmp
+        .path()
+        .join(".scryrs/accepted")
+        .join(format!("{}.json", proposal.id));
+    let decision_json = fs::read_to_string(&decision_path).expect("read decision");
+    let decision: ProposalReviewDecision =
+        serde_json::from_str(&decision_json).expect("decision json");
+    assert_eq!(
+        decision.accepted_content,
+        Some(ProposedContent::Markdown(stdin_content))
+    );
+    assert_eq!(
+        fs::read(&proposal_path).expect("read proposal after"),
+        proposal_before
+    );
+}
+
+#[test]
+fn proposals_accept_content_file_and_stdin_mutually_exclusive() {
+    let tmp = TempDir::new().expect("tempdir");
+    let proposal = make_markdown_proposal("alpha", "Alpha", "2026-06-28T10:00:00Z");
+    write_proposal(tmp.path(), &proposal);
+
+    let content_file = tmp.path().join("reviewed.md");
+    fs::write(&content_file, "# Content\n").expect("write content file");
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_eq!(
+        run_with_writers(
+            [
+                "proposals",
+                "accept",
+                tmp.path().to_str().unwrap(),
+                proposal.id.as_str(),
+                "--content-file",
+                content_file.to_str().unwrap(),
+                "--content-stdin",
+                "--reviewer",
+                "alice",
+                "--rationale",
+                "edited",
+                "--decided-at",
+                "2026-06-28T12:00:00Z",
+            ],
+            &mut out,
+            &mut err,
+        ),
+        2
+    );
+    assert!(out.is_empty());
+    assert!(String::from_utf8_lossy(&err).contains("mutually exclusive"));
+}
+
+#[test]
+fn proposals_reject_rejects_content_override_flags() {
+    let tmp = TempDir::new().expect("tempdir");
+    let proposal = make_markdown_proposal("alpha", "Alpha", "2026-06-28T10:00:00Z");
+    write_proposal(tmp.path(), &proposal);
+
+    let content_file = tmp.path().join("reviewed.md");
+    fs::write(&content_file, "# Content\n").expect("write content file");
+
+    // --content-file on reject
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_eq!(
+        run_with_writers(
+            [
+                "proposals",
+                "reject",
+                tmp.path().to_str().unwrap(),
+                proposal.id.as_str(),
+                "--content-file",
+                content_file.to_str().unwrap(),
+                "--reviewer",
+                "alice",
+                "--rationale",
+                "no",
+                "--decided-at",
+                "2026-06-28T12:00:00Z",
+            ],
+            &mut out,
+            &mut err,
+        ),
+        2
+    );
+    assert!(String::from_utf8_lossy(&err).contains("only supported on the accept subcommand"));
+
+    // --content-stdin on reject
+    out.clear();
+    err.clear();
+    assert_eq!(
+        run_with_writers(
+            [
+                "proposals",
+                "reject",
+                tmp.path().to_str().unwrap(),
+                proposal.id.as_str(),
+                "--content-stdin",
+                "--reviewer",
+                "alice",
+                "--rationale",
+                "no",
+                "--decided-at",
+                "2026-06-28T12:00:00Z",
+            ],
+            &mut out,
+            &mut err,
+        ),
+        2
+    );
+    assert!(String::from_utf8_lossy(&err).contains("only supported on the accept subcommand"));
+}
+
+#[test]
+fn proposals_accept_content_override_structured_target_rejected() {
+    let tmp = TempDir::new().expect("tempdir");
+    let proposal = make_memory_patch_proposal("alpha", "Alpha", "2026-06-28T10:00:00Z");
+    write_proposal(tmp.path(), &proposal);
+
+    let content_file = tmp.path().join("reviewed.md");
+    fs::write(&content_file, "# Not applicable\n").expect("write content file");
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_eq!(
+        run_with_writers(
+            [
+                "proposals",
+                "accept",
+                tmp.path().to_str().unwrap(),
+                proposal.id.as_str(),
+                "--content-file",
+                content_file.to_str().unwrap(),
+                "--reviewer",
+                "alice",
+                "--rationale",
+                "approved",
+                "--decided-at",
+                "2026-06-28T12:00:00Z",
+            ],
+            &mut out,
+            &mut err,
+        ),
+        2
+    );
+    assert!(out.is_empty());
+    assert!(String::from_utf8_lossy(&err).contains("not supported for target type"));
+    assert!(
+        !tmp.path()
+            .join(".scryrs/accepted")
+            .join(format!("{}.json", proposal.id))
+            .exists()
+    );
+}
+
+#[test]
+fn proposals_accept_overridden_content_idempotent() {
+    let tmp = TempDir::new().expect("tempdir");
+    let proposal = make_markdown_proposal("alpha", "Alpha", "2026-06-28T10:00:00Z");
+    write_proposal(tmp.path(), &proposal);
+
+    let content_file = tmp.path().join("reviewed.md");
+    fs::write(&content_file, "# Reviewed\n").expect("write content file");
+
+    let args = [
+        "proposals",
+        "accept",
+        tmp.path().to_str().unwrap(),
+        proposal.id.as_str(),
+        "--content-file",
+        content_file.to_str().unwrap(),
+        "--reviewer",
+        "alice",
+        "--rationale",
+        "approved",
+        "--decided-at",
+        "2026-06-28T12:00:00Z",
+    ];
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_eq!(run_with_writers(args, &mut out, &mut err), 0);
+    out.clear();
+    err.clear();
+    assert_eq!(run_with_writers(args, &mut out, &mut err), 0);
+    assert!(out.is_empty());
+    assert!(err.is_empty());
+}
+
+#[test]
+fn proposals_accept_overridden_content_conflict_different_bytes() {
+    let tmp = TempDir::new().expect("tempdir");
+    let proposal = make_markdown_proposal("alpha", "Alpha", "2026-06-28T10:00:00Z");
+    write_proposal(tmp.path(), &proposal);
+
+    let content_file = tmp.path().join("reviewed.md");
+    fs::write(&content_file, "# Reviewed v1\n").expect("write content file");
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_eq!(
+        run_with_writers(
+            [
+                "proposals",
+                "accept",
+                tmp.path().to_str().unwrap(),
+                proposal.id.as_str(),
+                "--content-file",
+                content_file.to_str().unwrap(),
+                "--reviewer",
+                "alice",
+                "--rationale",
+                "approved",
+                "--decided-at",
+                "2026-06-28T12:00:00Z",
+            ],
+            &mut out,
+            &mut err,
+        ),
+        0
+    );
+
+    fs::write(&content_file, "# Reviewed v2 different\n").expect("overwrite content file");
+
+    out.clear();
+    err.clear();
+    assert_eq!(
+        run_with_writers(
+            [
+                "proposals",
+                "accept",
+                tmp.path().to_str().unwrap(),
+                proposal.id.as_str(),
+                "--content-file",
+                content_file.to_str().unwrap(),
+                "--reviewer",
+                "alice",
+                "--rationale",
+                "approved",
+                "--decided-at",
+                "2026-06-28T12:00:00Z",
+            ],
+            &mut out,
+            &mut err,
+        ),
+        2
+    );
+    assert!(String::from_utf8_lossy(&err).contains("refusing to overwrite"));
+}
+
+#[test]
+fn proposals_list_relaxed_markdown_accepted_content_passes() {
+    let tmp = TempDir::new().expect("tempdir");
+    let proposal = make_markdown_proposal("alpha", "Alpha", "2026-06-28T10:00:00Z");
+    write_proposal(tmp.path(), &proposal);
+
+    let mut decision = make_review_decision(
+        &proposal,
+        ReviewOutcome::Accepted,
+        "alice",
+        "approved",
+        "2026-06-28T12:00:00Z",
+    );
+    decision.accepted_content = Some(ProposedContent::Markdown("# Reviewed by human\n".into()));
+    write_review_decision(tmp.path(), &decision);
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_eq!(
+        run_with_writers(
+            ["proposals", "list", tmp.path().to_str().unwrap()],
+            &mut out,
+            &mut err,
+        ),
+        0
+    );
+    assert!(err.is_empty());
+    let rows: serde_json::Value = serde_json::from_slice(&out).expect("stdout json");
+    let rows = rows.as_array().expect("rows array");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["proposalId"], proposal.id);
+    assert_eq!(rows[0]["state"], "accepted");
 }

@@ -484,8 +484,8 @@ fn doctor_and_publish_appear_in_help_and_help_json_output() {
         "--help-json must list doctor command, got:\n{help_json}"
     );
     assert!(
-        help_json.contains("\"surfaceVersion\":\"0.16.0\""),
-        "--help-json must bump surfaceVersion to 0.16.0, got:\n{help_json}"
+        help_json.contains("\"surfaceVersion\":\"0.17.0\""),
+        "--help-json must bump surfaceVersion to 0.17.0, got:\n{help_json}"
     );
     assert!(
         help_json.contains("\"name\":\"publish\""),
@@ -1570,8 +1570,8 @@ fn help_json_contains_grouped_proposals_surface_and_bumped_version() {
     assert!(err.is_empty());
     let json_str = String::from_utf8_lossy(&out);
     assert!(
-        json_str.contains("\"surfaceVersion\":\"0.16.0\""),
-        "--help-json must bump surfaceVersion to 0.16.0, got:\n{json_str}"
+        json_str.contains("\"surfaceVersion\":\"0.17.0\""),
+        "--help-json must bump surfaceVersion to 0.17.0, got:\n{json_str}"
     );
     assert!(
         json_str.contains("\"name\":\"proposals\""),
