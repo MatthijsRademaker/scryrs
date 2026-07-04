@@ -93,7 +93,7 @@ AGENTS.md                   # Project-wide agent instructions
 - `.devagent/.env` - Local runtime config, including PROJECT_ID and manual image overrides
 - `.pi/agents/` - Primary swarm agents (authoritative)
 - `.pi/prompts/` - Command prompt templates (feedback/plan/review/execute)
-- `.pi/skills/` - Skills loaded by agents (including `read-project-docs`, `swarm-board`)
+- `.pi/skills/` - Skills loaded by agents (including `project-docs`, `swarm-board`)
 - `scripts/` - Docker-backed verification scripts (build, test, lint)
 - `AGENTS.md` - Project-wide instructions for all agents
 

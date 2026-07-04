@@ -12,16 +12,16 @@ Read this skill before any dashboard UI change in `crates/scryrs-dashboard/front
 - Frontend path: `crates/scryrs-dashboard/frontend/`
 - Package manager: **Bun only**
 - CLI runner: `bunx --bun shadcn-vue@latest`
-- UI source path: `src/shared/ui/`
-- Utils path: `src/shared/lib/utils.ts`
-- Global styles path: `src/app/styles.css`
-- Stack: Vue 3, Vite, Tailwind CSS v4, shadcn-vue, Reka UI, lucide-vue, Vue Router, Pinia
+- UI source path: `crates/scryrs-dashboard/frontend/src/shared/ui/`
+- Utils path: `crates/scryrs-dashboard/frontend/src/shared/lib/utils.ts`
+- Global styles path: `crates/scryrs-dashboard/frontend/src/app/styles.css`
+- Stack: Vue 3, Vite, Tailwind CSS v4, shadcn-vue, Reka UI, Vue Router, Pinia. Icons are hand-written inline SVG components in `crates/scryrs-dashboard/frontend/src/shared/ui/icon/` — never import from `lucide-vue` (Vue 2 package, dead weight in package.json).
 
 ## Core Rules
 
-1. **Use existing components first.** Check `src/shared/ui/` before building fresh markup.
+1. **Use existing components first.** Check `crates/scryrs-dashboard/frontend/src/shared/ui/` before building fresh markup.
 2. **Compose, do not reinvent.** Dashboard views should be built from Sidebar, Card, Table, Badge, Button, Tabs, Select, Tooltip, Skeleton, Alert, Empty, Sheet, and Dialog primitives.
-3. **Use semantic tokens.** Prefer `bg-background`, `text-muted-foreground`, `border-border`, `bg-destructive`, and project token aliases in `src/app/styles.css`.
+3. **Use semantic tokens.** Prefer `bg-background`, `text-muted-foreground`, `border-border`, `bg-destructive`, and project token aliases in `crates/scryrs-dashboard/frontend/src/app/styles.css`.
 4. **Use Bun-only commands.** No alternate package runners for dashboard frontend work.
 5. **Read component docs first.** Run `bunx --bun shadcn-vue@latest docs <component>` before adding or adjusting a component you are unsure about.
 
@@ -55,14 +55,14 @@ Read this skill before any dashboard UI change in `crates/scryrs-dashboard/front
 
 ### Icons → [rules/icons.md](./rules/icons.md)
 
-- import icons from configured library
+- icons are inline SVG components in `crates/scryrs-dashboard/frontend/src/shared/ui/icon/` — do not import from `lucide-vue`
 - icons in `Button` use `data-icon="inline-start"` or `data-icon="inline-end"`
 - avoid manual sizing classes inside shadcn-vue components
 - pass icon component objects, not string keys
 
 ## Workflow
 
-1. Read `components.json`, `src/app/styles.css`, and `src/shared/ui/` before editing UI.
+1. Read `components.json`, `crates/scryrs-dashboard/frontend/src/app/styles.css`, and `crates/scryrs-dashboard/frontend/src/shared/ui/` before editing UI.
 2. Run `bunx --bun shadcn-vue@latest info` in `crates/scryrs-dashboard/frontend/` when you need current aliases or installed component list.
 3. Run `bunx --bun shadcn-vue@latest search` before writing custom UI for common primitives.
 4. Run `bunx --bun shadcn-vue@latest docs <component>` before adding or changing unfamiliar component usage.
@@ -90,7 +90,7 @@ bunx --bun shadcn-vue@latest add button card dialog table sidebar select
 ## Related Files
 
 - [cli.md](./cli.md) — Bun-only shadcn-vue CLI reference
-- [customization.md](./customization.md) — semantic token and theming rules for `src/app/styles.css`
+- [customization.md](./customization.md) — semantic token and theming rules for `crates/scryrs-dashboard/frontend/src/app/styles.css`
 - [rules/styling.md](./rules/styling.md)
 - [rules/forms.md](./rules/forms.md)
 - [rules/composition.md](./rules/composition.md)

@@ -11,6 +11,13 @@ repos:
 
   - repo: local
     hooks:
+      - id: skill-lint
+        name: skill lint
+        entry: scripts/skill-lint
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: check
         name: project check
         entry: scripts/check

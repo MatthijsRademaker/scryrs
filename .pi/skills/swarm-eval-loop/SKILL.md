@@ -15,7 +15,7 @@ This skill provides the stable heuristics, failure-to-surface mappings, stop con
 |---|---|---|
 | Staging (experiment variants) | `evaluation/experiments/prompts/<variant>/` | Candidate prompt edits before validation |
 | Live (production prompts) | `.opencode/commands/*.md`, `.opencode/agents/*.md` | After an experiment shows improvement |
-| Scaffolding (source templates) | `src/cli/scaffolding/` | **Do not touch** — user reviews first |
+| Scaffolding (source templates) | `src/cli/scaffolding/` | **Do not touch** — user reviews first | <!-- skill-lint-ignore: stale swarm-init template path -->
 
 ### Target prompt surfaces (priority order)
 
@@ -107,7 +107,7 @@ Use the existing `v1-baseline` manifest as the baseline for comparison.
 ### Execute the experiment
 
 ```bash
-scripts/eval-run --experiment <candidate-name> --workflow-task <task-id> --keep-workspace --mlflow-uri ""
+scripts/eval-run --experiment <candidate-name> --workflow-task <task-id> --keep-workspace --mlflow-uri "" <!-- skill-lint-ignore: stale swarm-init template path -->
 ```
 
 Use `--workflow-task` to target only the tasks that were "worse" in the baseline. Use `--keep-workspace` so you can inspect the replay workspace if needed.
@@ -158,7 +158,7 @@ When a candidate shows improvement and no regressions:
 
 - Only the files that were in the variant's `prompt_overrides`.
 - Do not promote unchanged companion files.
-- Do not touch any files in `src/cli/scaffolding/`.
+- Do not touch any files in `src/cli/scaffolding/`. <!-- skill-lint-ignore: stale swarm-init template path -->
 
 ### What to report after promotion
 

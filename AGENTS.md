@@ -73,6 +73,7 @@ Developer documentation lives under `.devagent/docs/`. The dashboard (`crates/sc
 ## Additional Rule Files
 
 - `.pi/rules/*` — project-specific guardrails. Read before modifying agent definitions, architecture docs, or runtime configuration.
+- `.pi/skills/CONVENTION.md` — the curated-skill authoring convention (provenance frontmatter, routing descriptions, recipe structure). Read before creating or editing any repo-specific skill in `.pi/skills/`; `scripts/skill-lint` enforces the path-accuracy floor.
 
 ## Pi Hook Source Ownership
 

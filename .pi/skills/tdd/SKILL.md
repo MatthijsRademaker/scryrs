@@ -70,7 +70,7 @@ GREEN: Write minimal code to pass → test passes
 This is your tracer bullet — proves the path works end-to-end. Run just this test repeatedly during the loop:
 
 ```bash
-scripts/test-go
+scripts/test
 ```
 
 ### 3. Incremental Loop
@@ -106,7 +106,7 @@ After all tests pass, look for [refactor candidates](refactoring.md):
 Run the full test suite to catch regressions:
 
 ```bash
-scripts/test-go
+scripts/test
 ```
 
 Fix any breaks. If other tests break, your change may need a broader interface update — loop back to Analyze.
