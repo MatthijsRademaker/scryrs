@@ -5,7 +5,7 @@ model: deepseek/deepseek-v4-pro
 thinking: high
 tools:
     dev: [run_development_verification, report_work_outcome]
-skills: tdd, github-cli, swarm-board, openspec-apply-change, openspec-archive-change, read-project-docs, docs-writer
+skills: project-docs, tdd, testing-this-repo, add-cli-command, add-adapter, dashboard-ui, graph-core-changes, pi-hook-changes
 systemPromptMode: append
 swarm:
     enabled: true

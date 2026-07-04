@@ -88,7 +88,7 @@ Add or change the view in `views.c4` (and its elements in `model.c4`) first, the
 
 For smaller or secondary pages where a full LikeC4 view is overkill, an ASCII sketch is fine. Rules:
 
-- **Show co-equal crates/processes flat, not nested** — siblings, not children
+- **Show co-equal crates or processes flat, not nested** — siblings, not children
 - **Show what depends on or talks to what**
 - **Label crate/source paths** so readers know where to look
 - Keep it within 15-20 lines max. A diagram that takes 40 lines is too detailed.

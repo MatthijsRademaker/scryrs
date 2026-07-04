@@ -5,7 +5,7 @@ model: deepseek/deepseek-v4-flash
 thinking: high
 tools:
     review: [report_review_outcome]
-skills: swarm-board, read-project-docs
+skills: swarm-board, project-docs, crate-map, testing-this-repo
 systemPromptMode: append
 swarm:
     enabled: true

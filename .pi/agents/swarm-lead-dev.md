@@ -6,7 +6,7 @@ thinking: high
 tools:
     refinement: [report_refinement_outcome]
     review: [report_review_outcome]
-skills: read-project-docs, swarm-board, openspec-explore, openspec-propose
+skills: project-docs, crate-map, testing-this-repo, swarm-board, openspec-explore, openspec-propose
 systemPromptMode: append
 swarm:
     enabled: true

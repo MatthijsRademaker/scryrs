@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# skill-lint — staleness floor for .pi/skills/*/SKILL.md.
+#
+# Checks:
+#   1. Every repo-relative path token referenced in a SKILL.md exists in the
+#      working tree. Tokens containing <, >, or * are placeholders/globs and
+#      are skipped. A line containing `skill-lint-ignore` is exempt.
+#   2. Every `sources:` glob declared by a curated skill (metadata.curated: true)
+#      matches at least one existing file.
+#
+# Plain bash + POSIX tools only: must run on host and in agent containers
+# without Rust, Node, or Python. See .pi/skills/CONVENTION.md.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+PREFIXES='(\.pi|\.devagent|crates|scripts|hooks|tests|openspec|xtask|examples|fuzz|src)'
+fail=0
+
+for skill in .pi/skills/*/SKILL.md; do
+  # --- Check 1: referenced paths exist ---------------------------------------
+  lineno=0
+  while IFS= read -r line; do
+    lineno=$((lineno + 1))
+    case "$line" in *skill-lint-ignore*) continue ;; esac
+
+    tokens=$(printf '%s\n' "$line" \
+      | grep -oE "(^|[^A-Za-z0-9_./-])${PREFIXES}/[A-Za-z0-9_.<>*/@-]+" \
+      | sed -E 's#^[^A-Za-z0-9.]+##') || continue
+
+    while IFS= read -r token; do
+      [ -n "$token" ] || continue
+      # placeholders and globs are not checkable paths
+      case "$token" in *'<'*|*'>'*|*'*'*) continue ;; esac
+      # strip trailing sentence punctuation (repeat for e.g. "path/.,")
+      while true; do
+        case "$token" in
+          *.|*,|*:|*\;) token="${token%?}" ;;
+          *) break ;;
+        esac
+      done
+      [ -n "$token" ] || continue
+      if [ ! -e "$token" ]; then
+        echo "skill-lint: ${skill}:${lineno}: missing path: ${token}"
+        fail=1
+      fi
+    done <<EOF
+$tokens
+EOF
+  done < "$skill"
+
+  # --- Check 2: curated sources globs match at least one file ----------------
+  if grep -qE '^[[:space:]]+curated:[[:space:]]*true' "$skill"; then
+    globs=$(awk '
+      /^[[:space:]]+sources:[[:space:]]*$/ { insources = 1; next }
+      insources && /^[[:space:]]+-[[:space:]]/ { sub(/^[[:space:]]+-[[:space:]]+/, ""); print; next }
+      insources { exit }
+    ' "$skill")
+    if [ -z "$globs" ]; then
+      echo "skill-lint: ${skill}: curated skill has no sources globs"
+      fail=1
+    fi
+    while IFS= read -r glob; do
+      [ -n "$glob" ] || continue
+      # bash 3.2 has no globstar: strip a trailing /** and downgrade any
+      # remaining ** to * — good enough for an existence check.
+      check="${glob%/\*\*}"
+      check="${check//\*\*/*}"
+      if ! compgen -G "$check" > /dev/null; then
+        echo "skill-lint: ${skill}: sources glob matches nothing: ${glob}"
+        fail=1
+      fi
+    done <<EOF
+$globs
+EOF
+  fi
+done
+
+if [ "$fail" -ne 0 ]; then
+  echo "skill-lint: FAILED — fix the paths above or mark intentional examples with skill-lint-ignore"
+  exit 1
+fi
+echo "skill-lint: ok"
