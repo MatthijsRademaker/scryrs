@@ -6,11 +6,11 @@
 
 ## Summary
 
-Reconciled 19 non-archived OpenSpec change directories under `openspec/changes/` against board task status and repository truth. Result: 16 archive-ready, 1 superseded, 2 still-active. 17 changes moved to archive. Zero application code modified.
+Reconciled 20 non-archived OpenSpec change directories under `openspec/changes/` against board task status and repository truth. Result: 17 archive-ready, 1 superseded, 2 still-active. 18 changes moved to archive. Zero application code modified.
 
 ## Classification Inventory
 
-### Archive-Ready — Fully Checked and Shipped (13)
+### Archive-Ready — Fully Checked and Shipped (14)
 
 All 13 changes had 100% `[x]` checklist completion and board status Done (5). Repository evidence confirmed shipped artifacts.
 
@@ -29,6 +29,7 @@ All 13 changes had 100% `[x]` checklist completion and board status Done (5). Re
 | `task-5c682a97` | `5c682a97-5d98-49c9-a5f7-b93ec7b036f7` | 5 (Done) | 11/11 checked; `ProposalReviewDecision` in `crates/scryrs-types/` |
 | `task-9b0c8757` | `9b0c8757-a49f-4337-8f49-1f324778eba6` | 5 (Done) | 14/14 checked; test infrastructure shipped |
 | `task-9b98b3fd` | `9b98b3fd-93f6-4b08-b4b5-cb30e5f9d486` | 5 (Done) | 25/25 checked; CLI v0 contract shipped (product evolved multi-command, change was completed regardless) |
+| `curated-skills-for-light-models` | *(named directory)* | Verified shipped | 21/21 checked; curated recipe skill portfolio, `scripts/skill-lint`, and agent routing updates shipped at `.pi/skills/` |
 
 ### Archive-Ready — Stale Checklist, Shipped Code (3)
 
@@ -120,7 +121,7 @@ Both tasks are flagged for maintainer triage per the reconciliation risk mitigat
 
 ## Archive Manifest
 
-17 changes archived to `openspec/changes/archive/2026-07-04-<name>/`:
+18 changes archived to `openspec/changes/archive/2026-07-04-<name>/`:
 
 1. `2026-07-04-add-init-interactive-wizard/`
 2. `2026-07-04-add-scryrs-debug-logging/`
@@ -139,11 +140,12 @@ Both tasks are flagged for maintainer triage per the reconciliation risk mitigat
 15. `2026-07-04-task-9b98b3fd-93f6-4b08-b4b5-cb30e5f9d486/`
 16. `2026-07-04-task-cc52db89-f03d-4461-9b94-d93e237a8f99/`
 17. `2026-07-04-task-e5d582d9-8d71-4c4c-baa6-d4ef1593d731/`
+18. `2026-07-04-curated-skills-for-light-models/`
 
 ## Validation
 
 - [x] `openspec/changes/` contains 3 still-active changes: `task-12579118`, `live-signal-feed-motion`, `public-binary-and-image-distribution`
-- [x] `openspec/changes/archive/` contains 17 new 2026-07-04-prefixed entries plus 59 prior archives = 76 total
+- [x] `openspec/changes/archive/` contains 18 new 2026-07-04-prefixed entries plus 59 prior archives = 77 total
 - [x] No application code, test files, or crate source modified
 - [x] `roadmap.mdx` Phase 3 and Phase 4 headings marked ✅ Delivered, tenses aligned with shipped state
 - [x] `production-suite.md` live hotspots row and P3 milestone updated
