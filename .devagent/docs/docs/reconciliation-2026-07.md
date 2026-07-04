@@ -116,6 +116,8 @@ No content was synced to canonical specs. Both deltas are preserved in the archi
 | `c2ba1718-b508-46ca-8a92-04dc938e0439` | Dashboard Verification 01 — Add automated live signal feed browser smoke | Unassigned | Backlog | `live-signal-feed-motion` tasks 5.1-5.3 |
 | `4349cc03-d831-42a1-9e2f-09e3aeeb12a1` | Release Ops 01 — Complete public binary/image release and anonymous verification | Unassigned | Backlog | `public-binary-and-image-distribution` tasks 6.1-6.4 |
 
+Both tasks are flagged for maintainer triage per the reconciliation risk mitigation plan.
+
 ## Archive Manifest
 
 17 changes archived to `openspec/changes/archive/2026-07-04-<name>/`:
