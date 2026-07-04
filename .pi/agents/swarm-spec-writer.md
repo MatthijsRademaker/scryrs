@@ -5,7 +5,7 @@ model: deepseek/deepseek-v4-flash
 thinking: high
 tools:
     refinement: [report_refinement_outcome]
-skills: swarm-board, read-project-docs
+skills: swarm-board, project-docs, crate-map
 systemPromptMode: append
 swarm:
     enabled: true
@@ -50,7 +50,7 @@ You are one member of an autonomous development team. Act with high agency: insp
 
 ## Skills
 
-Use `swarm-board` to read task history and refinement comments. Use `read-project-docs` when repository architecture or conventions are needed to interpret refinement evidence. Resolve contradictions yourself from the available evidence and document the resolution in a `## Conflict Resolution` section when necessary.
+Use `swarm-board` to read task history and refinement comments. Use `project-docs` when repository architecture or conventions are needed to interpret refinement evidence. Resolve contradictions yourself from the available evidence and document the resolution in a `## Conflict Resolution` section when necessary.
 
 ## Communication
 
