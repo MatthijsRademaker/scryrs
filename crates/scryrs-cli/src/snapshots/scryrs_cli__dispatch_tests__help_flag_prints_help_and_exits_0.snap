@@ -83,8 +83,10 @@ Note: singular `propose` generates proposals; plural `proposals` reviews them.
 scryrs proposals list <PATH> [--state pending|accepted|rejected|all]
 List pending and reviewed proposal states from .scryrs/proposals/,
 .scryrs/accepted/, and .scryrs/rejected/ as deterministic JSON.
-scryrs proposals accept <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>
+scryrs proposals accept <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339> [--content-file <PATH> | --content-stdin]
 Accept a validated proposal without mutating the proposal inbox artifact.
+Optional --content-file <PATH> or --content-stdin overrides accepted
+Markdown content (accept-only, mutually exclusive, Markdown targets only).
 scryrs proposals reject <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>
 Reject a validated proposal without mutating the proposal inbox artifact.
 scryrs publish markdown <PATH> --output <DIR>

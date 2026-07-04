@@ -153,7 +153,7 @@ Proposal review is now exposed as a grouped plural command surface:
 
 ```text
 scryrs proposals list <PATH> [--state pending|accepted|rejected|all]
-scryrs proposals accept <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>
+scryrs proposals accept <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339> [--content-file <PATH> | --content-stdin]
 scryrs proposals reject <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>
 ```
 
@@ -190,8 +190,17 @@ There are no defaults, and `decidedAt` is never derived from wall-clock time. Be
 Accepted decisions copy:
 
 - `targetType` from the proposal
-- `proposedContent` into `acceptedContent`
+- `proposedContent` into `acceptedContent` (unless `--content-file` or `--content-stdin` provides reviewed Markdown content)
 - proposal `evidence` into `sourceEvidence`
+
+When either `--content-file <PATH>` or `--content-stdin` is supplied on the `accept` subcommand, the reviewed Markdown bytes become `acceptedContent` instead of the proposal's `proposedContent`. These flags are:
+
+- Accept-only (rejected with exit `2` on `reject`)
+- Mutually exclusive (supplying both exits `2`)
+- Only supported for Markdown-backed target types (`docs_note`, `adr`, `skill`, `debugging_playbook`); supplying them for `memory_patch` or `semantic_graph_grouping` exits `2` with a clear unsupported-target error
+- The source `.scryrs/proposals/{proposalId}.json` remains byte-identical regardless
+
+When neither flag is supplied, `accept` preserves the existing copy-from-proposal behavior.
 
 Rejected decisions copy only `sourceEvidence` and set `outcome = rejected`; they omit `targetType` and `acceptedContent`.
 
@@ -206,6 +215,7 @@ The review CLI is deterministic and overwrite-averse:
 - attempting `accept` when a rejected artifact already exists fails with exit `2`
 - attempting `reject` when an accepted artifact already exists fails with exit `2`
 - simultaneous accepted and rejected artifacts for one proposal ID are a conflicting terminal state; `proposals list` fails with exit `2`
+- for Markdown-backed targets, `acceptedContent` may differ from `proposedContent`; list and accept both tolerate this divergence as long as `proposalId`, `targetType`, and `sourceEvidence` match
 
 ### Review boundary and exit codes
 

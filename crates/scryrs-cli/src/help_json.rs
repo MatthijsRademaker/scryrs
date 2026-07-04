@@ -4,7 +4,7 @@ use serde_json::json;
 
 /// Version of the `--help-json` surface document format, independent of
 /// `SCHEMA_VERSION` which governs command output envelopes.
-const SURFACE_VERSION: &str = "0.16.0";
+const SURFACE_VERSION: &str = "0.17.0";
 
 pub(crate) fn cli_surface_doc() -> String {
     let doc = json!({
@@ -287,11 +287,13 @@ pub(crate) fn cli_surface_doc() -> String {
                         "flags": [
                             {"name": "reviewer", "long": "--reviewer", "type": "string", "required": true, "description": "Reviewer identity"},
                             {"name": "rationale", "long": "--rationale", "type": "string", "required": true, "description": "Non-empty review rationale"},
-                            {"name": "decided-at", "long": "--decided-at", "type": "string", "required": true, "description": "Explicit RFC 3339 review timestamp"}
+                            {"name": "decided-at", "long": "--decided-at", "type": "string", "required": true, "description": "Explicit RFC 3339 review timestamp"},
+                            {"name": "content-file", "long": "--content-file", "type": "string", "description": "Optional file path with reviewed Markdown content (accept-only, mutually exclusive with --content-stdin, Markdown targets only)"},
+                            {"name": "content-stdin", "long": "--content-stdin", "type": "boolean", "description": "Optional flag to read reviewed Markdown content from stdin (accept-only, mutually exclusive with --content-file, Markdown targets only)"}
                         ],
                         "output": {
                             "mimeType": "none",
-                            "description": "Writes .scryrs/accepted/{proposalId}.json on success and preserves .scryrs/proposals/{proposalId}.json unchanged."
+                            "description": "Writes .scryrs/accepted/{proposalId}.json on success and preserves .scryrs/proposals/{proposalId}.json unchanged. Accepted content may differ from proposed content for Markdown target types when override flags are supplied."
                         }
                     },
                     {

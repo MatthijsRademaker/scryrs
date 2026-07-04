@@ -72,7 +72,7 @@ where
     }
 
     if !args.is_empty() && args[0] == "proposals" {
-        return execute_proposals_cli(&mut out, &mut err, &args[1..]);
+        return execute_proposals_cli(&mut out, &mut err, &args[1..], &mut stdin);
     }
 
     if !args.is_empty() && args[0] == "publish" {

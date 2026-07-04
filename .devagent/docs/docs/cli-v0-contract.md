@@ -393,16 +393,16 @@ Reviews inbox proposal artifacts without mutating the inbox file itself.
 | Subcommand | Input | Output | Exit 0 | Exit 1 | Exit 2 |
 | ------- | ------- | ------- | ------- | ------- | ------- |
 | `proposals list <PATH> [--state pending | accepted | rejected | all]` | Repository path containing `.scryrs/proposals/` and optional `.scryrs/accepted/` / `.scryrs/rejected/` | Deterministic JSON array of proposal rows sorted by `proposalId` ascending | Rows emitted successfully | Serialization failure writing stdout | Invalid filter, invalid proposal/review artifact, conflicting accepted+rejected state, or unreadable/malformed input artifact |
-| `proposals accept <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>` | Valid proposal inbox file plus explicit review metadata | No stdout; writes `.scryrs/accepted/{proposalId}.json` | Accepted artifact written, or idempotent byte-identical rerun | Filesystem write or serialization failure | Unknown proposal ID, invalid proposal document, invalid metadata, conflicting opposite-outcome artifact, or same-outcome overwrite with different bytes |
+| `proposals accept <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339> [--content-file <PATH> | --content-stdin]` | Valid proposal inbox file plus explicit review metadata; optional --content-file or --content-stdin provides reviewed Markdown content | No stdout; writes `.scryrs/accepted/{proposalId}.json` | Accepted artifact written, or idempotent byte-identical rerun | Filesystem write or serialization failure | Unknown proposal ID, invalid proposal document, invalid metadata, conflicting opposite-outcome artifact, same-outcome overwrite with different bytes, --content-file/--content-stdin on non-Markdown target, or mutually exclusive override flags |
 | `proposals reject <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>` | Valid proposal inbox file plus explicit review metadata | No stdout; writes `.scryrs/rejected/{proposalId}.json` | Rejected artifact written, or idempotent byte-identical rerun | Filesystem write or serialization failure | Unknown proposal ID, invalid proposal document, invalid metadata, conflicting opposite-outcome artifact, or same-outcome overwrite with different bytes |
 
 **Behavior notes:**
 
 - `list` validates every encountered `ProposalDocument` and `ProposalReviewDecision` before emitting output.
-- `accept` copies proposal `targetType`, `proposedContent`, and `evidence` into the accepted `ProposalReviewDecision`.
+- `accept` copies proposal `targetType`, `proposedContent`, and `evidence` into the accepted `ProposalReviewDecision`. When `--content-file` or `--content-stdin` is supplied for a Markdown-backed target (`docs_note`, `adr`, `skill`, `debugging_playbook`), `acceptedContent` reflects the reviewed content rather than the proposal's `proposedContent`. These flags are accept-only, mutually exclusive, and rejected for structured targets (`memory_patch`, `semantic_graph_grouping`).
 - `reject` copies only proposal `evidence`; rejected decisions omit `targetType` and `acceptedContent`.
 - Review commands never mutate `.scryrs/proposals/{proposalId}.json`, `.devagent/docs/`, `.scryrs/graph.json`, or `.scryrs/routes.json`.
-- `--help-json` represents `proposals` as a grouped command with nested `list`, `accept`, and `reject` subcommands. `surfaceVersion` is now `0.14.0`.
+- `--help-json` represents `proposals` as a grouped command with nested `list`, `accept`, and `reject` subcommands. `surfaceVersion` is now `0.17.0`.
 
 ### `scryrs publish markdown|rspress`
 
