@@ -130,11 +130,11 @@ scryrs hotspots <PATH>
 
 Phase 2 is strong — scryrs already has credible standalone utility.
 
-## Phase 3 - Dashboard
+## Phase 3 - Dashboard ✅ Delivered
 
-Only start this after hotspots stabilize. The dashboard is the first visual product surface and establishes the `scryrs dashboard` CLI command and frontend architecture before graph/route data multiplies the visualization surface later.
+Dashboard shipped as the first visual product surface, establishing the `scryrs dashboard` CLI command and frontend architecture before graph/route data multiplies the visualization surface later.
 
-Required deliverables:
+Delivered:
 
 - `scryrs dashboard [--port <PORT>] [--bind <ADDR>] [--no-open] [--dev]` CLI command that starts a local HTTP server and opens a Vue.js SPA in the default browser.
 - Local REST API serving `GET /api/hotspots` (from `.scryrs/hotspots.json`), `GET /api/sessions`, and `GET /api/events` (from `.scryrs/scryrs.db`).
@@ -155,11 +155,11 @@ Accepted limitations:
 - No real-time or streaming updates — the dashboard reads current artifact files on each API request.
 - SPA assets are embedded into the binary (acceptable for single-binary CLI tool).
 
-## Phase 4 - Live Hotspot Server and Signals
+## Phase 4 - Live Hotspot Server and Signals ✅ Delivered
 
-This is the next roadmap step after local hotspot and dashboard surfaces. The phase changes hotspot handling from a user-triggered batch artifact into shared live state: agents still emit deterministic `TraceEvent` evidence, but a long-lived server owns central ingestion, idempotency, incremental score state, and signal/query APIs.
+Live hotspot server shipped, changing hotspot handling from a user-triggered batch artifact into shared live state: agents still emit deterministic `TraceEvent` evidence, and a long-lived server now owns central ingestion, idempotency, incremental score state, and signal/query APIs.
 
-Required deliverables:
+Delivered:
 
 - Versioned server ingest envelope around existing `TraceEvent` data with stable repository id, workspace id, agent id, producer event id, client timestamp, and server `received_at` semantics.
 - Server-owned SQLite write path so multiple agent containers report through one process instead of writing the same database file directly.

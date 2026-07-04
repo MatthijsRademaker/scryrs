@@ -14,10 +14,12 @@ Today scryrs can only be installed from a source checkout (`scripts/install` req
 ## Capabilities
 
 ### New Capabilities
+
 - `prebuilt-binary-installer`: a platform-detecting, checksum-verifying one-shot `install.sh` that downloads and installs a published `scryrs` Release binary without requiring a source checkout or Rust toolchain.
 - `release-publication`: the tag-triggered release pipeline that publishes multi-platform CLI binaries as GitHub Release assets (with checksums and attestation) and publishes the `linux/amd64` server image to `ghcr.io`.
 
 ### Modified Capabilities
+
 - `live-hotspot-server-packaging`: removes the requirement-level exclusion that forbade automatic image publication; packaging now defines a published `ghcr.io` image as the canonical server artifact.
 - `workspace-live-bootstrap`: the scaffolded `.scryrs/compose.yml` references the published `ghcr.io/matthijsrademaker/scryrs-server:latest` image instead of a local-only image name.
 
@@ -28,3 +30,7 @@ Today scryrs can only be installed from a source checkout (`scripts/install` req
 - **Scripts/docs**: new `install.sh`; README install section; `.devagent/docs` live-server setup pages; `docker-compose.yml`/`Dockerfile` header comments noting the published image.
 - **Repository settings**: visibility flipped to public; ghcr package visibility set to public.
 - **No change** to runtime CLI behavior, server protocol, or stored data formats.
+
+## Board Tasks
+
+Remaining unchecked items (6.1-6.4, operational release steps: tag push, visibility flip, public verification, release notes) are tracked by board task **`4349cc03-d831-42a1-9e2f-09e3aeeb12a1`** (Release Ops 01 — Complete public binary/image release and anonymous verification), currently Backlog.
