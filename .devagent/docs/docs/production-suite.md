@@ -21,7 +21,7 @@ The heavy verification path is also exposed as `scripts/precommit-run --producti
 | Graph | `scryrs graph <PATH>` builds structural graph from hotspots plus docs navigation | Cross-domain edges and accepted evidence ingestion missing |
 | Route manifests | `scryrs route <PATH>` emits `.scryrs/routes.json` from graph nodes | Runtime explanation and context loading decisions missing |
 | Proposals | `ProposalDocument`, inbox layout, deterministic `scryrs propose <PATH>`, `scryrs proposals list|accept|reject`, accepted/rejected review artifacts, safety checks shipped | Dashboard review UX and broader accepted-evidence consumers still missing |
-| Adapters | Generic Markdown publisher consumes reviewed `.scryrs/accepted/*.json` into deterministic plain Markdown files | Rspress and llms-specific publishing surfaces now connect accepted knowledge through to the live docs site |
+| Adapters | Shipped `scryrs publish markdown` and `scryrs publish rspress` commands delegate to the publishing adapters over reviewed `.scryrs/accepted/*.json` | Broader docs-surface targets beyond Markdown/Rspress are still missing |
 | LLM assist | Bounded `scryrs-curator-llm` library shipped | Product integration must wait for acceptance lifecycle |
 
 ## Production loop
@@ -74,7 +74,7 @@ The loop is production-ready only when every arrow is explicit, deterministic wh
 | `scripts/verify-live-hotspots` | remote ingest, idempotent replay, hotspot query, SSE replay/resume |
 | `scripts/verify-core-artifact-loop` | deterministic local artifact loop `record -> hotspots -> graph -> route -> propose -> proposals accept` |
 | `scripts/verify-privacy-defaults` | compiled telemetry/privacy defaults |
-| `scripts/verify-docs-publish` | accepted-knowledge publishing through to built docs surfaces |
+| `scripts/verify-docs-publish` | real `scryrs publish markdown` and `scryrs publish rspress` commands publish accepted knowledge through to built docs surfaces |
 
 ### Failure interpretation
 
@@ -118,7 +118,7 @@ Proposal files are not truth. Accepted evidence is truth candidate. Production v
 .scryrs/routes.json            deterministic projection from graph
 ```
 
-**Docs subtree ownership:** `.devagent/docs/docs/accepted-knowledge/` is owned exclusively by the Rspress publishing adapter (`scryrs-adapter-rspress`). It is cleared and regenerated on every publish run.
+**Docs subtree ownership:** `.devagent/docs/docs/accepted-knowledge/` is owned exclusively by the `scryrs publish rspress` path, implemented by `scryrs-adapter-rspress`. It is cleared and regenerated on every publish run.
 
 ### Privacy proving boundary
 
@@ -151,7 +151,7 @@ The exact manual commands and the explicit Linux-vs-macOS limitation are documen
 | P2. Accepted evidence graph | Reviewed groupings and docs notes influence graph deterministically | Graph consumes accepted evidence; route manifests update from graph; provenance preserved |
 | P3. Live dashboard | Multi-agent hotspots become visible product, not just API | Dashboard live mode, server API client, signal timeline, reconnect behavior |
 | P4. Runtime explain | Agents can ask what to read and why | Route hint schema, `scryrs route explain`, deterministic evidence-backed reasons |
-| P5. Publishing adapters | Reviewed knowledge leaves `.scryrs/` through generic Markdown first | Markdown adapter (`scryrs-adapter-markdown`) publishes accepted review decisions. Rspress adapter (`scryrs-adapter-rspress`) layers on top to write pages with Rspress frontmatter into `.devagent/docs/docs/accepted-knowledge/` and update `_nav.json`. Build verification script (`scripts/verify-docs-publish`) proves published knowledge reaches `doc_build/llms.txt`. |
+| P5. Publishing adapters | Reviewed knowledge leaves `.scryrs/` through explicit shipped CLI commands | `scryrs publish markdown` delegates to `scryrs-adapter-markdown` for generic Markdown output. `scryrs publish rspress` delegates to `scryrs-adapter-rspress` to write pages with Rspress frontmatter into `.devagent/docs/docs/accepted-knowledge/` and update `_nav.json`. `scripts/verify-docs-publish` proves both real CLI publish modes before checking `doc_build/llms.txt`. |
 | P6. LLM assist UX | Models improve proposal quality without owning truth | Opt-in draft/group commands or UI action, bounded EvidencePack, citation validation, no auto-accept |
 | P7. Production hardening | Suite can ship reliably | Release packaging, `scryrs doctor`, authoritative production suite, CI matrix, E2E live workflow, security and privacy checks |
 

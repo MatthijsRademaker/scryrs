@@ -4,7 +4,10 @@
 //! These tests exercise the canonical CWD-based path that real users experience,
 //! and include `insta` snapshot assertions for hotspot output drift detection.
 
-use std::sync::Mutex;
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::sync::{Mutex, mpsc};
+use std::thread;
 
 use scryrs_types::SCHEMA_VERSION;
 
@@ -21,6 +24,41 @@ fn with_cwd(dir: &std::path::Path, f: impl FnOnce()) {
     if let Err(error) = result {
         std::panic::resume_unwind(error);
     }
+}
+
+fn spawn_live_hotspots_server(response_body: String) -> (String, mpsc::Receiver<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap_or_else(|e| panic!("bind server: {e}"));
+    let addr = listener
+        .local_addr()
+        .unwrap_or_else(|e| panic!("local addr: {e}"));
+    let (tx, rx) = mpsc::channel();
+
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap_or_else(|e| panic!("accept: {e}"));
+        let mut buf = [0_u8; 8192];
+        let bytes = stream
+            .read(&mut buf)
+            .unwrap_or_else(|e| panic!("read request: {e}"));
+        let request = String::from_utf8_lossy(&buf[..bytes]).to_string();
+        let request_line = request
+            .lines()
+            .next()
+            .unwrap_or_else(|| panic!("missing request line"))
+            .to_string();
+        tx.send(request_line)
+            .unwrap_or_else(|e| panic!("send request line: {e}"));
+
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            response_body.len(),
+            response_body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .unwrap_or_else(|e| panic!("write response: {e}"));
+    });
+
+    (format!("http://{addr}"), rx)
 }
 
 // ---------------------------------------------------------------------------
@@ -387,5 +425,94 @@ fn e2e_missing_store_exits_2() {
             stderr.contains("datastore not found"),
             "stderr must mention datastore not found, got: {stderr}"
         );
+    });
+}
+
+#[test]
+#[allow(clippy::disallowed_methods)]
+fn e2e_live_hotspots_uses_process_env_precedence_and_percent_encodes_repository_id() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+
+    with_cwd(dir.path(), || {
+        std::fs::create_dir_all(dir.path().join(".scryrs"))
+            .unwrap_or_else(|e| panic!("create .scryrs: {e}"));
+        std::fs::write(
+            dir.path().join("scryrs.json"),
+            r#"{"remote":{"ingest_url":"http://manifest.invalid:9","repository_id":"manifest-repo"}}"#,
+        )
+        .unwrap_or_else(|e| panic!("write manifest: {e}"));
+        std::fs::write(
+            dir.path().join(".scryrs/.env"),
+            "SCRYRS_REMOTE_INGEST_URL=http://dotenv.invalid:9\nSCRYRS_REPOSITORY_ID=dotenv-repo\n",
+        )
+        .unwrap_or_else(|e| panic!("write dotenv: {e}"));
+
+        let repository_id = "https://github.com/acme/widgets";
+        let encoded_repository_id = "https%3A%2F%2Fgithub.com%2Facme%2Fwidgets";
+        let response = serde_json::json!({
+            "schemaVersion": "1.0.0",
+            "repositoryId": repository_id,
+            "cursor": "",
+            "generatedAt": "2026-07-01T12:00:00Z",
+            "entries": [
+                {
+                    "rank": 1,
+                    "subjectKind": "file",
+                    "subject": "src/live.rs",
+                    "score": 2,
+                    "counts": {"eventType": {}, "outcome": {}},
+                    "sessionCount": 1,
+                    "firstSeen": "2026-07-01T11:00:00Z",
+                    "lastSeen": "2026-07-01T11:00:00Z",
+                    "evidence": {"rowIds": [7, 8]}
+                }
+            ]
+        })
+        .to_string();
+        let (server_url, request_rx) = spawn_live_hotspots_server(response);
+
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_scryrs"))
+            .current_dir(dir.path())
+            .args(["hotspots", ".", "--mode", "live"])
+            .env("SCRYRS_REMOTE_INGEST_URL", &server_url)
+            .env("SCRYRS_REPOSITORY_ID", repository_id)
+            .output()
+            .unwrap_or_else(|e| panic!("run scryrs: {e}"));
+
+        assert!(
+            output.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let request_line = request_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap_or_else(|e| panic!("request line: {e}"));
+        assert_eq!(
+            request_line,
+            format!(
+                "GET /v1/repositories/{encoded_repository_id}/hotspots?window=cumulative HTTP/1.1"
+            )
+        );
+
+        let stdout =
+            String::from_utf8(output.stdout).unwrap_or_else(|e| panic!("stdout utf8: {e}"));
+        let report: serde_json::Value =
+            serde_json::from_str(stdout.trim_end()).unwrap_or_else(|e| panic!("parse stdout: {e}"));
+        assert_eq!(
+            report["storePath"],
+            format!(
+                "live:{server_url}/v1/repositories/{encoded_repository_id}/hotspots?window=cumulative"
+            )
+        );
+        assert_eq!(report["entries"][0]["subject"], "src/live.rs");
+
+        let artifact = std::fs::read_to_string(dir.path().join(".scryrs/hotspots.json"))
+            .unwrap_or_else(|e| panic!("read artifact: {e}"));
+        assert_eq!(artifact, stdout);
+        let stderr =
+            String::from_utf8(output.stderr).unwrap_or_else(|e| panic!("stderr utf8: {e}"));
+        assert!(stderr.contains(&server_url));
+        assert!(stderr.contains(repository_id));
     });
 }

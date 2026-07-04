@@ -5,8 +5,9 @@ use std::collections::HashMap;
 
 #[cfg(feature = "graph")]
 use scryrs_types::{
-    EvidenceLink, GRAPH_SCHEMA_VERSION, KnowledgeGraphDocument, ROUTE_SCHEMA_VERSION, RouteEntry,
-    RouteGrouping, RouteManifestDocument,
+    EvidenceLink, EvidenceSourceKind, GRAPH_SCHEMA_VERSION, KnowledgeGraphDocument,
+    ROUTE_SCHEMA_VERSION, RouteEntry, RouteGrouping, RouteLoadTarget, RouteLoadTargetKind,
+    RouteManifestDocument,
 };
 
 #[cfg(feature = "graph")]
@@ -56,11 +57,17 @@ pub(crate) fn write_route_json(out: &mut impl Write, err: &mut impl Write, path:
     let parent_map = build_parent_map(&graph_doc.edges);
 
     // Build route entries from graph nodes.
-    let mut routes: Vec<RouteEntry> = graph_doc
-        .nodes
-        .iter()
-        .map(|node| build_route_entry(node, &parent_map))
-        .collect();
+    let mut routes: Vec<RouteEntry> = Vec::with_capacity(graph_doc.nodes.len());
+    for node in &graph_doc.nodes {
+        let entry = match build_route_entry(node, &parent_map) {
+            Ok(entry) => entry,
+            Err(message) => {
+                let _ = writeln!(err, "scryrs route: {message}");
+                return 2;
+            }
+        };
+        routes.push(entry);
+    }
 
     // Enrich grouping labels from node list.
     enrich_group_labels(&mut routes, &graph_doc.nodes);
@@ -126,7 +133,7 @@ fn build_parent_map(edges: &[scryrs_types::GraphEdge]) -> HashMap<&str, &str> {
 fn build_route_entry(
     node: &scryrs_types::GraphNode,
     parent_map: &HashMap<&str, &str>,
-) -> RouteEntry {
+) -> Result<RouteEntry, String> {
     let grouping = parent_map.get(node.id.as_str()).map(|parent_id| {
         // We don't have the parent's label accessible here — we only mapped
         // target → source_id. The edge stores source_node_id, not label.
@@ -139,18 +146,106 @@ fn build_route_entry(
         }
     });
     let subject = raw_subject(node);
+    let load_target = Some(derive_load_target(node, &subject)?);
 
-    RouteEntry {
+    Ok(RouteEntry {
         id: node.id.clone(),
         subject_kind: node.kind.clone(),
         subject,
         label: node.label.clone(),
         target: node.id.clone(),
+        load_target,
         kind: node.kind.clone(),
         evidence_links: node.evidence_links.clone(),
         grouping,
         metadata: node.metadata.clone(),
+    })
+}
+
+#[cfg(feature = "graph")]
+fn derive_load_target(
+    node: &scryrs_types::GraphNode,
+    _subject: &str,
+) -> Result<RouteLoadTarget, String> {
+    match node.kind.as_str() {
+        "file" => {
+            let file_subject = node.id.strip_prefix("file:").ok_or_else(|| {
+                "file routes must resolve to a non-empty repository-relative path without parent traversal"
+                    .to_string()
+            })?;
+            Ok(RouteLoadTarget {
+                kind: RouteLoadTargetKind::File,
+                reference: Some(validate_file_reference(file_subject)?),
+            })
+        }
+        "doc_page" => Ok(RouteLoadTarget {
+            kind: RouteLoadTargetKind::DocPage,
+            reference: Some(canonical_doc_reference(&node.evidence_links)?),
+        }),
+        _ => Ok(RouteLoadTarget {
+            kind: RouteLoadTargetKind::NonLoadable,
+            reference: None,
+        }),
     }
+}
+
+#[cfg(feature = "graph")]
+fn validate_file_reference(subject: &str) -> Result<String, String> {
+    use std::path::{Component, Path};
+
+    if subject.is_empty() {
+        return Err(
+            "file routes must resolve to a non-empty repository-relative path without parent traversal"
+                .into(),
+        );
+    }
+
+    let path = Path::new(subject);
+    if path.is_absolute() {
+        return Err(
+            "file routes must resolve to a non-empty repository-relative path without parent traversal"
+                .into(),
+        );
+    }
+
+    if path.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
+        return Err(
+            "file routes must resolve to a non-empty repository-relative path without parent traversal"
+                .into(),
+        );
+    }
+
+    Ok(subject.to_string())
+}
+
+#[cfg(feature = "graph")]
+fn canonical_doc_reference(evidence_links: &[EvidenceLink]) -> Result<String, String> {
+    for link in evidence_links {
+        if link.source_kind != EvidenceSourceKind::DocReference {
+            continue;
+        }
+        if let Some(doc_ref) = link.doc_ref.as_deref() {
+            if let Some(reference) = normalize_doc_reference(doc_ref) {
+                return Ok(reference);
+            }
+        }
+    }
+
+    Err("doc_page routes must provide a canonical docs reference".into())
+}
+
+#[cfg(feature = "graph")]
+fn normalize_doc_reference(doc_ref: &str) -> Option<String> {
+    let slug = doc_ref.strip_prefix("project-docs/").unwrap_or(doc_ref);
+    if slug.is_empty() || slug.starts_with('/') {
+        return None;
+    }
+    Some(format!("project-docs/{slug}"))
 }
 
 #[cfg(feature = "graph")]
@@ -336,7 +431,7 @@ mod tests {
         };
 
         let parent_map = HashMap::new();
-        let entry = build_route_entry(&node, &parent_map);
+        let entry = build_route_entry(&node, &parent_map).expect("route entry");
 
         assert_eq!(entry.id, "file:src/main.rs");
         assert_eq!(entry.subject_kind, "file");
@@ -376,7 +471,7 @@ mod tests {
         let mut parent_map = HashMap::new();
         parent_map.insert("doc_page:graph", "technical");
 
-        let entry = build_route_entry(&node, &parent_map);
+        let entry = build_route_entry(&node, &parent_map).expect("route entry");
 
         assert_eq!(entry.id, "doc_page:graph");
         assert!(entry.grouping.is_some());
@@ -397,7 +492,7 @@ mod tests {
             metadata: None,
         };
 
-        let entry = build_route_entry(&node, &HashMap::new());
+        let entry = build_route_entry(&node, &HashMap::new()).expect("route entry");
 
         assert_eq!(entry.subject_kind, "domain_term");
         assert_eq!(entry.subject, "auth");
@@ -423,6 +518,10 @@ mod tests {
             subject: "graph".into(),
             label: "graph".into(),
             target: "doc_page:graph".into(),
+            load_target: Some(RouteLoadTarget {
+                kind: RouteLoadTargetKind::DocPage,
+                reference: Some("project-docs/graph".into()),
+            }),
             kind: "doc_page".into(),
             evidence_links: vec![],
             grouping: Some(RouteGrouping {
@@ -523,6 +622,8 @@ mod tests {
         let stdout = String::from_utf8_lossy(&out);
         let manifest: RouteManifestDocument =
             serde_json::from_str(stdout.trim()).expect("must be valid JSON");
+        let manifest_json: serde_json::Value =
+            serde_json::from_str(stdout.trim()).expect("must be valid JSON value");
 
         assert_eq!(manifest.schema_version, ROUTE_SCHEMA_VERSION);
         assert_eq!(manifest.routes.len(), 3);
@@ -540,13 +641,202 @@ mod tests {
             doc_entry.grouping.as_ref().unwrap().group_label,
             "Technical"
         );
+        assert_eq!(
+            manifest_json["routes"][0]["loadTarget"]["kind"].as_str(),
+            Some("doc_page")
+        );
+        assert_eq!(
+            manifest_json["routes"][0]["loadTarget"]["reference"].as_str(),
+            Some("project-docs/graph")
+        );
 
         // file:src/main.rs should NOT have grouping.
         let file_entry = &manifest.routes[1];
         assert!(file_entry.grouping.is_none());
+        assert_eq!(
+            manifest_json["routes"][1]["loadTarget"]["kind"].as_str(),
+            Some("file")
+        );
+        assert_eq!(
+            manifest_json["routes"][1]["loadTarget"]["reference"].as_str(),
+            Some("src/main.rs")
+        );
+
+        assert_eq!(
+            manifest_json["routes"][2]["loadTarget"]["kind"].as_str(),
+            Some("non_loadable")
+        );
+        assert!(manifest_json["routes"][2]["loadTarget"]["reference"].is_null());
 
         // Artifact was written.
         assert!(tmp.path().join(".scryrs/routes.json").exists());
+    }
+
+    #[test]
+    fn malformed_file_subject_fails_loudly() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().expect("tempdir");
+        let scryrs_dir = tmp.path().join(".scryrs");
+        fs::create_dir(&scryrs_dir).expect("create .scryrs");
+
+        let graph_doc = make_test_doc(
+            vec![GraphNode {
+                id: "file:../src/main.rs".into(),
+                label: "../src/main.rs".into(),
+                description: None,
+                kind: "file".into(),
+                tags: vec![],
+                aliases: vec![],
+                evidence_links: vec![],
+                metadata: None,
+            }],
+            vec![],
+        );
+
+        fs::write(
+            scryrs_dir.join("graph.json"),
+            serde_json::to_string(&graph_doc).expect("serialize graph"),
+        )
+        .expect("write graph.json");
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            write_route_json(&mut out, &mut err, tmp.path().to_str().expect("utf8 path")),
+            2
+        );
+        assert!(out.is_empty());
+        assert!(String::from_utf8_lossy(&err).contains(
+            "file routes must resolve to a non-empty repository-relative path without parent traversal"
+        ));
+    }
+
+    #[test]
+    fn non_loadable_kinds_emit_explicit_load_targets() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().expect("tempdir");
+        let scryrs_dir = tmp.path().join(".scryrs");
+        fs::create_dir(&scryrs_dir).expect("create .scryrs");
+
+        let graph_doc = make_test_doc(
+            vec![
+                GraphNode {
+                    id: "search:auth".into(),
+                    label: "auth".into(),
+                    description: None,
+                    kind: "search".into(),
+                    tags: vec![],
+                    aliases: vec![],
+                    evidence_links: vec![],
+                    metadata: None,
+                },
+                GraphNode {
+                    id: "symbol:AuthService".into(),
+                    label: "AuthService".into(),
+                    description: None,
+                    kind: "symbol".into(),
+                    tags: vec![],
+                    aliases: vec![],
+                    evidence_links: vec![],
+                    metadata: None,
+                },
+                GraphNode {
+                    id: "domain_term:auth".into(),
+                    label: "Auth".into(),
+                    description: None,
+                    kind: "domain_term".into(),
+                    tags: vec![],
+                    aliases: vec![],
+                    evidence_links: vec![],
+                    metadata: None,
+                },
+            ],
+            vec![],
+        );
+
+        fs::write(
+            scryrs_dir.join("graph.json"),
+            serde_json::to_string(&graph_doc).expect("serialize graph"),
+        )
+        .expect("write graph.json");
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            write_route_json(&mut out, &mut err, tmp.path().to_str().expect("utf8 path")),
+            0
+        );
+
+        let manifest_json: serde_json::Value =
+            serde_json::from_slice(&out).expect("must be valid JSON value");
+        let routes = manifest_json["routes"].as_array().expect("routes array");
+        for route_id in ["domain_term:auth", "search:auth", "symbol:AuthService"] {
+            let route = routes
+                .iter()
+                .find(|route| route["id"].as_str() == Some(route_id))
+                .expect("route exists");
+            assert_eq!(route["target"].as_str(), Some(route_id));
+            assert_eq!(route["loadTarget"]["kind"].as_str(), Some("non_loadable"));
+            assert!(route["loadTarget"]["reference"].is_null());
+        }
+        assert!(String::from_utf8_lossy(&err).is_empty());
+    }
+
+    #[test]
+    fn doc_page_without_doc_reference_fails_loudly() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().expect("tempdir");
+        let scryrs_dir = tmp.path().join(".scryrs");
+        fs::create_dir(&scryrs_dir).expect("create .scryrs");
+
+        let graph_doc = make_test_doc(
+            vec![GraphNode {
+                id: "doc_page:graph".into(),
+                label: "graph".into(),
+                description: None,
+                kind: "doc_page".into(),
+                tags: vec![],
+                aliases: vec![],
+                evidence_links: vec![EvidenceLink {
+                    source_kind: EvidenceSourceKind::DocReference,
+                    subject: "graph".into(),
+                    row_ids: vec![],
+                    doc_ref: None,
+                    description: None,
+                    score: None,
+                    metadata: None,
+                }],
+                metadata: None,
+            }],
+            vec![],
+        );
+
+        fs::write(
+            scryrs_dir.join("graph.json"),
+            serde_json::to_string(&graph_doc).expect("serialize graph"),
+        )
+        .expect("write graph.json");
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            write_route_json(&mut out, &mut err, tmp.path().to_str().expect("utf8 path")),
+            2
+        );
+        assert!(out.is_empty());
+        assert!(
+            String::from_utf8_lossy(&err)
+                .contains("doc_page routes must provide a canonical docs reference")
+        );
     }
 
     #[test]

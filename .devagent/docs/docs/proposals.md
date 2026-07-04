@@ -143,9 +143,9 @@ Accepted and rejected review decisions are recorded as separate `ProposalReviewD
 Trust boundary:
 
 - `.scryrs/proposals/` remains non-authoritative inbox state only
-- `.scryrs/accepted/` is the only review artifact set that generic Markdown publishing consumes; the Markdown adapter reads `.scryrs/accepted/*.json` and never publishes directly from proposal inbox files
+- `.scryrs/accepted/` is the only review artifact set that publishing consumes; `scryrs publish markdown` and `scryrs publish rspress` both read `.scryrs/accepted/*.json` and never publish directly from proposal inbox files
 - `.scryrs/accepted/` can also become graph-build input when the accepted decision targets `semantic_graph_grouping`
-- `.scryrs/rejected/` records explicit rejections but is ignored by graph, route generation, and Markdown publishing
+- `.scryrs/rejected/` records explicit rejections but is ignored by graph, route generation, and both publish modes
 
 ## Review CLI
 
@@ -161,6 +161,7 @@ The naming split is intentional:
 
 - `scryrs propose` **generates** inbox proposals
 - `scryrs proposals ...` **reviews** existing inbox proposals
+- `scryrs publish ...` **publishes** accepted review decisions only, in a separate explicit step
 
 ### `proposals list`
 
@@ -193,6 +194,8 @@ Accepted decisions copy:
 - proposal `evidence` into `sourceEvidence`
 
 Rejected decisions copy only `sourceEvidence` and set `outcome = rejected`; they omit `targetType` and `acceptedContent`.
+
+Accepting a proposal is still ledger-only. `scryrs proposals accept` writes `.scryrs/accepted/{proposalId}.json`, but it does not create generic Markdown output, it does not update `.devagent/docs/docs/accepted-knowledge/`, and it does not touch `.devagent/docs/docs/_nav.json`. Operators must run `scryrs publish markdown` or `scryrs publish rspress` separately to materialize accepted knowledge.
 
 ### Determinism and conflicts
 
@@ -247,7 +250,7 @@ Model output is proposal input only.
 - Proposal inbox artifacts are still not consumed automatically by graph build, route generation, or adapters.
 - Accepted review decisions can affect graph build only through `.scryrs/accepted/`, and only accepted `semantic_graph_grouping` targets project into graph structure today.
 - Route generation still consumes `.scryrs/graph.json` only; it never reads proposal or review-artifact directories directly.
-- Generic Markdown publishing now consumes reviewed `.scryrs/accepted/*.json` artifacts only and writes plain Markdown to a caller-chosen output root; Rspress-specific publishing remains a later, separate adapter surface.
+- Publishing now consumes reviewed `.scryrs/accepted/*.json` artifacts only. `scryrs publish markdown` writes plain Markdown to a caller-chosen output root, and `scryrs publish rspress` writes Rspress `accepted-knowledge/` pages plus `_nav.json` updates as a separate explicit operator action.
 
 ## Related Pages
 

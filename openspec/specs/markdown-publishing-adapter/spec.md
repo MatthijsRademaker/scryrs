@@ -71,22 +71,26 @@ Each published file SHALL render generic Markdown only: a deterministic heading 
 - **THEN** every evidence entry appears in the section
 - **AND** available row IDs, `docRef`, `description`, and `score` values are preserved in the rendered output
 
-### Requirement: Markdown publishing remains framework-agnostic and library-only
+### Requirement: Markdown publishing remains framework-agnostic behind a reusable library boundary
 
-This foundation slice SHALL expose Markdown publishing from `crates/scryrs-adapter-markdown` as a library API that takes repository and output roots. It SHALL not add a new CLI command in this change, SHALL not depend on `scryrs-adapter-rspress`, and SHALL not assume `.devagent/docs/` layout, Rspress routes, or frontmatter conventions.
+The Markdown publishing capability SHALL expose `publish_accepted_markdown()` from `crates/scryrs-adapter-markdown` as the reusable rendering boundary for generic accepted-knowledge Markdown. Callers, including the shipped `scryrs` CLI, SHALL invoke this library API rather than re-implementing accepted-artifact loading, `ProposalReviewDecision` validation, `proposalId` sorting, Markdown rendering, or target-path derivation.
 
-#### Scenario: Caller chooses an arbitrary output root
+The adapter SHALL NOT depend on `scryrs-adapter-rspress`, SHALL NOT assume `.devagent/docs/` layout, Rspress routes, or frontmatter conventions, and SHALL continue to render plain generic Markdown at caller-selected output roots.
 
-- **GIVEN** a writable output directory outside `.devagent/docs/`
-- **WHEN** the publisher runs
-- **THEN** files are written relative to that output directory
-- **AND** the published content remains plain Markdown without Rspress-specific metadata
+#### Scenario: CLI markdown publish reuses the library boundary
 
-#### Scenario: Existing CLI surface remains unchanged
+- **GIVEN** accepted Markdown-backed review decisions and a writable output directory outside `.devagent/docs/`
+- **WHEN** a caller invokes `scryrs publish markdown <PATH> --output <DIR>`
+- **THEN** the CLI delegates rendering to `publish_accepted_markdown()`
+- **AND** the written files remain plain generic Markdown under the caller-selected output root
+- **AND** the CLI does not duplicate adapter rendering logic
 
-- **WHEN** this foundation change is implemented
-- **THEN** no new `publish` or `markdown` command is required on the `scryrs` CLI
-- **AND** Markdown publishing is provided by the adapter library only
+#### Scenario: Non-CLI callers keep the same generic Markdown boundary
+
+- **GIVEN** any non-CLI caller that needs accepted Markdown output
+- **WHEN** it invokes `publish_accepted_markdown(repo_root, output_root)` directly
+- **THEN** the same deterministic accepted-only Markdown output is produced
+- **AND** the adapter remains independent from Rspress-specific layout or metadata
 
 ### Requirement: Project docs describe the reviewed-evidence publishing boundary
 

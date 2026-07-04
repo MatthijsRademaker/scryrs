@@ -4,7 +4,7 @@ use serde_json::json;
 
 /// Version of the `--help-json` surface document format, independent of
 /// `SCHEMA_VERSION` which governs command output envelopes.
-const SURFACE_VERSION: &str = "0.13.0";
+const SURFACE_VERSION: &str = "0.16.0";
 
 pub(crate) fn cli_surface_doc() -> String {
     let doc = json!({
@@ -13,7 +13,7 @@ pub(crate) fn cli_surface_doc() -> String {
         "commands": [
             {
                 "name": "hotspots",
-                "description": "Discover and analyze knowledge hotspots in a repository",
+                "description": "Discover and analyze knowledge hotspots in a repository. Local mode is the default and reads .scryrs/scryrs.db. Live mode materializes the same HotspotsReport artifact from GET /v1/repositories/{repository_id}/hotspots?window=cumulative and does not merge local SQLite data.",
                 "arguments": [
                     {
                         "name": "PATH",
@@ -22,16 +22,22 @@ pub(crate) fn cli_surface_doc() -> String {
                         "description": "Path to the repository root directory"
                     }
                 ],
+                "flags": [
+                    {"name": "mode", "flag": "--mode", "type": "string", "values": ["local", "live"], "default": "local", "description": "Source mode: local (default) or live"},
+                    {"name": "server-url", "flag": "--server-url", "type": "string", "description": "Live-mode scryrs server base URL (overrides .scryrs/.env SCRYRS_REMOTE_INGEST_URL)"},
+                    {"name": "repository-id", "flag": "--repository-id", "type": "string", "description": "Live-mode repository identity (overrides .scryrs/.env SCRYRS_REPOSITORY_ID)"}
+                ],
+                "liveConfigPrecedence": ["1. CLI flags", "2. Environment variables (SCRYRS_REMOTE_INGEST_URL, SCRYRS_REPOSITORY_ID)", "3. .scryrs/.env", "4. scryrs.json `remote` section"],
                 "output": {
                     "mimeType": "application/json",
                     "fields": [
                         {"name": "schemaVersion", "type": "string", "description": "Version of the hotspot report output format (independent of trace event version)", "optional": false},
                         {"name": "command", "type": "string", "description": "Name of the executed command", "optional": false},
                         {"name": "repositoryPath", "type": "string", "description": "Resolved absolute path to the repository root", "optional": false},
-                        {"name": "storePath", "type": "string", "description": "Resolved absolute path to .scryrs/scryrs.db", "optional": false},
-                        {"name": "runMetadata", "type": "object", "description": "Deterministic metadata from store state (storeSchemaVersion, analyzedEventCount, analyzedSubjectCount, firstEventId, lastEventId)", "optional": false},
-                        {"name": "generatedAt", "type": "string", "description": "ISO 8601 wall-clock timestamp", "optional": false},
-                        {"name": "entries", "type": "array", "description": "Array of ranked HotspotEntry objects (empty for stores with no subject-bearing events)", "optional": false}
+                        {"name": "storePath", "type": "string", "description": "Local mode: absolute path to .scryrs/scryrs.db. Live mode: live:<query_url> descriptor for the cumulative server query.", "optional": false},
+                        {"name": "runMetadata", "type": "object", "description": "Local mode: store-derived metadata. Live mode: derived from live entries (subject count, evidence-row count, sentinel store fields).", "optional": false},
+                        {"name": "generatedAt", "type": "string", "description": "Local mode: export-time timestamp. Live mode: generatedAt copied from the server response.", "optional": false},
+                        {"name": "entries", "type": "array", "description": "Array of ranked HotspotEntry objects. Live mode preserves the response entries unchanged.", "optional": false}
                     ]
                 }
             },
@@ -308,6 +314,69 @@ pub(crate) fn cli_surface_doc() -> String {
                 ]
             },
             {
+                "name": "publish",
+                "description": "Publish accepted knowledge explicitly through adapter-backed markdown or Rspress surfaces",
+                "subcommands": [
+                    {
+                        "name": "markdown",
+                        "description": "Publish accepted Markdown-backed review decisions to generic Markdown output",
+                        "arguments": [
+                            {"name": "PATH", "type": "string", "required": true, "description": "Path to the repository root directory"}
+                        ],
+                        "flags": [
+                            {"name": "output", "long": "--output", "type": "string", "required": true, "description": "Output directory for generic Markdown files"}
+                        ],
+                        "output": {
+                            "mimeType": "application/json",
+                            "fields": [
+                                {"name": "command", "type": "string", "description": "Name of the executed command (always \"publish\")", "optional": false},
+                                {"name": "mode", "type": "string", "description": "Publish mode (always \"markdown\")", "optional": false},
+                                {"name": "schemaVersion", "type": "string", "description": "Version of the output envelope format", "optional": false},
+                                {"name": "count", "type": "number", "description": "Count of published Markdown files", "optional": false},
+                                {"name": "paths", "type": "array", "description": "Deterministically ordered output file paths", "optional": false}
+                            ]
+                        },
+                        "exitCodes": {
+                            "0": "Accepted knowledge published successfully",
+                            "1": "Runtime or filesystem failure",
+                            "2": "Usage error or publish-input validation failure"
+                        }
+                    },
+                    {
+                        "name": "rspress",
+                        "description": "Publish accepted Markdown-backed review decisions into an Rspress docs tree",
+                        "arguments": [
+                            {"name": "PATH", "type": "string", "required": true, "description": "Path to the repository root directory"}
+                        ],
+                        "flags": [
+                            {"name": "docs-root", "long": "--docs-root", "type": "string", "required": true, "description": "Rspress docs root containing _nav.json and accepted-knowledge/"}
+                        ],
+                        "output": {
+                            "mimeType": "application/json",
+                            "fields": [
+                                {"name": "command", "type": "string", "description": "Name of the executed command (always \"publish\")", "optional": false},
+                                {"name": "mode", "type": "string", "description": "Publish mode (always \"rspress\")", "optional": false},
+                                {"name": "schemaVersion", "type": "string", "description": "Version of the output envelope format", "optional": false},
+                                {"name": "count", "type": "number", "description": "Count of published Rspress pages", "optional": false},
+                                {"name": "entries", "type": "array", "description": "Deterministically ordered published entry metadata", "optional": false}
+                            ],
+                            "entryFields": [
+                                {"name": "path", "type": "string", "description": "Relative accepted-knowledge page path under the docs root", "optional": false},
+                                {"name": "proposalId", "type": "string", "description": "Accepted proposal identifier", "optional": false},
+                                {"name": "targetType", "type": "string", "description": "Accepted target type slug", "optional": false},
+                                {"name": "navText", "type": "string", "description": "Navigation label inserted into _nav.json", "optional": false},
+                                {"name": "navLink", "type": "string", "description": "Navigation link inserted into _nav.json", "optional": false}
+                            ]
+                        },
+                        "exitCodes": {
+                            "0": "Accepted knowledge published successfully",
+                            "1": "Runtime or filesystem failure",
+                            "2": "Usage error or publish-input validation failure"
+                        }
+                    }
+                ]
+            },
+            {
                 "name": "dashboard",
                 "description": "Start dashboard server and open the browser dashboard. Live is the default source mode (proxies a scryrs server); use --mode local to read local .scryrs artifacts. Live targets resolve from flags, then env, then .scryrs/.env, then scryrs.json `remote`; unresolved live config fails fast (exit 2) with guidance.",
                 "flags": [
@@ -396,11 +465,11 @@ pub(crate) fn cli_surface_doc() -> String {
                                 {"tier": 2, "description": "Prefix match"},
                                 {"tier": 1, "description": "Substring match"}
                             ],
-                            "tieBreak": "Manifest entry order (by id ascending) within each tier"
+                            "tieBreak": "(tier DESC, score DESC, count DESC, manifest_index ASC, route_id ASC)"
                         },
                         "output": {
                             "mimeType": "application/json",
-                            "description": "Single-line RouteHintDocument JSON with schemaVersion and hints array. The reason field appends '; query match on <fields>' suffix. Zero matches produces a valid document with empty hints array."
+                            "description": "Single-line RouteHintDocument JSON with schemaVersion and hints array. Each hint returns the stable target node id plus optional loadTarget (file, doc_page, or non_loadable). rank remains the manifest ordinal; explain relevance is the packed score tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999). The reason field includes load target kind and appends '; query match on <fields>' suffix. Zero matches produces a valid document with empty hints array."
                         },
                         "exitCodes": {
                             "0": "Success (including zero-match results)",
@@ -411,21 +480,22 @@ pub(crate) fn cli_surface_doc() -> String {
                 ],
                 "output": {
                     "mimeType": "application/json",
-                    "description": "Single-line RouteManifestDocument JSON written to stdout. Also persisted to .scryrs/routes.json."
+                    "description": "Single-line RouteManifestDocument JSON written to stdout. target remains the stable graph-node id; optional loadTarget carries file/doc_page/non_loadable retrieval context. Also persisted to .scryrs/routes.json."
                 },
                 "routeHintOutput": {
                     "mimeType": "application/json",
-                    "description": "Deterministic RouteHintDocument projection derived from the route manifest. Each route entry produces one RouteHintItem with identity, target, label, 1-based ordinal rank, evidence citations, and a template-derived reason. Rank is a deterministic ordinal derived from manifest entry sort order; relevance is deferred (None). Use `scryrs route explain <PATH> --query <TEXT>` to filter and rank hints by query match.",
+                    "description": "Deterministic RouteHintDocument projection derived from the route manifest. Each route entry produces one RouteHintItem with identity, stable target node id, optional loadTarget, label, 1-based ordinal rank, evidence citations, and a template-derived reason that names the load target kind. Plain route projection omits relevance; `scryrs route explain <PATH> --query <TEXT>` populates it with the packed explain score tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999).",
                     "fields": [
                         {"name": "schemaVersion", "type": "string", "description": "Route hint schema version (always HINT_SCHEMA_VERSION = 1.0.0)", "optional": false},
                         {"name": "hints", "type": "array", "description": "Deterministically ordered array of RouteHintItem objects", "optional": false}
                     ],
                     "hintItemFields": [
                         {"name": "routeId", "type": "string", "description": "Source route entry id", "optional": false},
-                        {"name": "target", "type": "string", "description": "Normalized load target", "optional": false},
+                        {"name": "target", "type": "string", "description": "Stable graph-node identity string copied from RouteEntry.target", "optional": false},
+                        {"name": "loadTarget", "type": "object|null", "description": "Optional structured load target with kind file, doc_page, or non_loadable; file references are repository-relative paths and doc_page references are canonical project-docs/<slug> values", "optional": true},
                         {"name": "label", "type": "string", "description": "Human-readable label", "optional": false},
                         {"name": "rank", "type": "number", "description": "1-based ordinal rank from manifest entry sort order (deterministic ordinal, not final ranking)", "optional": false},
-                        {"name": "relevance", "type": "number|null", "description": "Optional relevance score — deferred for future enhancement (always null in current version)", "optional": true},
+                        {"name": "relevance", "type": "number|null", "description": "Optional relevance score — omitted by plain route projection and populated for explain matches using the packed deterministic formula", "optional": true},
                         {"name": "reason", "type": "string", "description": "Deterministic template reason citing route entry identity and evidence count", "optional": false},
                         {"name": "evidence", "type": "array", "description": "Evidence provenance links copied from source route entry", "optional": true}
                     ],
@@ -435,9 +505,10 @@ pub(crate) fn cli_surface_doc() -> String {
                             {
                                 "routeId": "file:src/main.rs",
                                 "target": "file:src/main.rs",
+                                "loadTarget": {"kind": "file", "reference": "src/main.rs"},
                                 "label": "src/main.rs",
                                 "rank": 1,
-                                "reason": "Route 'src/main.rs' (file:src/main.rs): 2 evidence link(s), subject kind file",
+                                "reason": "Route 'src/main.rs' (file:src/main.rs): 2 evidence link(s), subject kind file, load target file",
                                 "evidence": [
                                     {
                                         "sourceKind": "local_trace_row",
@@ -448,7 +519,7 @@ pub(crate) fn cli_surface_doc() -> String {
                             }
                         ]
                     },
-                    "rankingPolicy": "Rank is a deterministic 1-based ordinal derived from manifest entry sort order (by id ascending). Relevance is deferred (None) and does not represent a frozen long-term ranking formula. Both fields are explicitly documented as deferred or ordinal."
+                    "rankingPolicy": "Rank is a deterministic 1-based ordinal derived from manifest entry sort order (by id ascending). Explain ordering uses (tier DESC, score DESC, count DESC, manifest_index ASC, route_id ASC); packed relevance is a display-friendly derivative of that tuple, not the sort key. Plain route projection still omits relevance, while reason strings mention load target kind."
                 }
             }
         ],
@@ -459,9 +530,9 @@ pub(crate) fn cli_surface_doc() -> String {
         ],
         "rootBehavior": {"action": "help", "exitCode": 0},
         "exitCodes": {
-            "0": "Success (hotspots: JSON written, including empty entries; record local: all events accepted; record remote: no rejections or failures; init: hook installed; up: workspace-managed compose stack started; doctor: only ok/warn findings; propose/proposals: artifacts written or listed successfully; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)",
-            "1": "Hotspots: storage error. Record: one or more events rejected (local or server), or I/O error writing output. Init: I/O error. Up: docker invocation failure. Doctor: output write failure. Proposals: serialization or filesystem write failure. Dashboard: port in use or artifact read error. Server: port in use or store error.",
-            "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, or self-install refusal; setup: unknown/missing mode, source-checkout refusal (live), or missing/invalid/conflicting live configuration; up: missing scaffold files, missing external network, or unexpected arguments; doctor: one or more structural error findings; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; dashboard: invalid flags or partial live-mode configuration; server: invalid flags or bind failure."
+            "0": "Success (hotspots: JSON written, including empty entries; record local: all events accepted; record remote: no rejections or failures; init: hook installed; up: workspace-managed compose stack started; doctor: only ok/warn findings; propose/proposals: artifacts written or listed successfully; publish: accepted knowledge published successfully; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)",
+            "1": "Hotspots: storage error. Record: one or more events rejected (local or server), or I/O error writing output. Init: I/O error. Up: docker invocation failure. Doctor: output write failure. Proposals: serialization or filesystem write failure. Publish: runtime or filesystem failure. Dashboard: port in use or artifact read error. Server: port in use or store error.",
+            "2": "Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, or self-install refusal; setup: unknown/missing mode, source-checkout refusal (live), or missing/invalid/conflicting live configuration; up: missing scaffold files, missing external network, or unexpected arguments; doctor: one or more structural error findings; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; publish: usage error or publish-input validation failure; dashboard: invalid flags or partial live-mode configuration; server: invalid flags or bind failure."
         }
     });
     serde_json::to_string(&doc).unwrap_or_else(|_| "{}".into())

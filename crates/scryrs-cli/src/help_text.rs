@@ -8,8 +8,9 @@ pub(crate) fn write_help(out: &mut impl Write) -> io::Result<()> {
         "scryrs — context intelligence for AI-assisted codebases\n\n\
 Discover, analyze, and navigate hotspots in your codebase.\n\n\
 COMMANDS\n\
-  scryrs hotspots <PATH>\n\
-      Emit a versioned JSON hotspot report from recorded trace events.\n\
+  scryrs hotspots <PATH> [--mode <local|live>] [--server-url <URL>] [--repository-id <ID>]\n\
+      Emit a versioned JSON hotspot report from local SQLite (default) or from\n\
+      the live hotspot server without merging local SQLite data.\n\
   scryrs record --stdin\n\
       Ingest JSONL trace events from stdin.\n\
   scryrs record --file <PATH>\n\
@@ -52,20 +53,29 @@ COMMANDS\n\
   scryrs route <PATH>\n\
       Generate the route manifest from a knowledge graph artifact.\n\
       Emits a single-line RouteManifestDocument JSON to stdout and .scryrs/routes.json.\n\
+      target stays the stable graph-node id; loadTarget adds file/doc_page/\n\
+      non_loadable retrieval context without changing schema versions.\n\
   scryrs route explain <PATH> --query <TEXT>\n\
       Query the route manifest for matching entries.\n\
       Case-insensitive substring match against label, subject, id, target, kind,\n\
-      and evidence_links[].subject. Match tier (exact > prefix > substring) orders\n\
-      results. Returns single-line RouteHintDocument JSON. Zero matches produces\n\
-      valid document with empty hints array.\n\
-      Example: scryrs route explain . --query \"authentication\"\n\
+      and evidence_links[].subject. Match tiers are exact > prefix > substring,\n\
+      then the authoritative explain ranking chain is\n\
+      (tier DESC, score DESC, count DESC, manifest_index ASC, route_id ASC).\n\
+      Returns single-line RouteHintDocument JSON. Zero matches produces valid\n\
+      document with empty hints array. Example: scryrs route explain . --query\n\
+      \"authentication\"\n\
 \n\
       Route hint contract: Each route entry projects to a RouteHintItem\n\
-      (HINT_SCHEMA_VERSION 1.0.0) with routeId, target, label, 1-based\n\
-      ordinal rank, evidence citations, and a template-derived reason.\n\
-      The reason field appends \"; query match on <fields>\" for explain results.\n\
-      Rank is a deterministic ordinal derived from manifest entry order;\n\
-      relevance is deferred (None).\n\
+      (HINT_SCHEMA_VERSION 1.0.0) with routeId, stable target node id,\n\
+      optional loadTarget, label, 1-based ordinal rank, evidence citations,\n\
+      and a template-derived reason. File loadTarget references are repository-\n\
+      relative paths, doc_page references are project-docs/<slug>, and search /\n\
+      symbol / domain_term / doc_group routes stay explicitly non_loadable.\n\
+      reason strings include load target kind; explain appends\n\
+      \"; query match on <fields>\". rank remains the manifest ordinal; explain\n\
+      relevance is the packed score tier * 1_000_000_000 +\n\
+      min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999).\n\
+      plain route projection omits relevance.\n\
   scryrs propose <PATH>\n\
       Generate reviewable knowledge proposals from hotspot and graph evidence.\n\
       Writes validated ProposalDocument files under .scryrs/proposals/.\n\
@@ -78,6 +88,13 @@ COMMANDS\n\
       Accept a validated proposal without mutating the proposal inbox artifact.\n\
   scryrs proposals reject <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>\n\
       Reject a validated proposal without mutating the proposal inbox artifact.\n\
+  scryrs publish markdown <PATH> --output <DIR>\n\
+      Publish accepted Markdown-backed review decisions to generic Markdown only.\n\
+      Reads .scryrs/accepted/ only and never deletes stale generic Markdown output.\n\
+  scryrs publish rspress <PATH> --docs-root <DIR>\n\
+      Publish accepted Markdown-backed review decisions to Rspress accepted-knowledge pages.\n\
+      Updates accepted-knowledge/ and _nav.json deterministically after validating nav input.\n\
+      Publishing remains explicit: `scryrs proposals accept` does not publish automatically.\n\
   scryrs dashboard [--mode live|local] [--port <PORT>] [--bind <ADDR>] [--server-url <URL>] [--repository-id <ID>] [--no-open] [--dev]\n\
       Start dashboard server and open the browser dashboard (live by default).\n\
   scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]\n\
@@ -122,7 +139,7 @@ HOTSPOTS OUTPUT\n\
       \"schemaVersion\": \"{}\",\n\
       \"command\": \"hotspots\",\n\
       \"repositoryPath\": \"<absolute path>\",\n\
-      \"storePath\": \"<absolute path to .scryrs/scryrs.db>\",\n\
+      \"storePath\": \"<absolute path to .scryrs/scryrs.db | live:<query_url>>\",\n\
       \"runMetadata\": {{\n\
         \"storeSchemaVersion\": <integer>,\n\
         \"analyzedEventCount\": <count>,\n\
@@ -137,10 +154,19 @@ HOTSPOTS OUTPUT\n\
   per-event-type counts, per-outcome counts, sessionCount,\n\
   firstSeen/lastSeen timestamps, and evidence rowIds.\n\
   Empty stores produce entries: [].\n\
+  Local mode sets generatedAt from the export clock and storePath to the local\n\
+  .scryrs/scryrs.db path.\n\
+  Live mode resolves server-url and repository-id by precedence — flags, then\n\
+  environment, then .scryrs/.env, then scryrs.json `remote` — queries\n\
+  GET /v1/repositories/<repository_id>/hotspots?window=cumulative, sets\n\
+  storePath to live:<query_url>, copies generatedAt from the server response,\n\
+  derives runMetadata from live entries, writes .scryrs/hotspots.json\n\
+  atomically, and exports the artifact without merging local SQLite data.\n\
   On success, the report is also written to .scryrs/hotspots.json.\n\
 EXAMPLES\n\
   scryrs hotspots /path/to/repo\n\
   scryrs hotspots .\n\
+  scryrs hotspots . --mode live --server-url http://127.0.0.1:8081 --repository-id repo-a\n\
   scryrs record --stdin < events.jsonl\n\
   scryrs record --file session.jsonl\n\
   scryrs hook claude-code < pre-tool-use.json\n\
@@ -155,6 +181,8 @@ EXAMPLES\n\
   scryrs dashboard --port 9090 --no-open\n\
   scryrs server\n\
   scryrs server --port 9091\n\
+  scryrs publish markdown . --output ./published-markdown\n\
+  scryrs publish rspress . --docs-root ./.devagent/docs/docs\n\
   scryrs graph .
   scryrs route .
   scryrs route explain . --query \"authentication\"\n\n\
@@ -163,9 +191,9 @@ OPTIONS\n\
   -V, --version    Print version and exit\n\
   -hj, --help-json Print machine-readable CLI surface description and exit\n\n\
 EXIT CODES\n\
-  0    Success (hotspots: JSON written; record local: all events accepted; record remote: no rejections or failures; init: hook installed; up: workspace-managed compose stack started; doctor: only ok/warn findings; propose/proposals: artifacts written or listed successfully; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)\n\
-  1    Hotspots: storage error. Record: rejected events or I/O error (local or server rejections). Init: I/O error. Up: docker invocation failure. Doctor: output write failure. Proposals: serialization or filesystem write failure. Dashboard: port in use or artifact read error. Server: port in use or store error.\n\
-  2    Usage error; hotspots: missing/unsupported store; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, or self-install refusal; setup: unknown/missing mode, source-checkout refusal (live), or missing/invalid/conflicting live configuration; up: missing scaffold files, missing external network, or unexpected arguments; doctor: one or more structural error findings; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; route explain: missing PATH, missing --query, missing/malformed/schema-mismatched routes.json; dashboard: invalid flags, bind failure, or partial live-mode configuration; server: invalid flags or bind failure",
+  0    Success (hotspots: JSON written; record local: all events accepted; record remote: no rejections or failures; init: hook installed; up: workspace-managed compose stack started; doctor: only ok/warn findings; propose/proposals: artifacts written or listed successfully; publish: accepted knowledge published successfully; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)\n\
+  1    Hotspots: storage error or artifact write failure. Record: rejected events or I/O error (local or server rejections). Init: I/O error. Up: docker invocation failure. Doctor: output write failure. Proposals: serialization or filesystem write failure. Publish: runtime or filesystem failure. Dashboard: port in use or artifact read error. Server: port in use or store error.\n\
+  2    Usage error; hotspots: missing/unsupported local store, unknown mode, missing live identity, live timeout/connection failure, non-2xx response, malformed live response, or live schema/repository mismatch; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, or self-install refusal; setup: unknown/missing mode, source-checkout refusal (live), or missing/invalid/conflicting live configuration; up: missing scaffold files, missing external network, or unexpected arguments; doctor: one or more structural error findings; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; publish: usage error or publish-input validation failure (invalid accepted artifacts, malformed _nav.json); route explain: missing PATH, missing --query, missing/malformed/schema-mismatched routes.json; dashboard: invalid flags, bind failure, or partial live-mode configuration; server: invalid flags or bind failure",
         SCHEMA_VERSION, SCHEMA_VERSION, HOTSPOT_SCHEMA_VERSION
     )
 }
