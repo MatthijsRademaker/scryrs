@@ -31,3 +31,7 @@ This change defines the read-only live dashboard mode contract. It specifies how
   - `.devagent/docs/` — live dashboard mode documentation
 - **Local mode unchanged**: Existing local-only behavior, tests, and default startup are preserved exactly. No silent fallback or merge between local and live data.
 - **Breaking changes**: None. Live mode is strictly opt-in via explicit configuration.
+
+## Superseded By
+
+This change is superseded by archived `2026-06-29-task-206a6986-5940-4824-a202-c7c759da4548` (Live Dashboard 02 — Implement live hotspot rankings and signal timeline UI), whose work was promoted to canonical spec at `openspec/specs/live-dashboard-mode/spec.md`. No delta spec sync is required.

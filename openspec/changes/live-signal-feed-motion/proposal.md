@@ -15,9 +15,11 @@ The live Signals view is the most real-time surface in the dashboard, yet it is 
 ## Capabilities
 
 ### New Capabilities
+
 - `live-signal-feed-motion`: The animated live Signals feed — newest-first layout, the data-driven arrival motion (enter, layout settle, flame flare, score count-up), the replay-vs-live distinction, and reduced-motion behavior.
 
 ### Modified Capabilities
+
 - `dashboard-visual-design`: The "Motion is spring-based and restrained" requirement changes to permit a dedicated spring-physics library (`motion-v`) for data-bearing motion, while preserving the restraint discipline (a single soft settle, never cartoonish bounce; calm at rest; reduced-motion honored). The "no new animation dependency" scenario is replaced accordingly.
 
 ## Impact
@@ -26,3 +28,7 @@ The live Signals view is the most real-time surface in the dashboard, yet it is 
 - **Dependencies**: adds `motion-v` to `crates/scryrs-dashboard/frontend/package.json`.
 - **Specs**: modifies `dashboard-visual-design`; adds `live-signal-feed-motion`.
 - **Out of scope (future threads)**: FLIP-animated leaderboard on the Hotspots view, a unified signals+rankings live surface, and a globally reactive ambient aurora.
+
+## Board Tasks
+
+Remaining unchecked items (5.1-5.3, manual visual verification) are tracked by board task **`c2ba1718-b508-46ca-8a92-04dc938e0439`** (Dashboard Verification 01 — Add automated live signal feed browser smoke), currently Backlog.

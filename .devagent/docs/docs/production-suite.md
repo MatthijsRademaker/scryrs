@@ -17,10 +17,10 @@ The heavy verification path is also exposed as `scripts/precommit-run --producti
 | --- | --- | --- |
 | Trace capture | `scryrs record`, `scryrs hook`, `scryrs init`, local SQLite, fail-open hooks, Pi and Claude Code adapters | Broader harness matrix and release-grade install diagnostics |
 | Hotspots | Deterministic batch scoring and `.scryrs/hotspots.json` shipped | Long-running UX around trend/history still missing |
-| Live hotspots | Central ingest server, idempotency, accumulators, query API, SSE signals shipped | Dashboard live mode and multi-agent end-to-end product workflow missing |
+| Live hotspots | Central ingest server, idempotency, accumulators, query API, SSE signals, and dashboard live mode shipped | Multi-agent end-to-end browser automation and visual verification still missing (see board task `c2ba1718`) |
 | Graph | `scryrs graph <PATH>` builds structural graph from hotspots plus docs navigation | Cross-domain edges and accepted evidence ingestion missing |
 | Route manifests | `scryrs route <PATH>` emits `.scryrs/routes.json` from graph nodes | Runtime explanation and context loading decisions missing |
-| Proposals | `ProposalDocument`, inbox layout, deterministic `scryrs propose <PATH>`, `scryrs proposals list|accept|reject`, accepted/rejected review artifacts, safety checks shipped | Dashboard review UX and broader accepted-evidence consumers still missing |
+| Proposals | `ProposalDocument`, inbox layout, deterministic `scryrs propose <PATH>`, `scryrs proposals list | accept | reject`, accepted/rejected review artifacts, safety checks shipped | Dashboard review UX and broader accepted-evidence consumers still missing |
 | Adapters | Shipped `scryrs publish markdown` and `scryrs publish rspress` commands delegate to the publishing adapters over reviewed `.scryrs/accepted/*.json` | Broader docs-surface targets beyond Markdown/Rspress are still missing |
 | LLM assist | Bounded `scryrs-curator-llm` library shipped | Product integration must wait for acceptance lifecycle |
 
@@ -149,7 +149,7 @@ The exact manual commands and the explicit Linux-vs-macOS limitation are documen
 | --- | --- | --- |
 | P1. Acceptance ledger | Proposals can become reviewed evidence without silent mutation | Accepted/rejected artifact contract, CLI review commands, validation, no-write guarantees |
 | P2. Accepted evidence graph | Reviewed groupings and docs notes influence graph deterministically | Graph consumes accepted evidence; route manifests update from graph; provenance preserved |
-| P3. Live dashboard | Multi-agent hotspots become visible product, not just API | Dashboard live mode, server API client, signal timeline, reconnect behavior |
+| P3. Live dashboard | Multi-agent hotspots become visible product, not just API | Dashboard live mode, server API client, signal timeline, reconnect behavior ✅ Shipped |
 | P4. Runtime explain | Agents can ask what to read and why | Route hint schema, `scryrs route explain`, deterministic evidence-backed reasons |
 | P5. Publishing adapters | Reviewed knowledge leaves `.scryrs/` through explicit shipped CLI commands | `scryrs publish markdown` delegates to `scryrs-adapter-markdown` for generic Markdown output. `scryrs publish rspress` delegates to `scryrs-adapter-rspress` to write pages with Rspress frontmatter into `.devagent/docs/docs/accepted-knowledge/` and update `_nav.json`. `scripts/verify-docs-publish` proves both real CLI publish modes before checking `doc_build/llms.txt`. |
 | P6. LLM assist UX | Models improve proposal quality without owning truth | Opt-in draft/group commands or UI action, bounded EvidencePack, citation validation, no auto-accept |
