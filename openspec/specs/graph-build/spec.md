@@ -71,7 +71,7 @@ The builder SHALL convert every entry in the loaded `.scryrs/hotspots.json` `ent
 
 ### Requirement: Doc pages become graph nodes with structural edges
 
-The builder SHALL scan `.devagent/docs/docs/` for `.md` and `.mdx` files and parse `_nav.json` for navigation hierarchy. Each discovered page SHALL become a `GraphNode` with kind `"doc_page"`. Nav hierarchy SHALL produce `contains` edges.
+The builder SHALL scan `.devagent/docs/docs/` for `.md` and `.mdx` files and parse `_nav.json` for navigation hierarchy. Each discovered page SHALL become a `GraphNode` with kind `"doc_page"`. Nav hierarchy SHALL produce `contains` edges. These structural docs edges remain distinct from any separately derived cross-domain relationships and SHALL NOT change doc-page node identity.
 
 #### Scenario: Doc pages are discovered from the docs directory
 
@@ -102,12 +102,37 @@ The builder SHALL scan `.devagent/docs/docs/` for `.md` and `.mdx` files and par
 - **AND** a synthetic `docs_root` node exists as the root of the doc hierarchy
 - **AND** `contains` edges connect `docs_root` to each top-level nav group
 
-#### Scenario: No cross-domain edges in v1
+### Requirement: Cross-domain edges derive only from explicit local trace evidence
 
-- **GIVEN** the graph contains hotspot nodes and doc page nodes
-- **WHEN** the builder produces edges
-- **THEN** no edges connect hotspot nodes to doc page nodes
-- **AND** edges are restricted to `contains` relationships derived from navigation hierarchy
+The builder SHALL preserve exact node identity for hotspot, docs, and accepted-group nodes while optionally deriving additional non-`contains` edges from the local `.scryrs/scryrs.db` trace store. It SHALL derive only the shipped deterministic rules, SHALL attach evidence links to every derived edge, SHALL deduplicate by `(relationship, sourceNodeId, targetNodeId)`, and SHALL silently emit no derived edge when the local trace store is missing, empty, or lacks qualifying evidence.
+
+#### Scenario: File and symbol evidence in the same session derive a directed edge
+
+- **GIVEN** the graph contains nodes `file:src/auth.rs` and `symbol:Authenticator`
+- **AND** qualifying `FileOpened("src/auth.rs")` and `SymbolInspected("Authenticator")` trace evidence appears in the same `session_id`
+- **WHEN** graph build runs
+- **THEN** the graph contains exactly one edge from `file:src/auth.rs` to `symbol:Authenticator`
+- **AND** that edge uses relationship `symbol_inspected_during_file_context`
+- **AND** that edge includes evidence links citing both qualifying trace subjects
+
+#### Scenario: Search evidence derives separate document and doc-page edges for exact normalized matches
+
+- **GIVEN** the graph contains node `search:Graph`, node `document:/graph.mdx`, and node `doc_page:graph`
+- **AND** qualifying `SearchRun("Graph")` and `DocRetrieved("/graph.mdx")` trace evidence appears in the same `session_id`
+- **WHEN** graph build runs
+- **THEN** the graph contains a `search_result` edge from `search:Graph` to `document:/graph.mdx`
+- **AND** the graph contains a separate `search_result` edge from `search:Graph` to `doc_page:graph`
+- **AND** both edges include qualifying trace evidence
+- **AND** the `doc_page:graph` edge also preserves `doc_reference` provenance from the target doc page node
+
+#### Scenario: Cross-domain derivation skips cleanly without local trace support
+
+- **GIVEN** hotspot, docs, and accepted-evidence inputs are otherwise valid
+- **AND** `.scryrs/scryrs.db` is missing, empty, or lacks qualifying same-session evidence for a shipped rule
+- **WHEN** graph build runs
+- **THEN** the command still exits with code 0
+- **AND** the emitted graph preserves the same node identities
+- **AND** no derived cross-domain edge is emitted for the unsupported case
 
 ### Requirement: Output is a valid KnowledgeGraphDocument
 
@@ -237,4 +262,87 @@ Graph build SHALL deserialize accepted review-decision artifacts as `ProposalRev
 - **WHEN** graph build runs
 - **THEN** the command exits non-zero
 - **AND** stderr reports a conflicting accepted grouping for that target group node ID
+
+### Requirement: Graph build derives deterministic cross-domain edges from local trace evidence
+
+Graph build SHALL attempt cross-domain derivation only when the local `.scryrs/scryrs.db` trace store is available. It SHALL use hotspot evidence row IDs plus `TraceQuery::iter_events_with_ids_ordered()` to reconstruct same-session observations and SHALL apply exactly two v1 rules after hotspot nodes, docs nodes, and accepted semantic-grouping nodes exist. It SHALL NOT use LLM inference, fuzzy matching, substring matching, embeddings, or generic all-pairs co-occurrence.
+
+Derived edges SHALL use stable IDs in the format `{relationship}_{sourceNodeId}_{targetNodeId}` and SHALL be deduplicated by `(relationship, source_node_id, target_node_id)`. Every derived edge SHALL carry evidence links citing both sides of the relationship. If the local trace store is absent, or if a candidate relationship lacks the required nodes or exact rule match, graph build SHALL emit no derived edge for that case and SHALL continue successfully.
+
+#### Scenario: Missing local trace store skips cross-domain derivation
+
+- **GIVEN** `.scryrs/hotspots.json` and optional docs inputs exist
+- **AND** `.scryrs/scryrs.db` is absent
+- **WHEN** `scryrs graph build <PATH>` runs
+- **THEN** the command exits with code `0`
+- **AND** hotspot, docs, and accepted-grouping nodes and edges are still emitted normally
+- **AND** no derived cross-domain edges are added
+
+#### Scenario: File and symbol evidence link deterministically
+
+- **GIVEN** the graph already contains `file:src/auth.rs` and `symbol:Authenticator`
+- **AND** hotspot evidence row IDs for those nodes resolve to `FileOpened(path = "src/auth.rs")` and `SymbolInspected(name = "Authenticator")` events with the same `session_id`
+- **WHEN** graph build derives cross-domain edges
+- **THEN** exactly one edge with `relationship = "symbol_inspected_during_file_context"` is emitted from `file:src/auth.rs` to `symbol:Authenticator`
+- **AND** the edge ID is `"symbol_inspected_during_file_context_file:src/auth.rs_symbol:Authenticator"`
+- **AND** the edge includes evidence links citing both the file-side and symbol-side trace evidence
+
+#### Scenario: Search and document hotspot evidence link deterministically
+
+- **GIVEN** the graph already contains `search:graph` and `document:/graph.mdx`
+- **AND** hotspot evidence row IDs for those nodes resolve to `SearchRun(query = "graph")` and `DocRetrieved(doc_ref = "/graph.mdx")` events with the same `session_id`
+- **WHEN** graph build derives cross-domain edges
+- **THEN** exactly one edge with `relationship = "search_result"` is emitted from `search:graph` to `document:/graph.mdx`
+- **AND** the edge includes evidence links citing both the search-side and document-side evidence
+
+#### Scenario: Search and docs page evidence link deterministically
+
+- **GIVEN** the graph already contains `search:graph` and `doc_page:graph`
+- **AND** a `SearchRun(query = "graph")` event and a `DocRetrieved(doc_ref = "/graph.mdx")` event share the same `session_id`
+- **AND** the normalized search query equals the normalized docs-page slug after lowercasing, stripping one leading `/`, and stripping a trailing `.md` or `.mdx`
+- **WHEN** graph build derives cross-domain edges
+- **THEN** exactly one edge with `relationship = "search_result"` is emitted from `search:graph` to `doc_page:graph`
+- **AND** the edge includes evidence links citing search trace evidence and docs-page/document evidence
+
+#### Scenario: Matching document and docs page remain separate targets
+
+- **GIVEN** the graph contains `search:graph`, `document:/graph.mdx`, and `doc_page:graph`
+- **AND** same-session `SearchRun(query = "graph")` and `DocRetrieved(doc_ref = "/graph.mdx")` evidence satisfies the search rule
+- **WHEN** graph build derives cross-domain edges
+- **THEN** it emits one `search_result` edge to `document:/graph.mdx`
+- **AND** it emits a separate `search_result` edge to `doc_page:graph`
+- **AND** no nodes are merged or replaced
+
+#### Scenario: Duplicate qualifying observations aggregate into one derived edge
+
+- **GIVEN** multiple same-session evidence observations qualify for `search_result` from `search:graph` to `doc_page:graph`
+- **WHEN** graph build derives cross-domain edges
+- **THEN** only one edge exists for that `(relationship, source, target)` tuple
+- **AND** the edge carries the aggregated evidence links from the qualifying observations
+
+#### Scenario: No exact match or missing target produces no derived edge
+
+- **GIVEN** a `SearchRun(query = "graph routing")` event and a `DocRetrieved(doc_ref = "/graph.mdx")` event share the same `session_id`
+- **AND** the graph does not contain another target node whose normalized subject exactly equals `graph routing`
+- **WHEN** graph build derives cross-domain edges
+- **THEN** no `search_result` edge is emitted for that search node
+
+### Requirement: Cross-domain derivation preserves node identity and accepted semantic grouping
+
+Derived cross-domain edges SHALL add context only. They SHALL reference existing graph nodes, SHALL NOT merge or rewrite hotspot/doc-page/group node identities, and SHALL NOT remove or alter accepted `semantic_graph_grouping` nodes or their `contains` edges.
+
+#### Scenario: Shared labels across subject kinds remain distinct
+
+- **GIVEN** the graph contains `file:auth`, `search:auth`, and `symbol:auth`
+- **WHEN** graph build derives cross-domain edges
+- **THEN** those three nodes remain distinct graph nodes
+- **AND** the presence or absence of derived edges does not collapse them into one identity
+
+#### Scenario: Accepted semantic grouping remains supported alongside derived edges
+
+- **GIVEN** accepted evidence already created `domain_term:auth` with `contains` edges to `file:auth` and `search:auth`
+- **AND** same-session evidence also qualifies `file:auth` for a derived edge to `symbol:AuthService`
+- **WHEN** graph build completes
+- **THEN** the accepted group node and its `contains` edges remain present
+- **AND** the derived cross-domain edge is added without replacing or weakening the accepted grouping structure
 

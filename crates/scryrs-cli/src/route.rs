@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use scryrs_types::{
     EvidenceLink, EvidenceSourceKind, GRAPH_SCHEMA_VERSION, KnowledgeGraphDocument,
     ROUTE_SCHEMA_VERSION, RouteEntry, RouteGrouping, RouteLoadTarget, RouteLoadTargetKind,
-    RouteManifestDocument,
+    RouteManifestDocument, RouteRelatedEdge,
 };
 
 #[cfg(feature = "graph")]
@@ -55,11 +55,12 @@ pub(crate) fn write_route_json(out: &mut impl Write, err: &mut impl Write, path:
 
     // Build parent lookup map from contains edges.
     let parent_map = build_parent_map(&graph_doc.edges);
+    let related_edges_map = build_related_edges_map(&graph_doc.edges);
 
     // Build route entries from graph nodes.
     let mut routes: Vec<RouteEntry> = Vec::with_capacity(graph_doc.nodes.len());
     for node in &graph_doc.nodes {
-        let entry = match build_route_entry(node, &parent_map) {
+        let entry = match build_route_entry(node, &parent_map, &related_edges_map) {
             Ok(entry) => entry,
             Err(message) => {
                 let _ = writeln!(err, "scryrs route: {message}");
@@ -75,9 +76,10 @@ pub(crate) fn write_route_json(out: &mut impl Write, err: &mut impl Write, path:
     // Sort routes by id ascending (deterministic).
     routes.sort_by(|a, b| a.id.cmp(&b.id));
 
-    // Sort evidence links within each entry.
+    // Sort evidence links within each entry and related edge summary.
     for entry in &mut routes {
         sort_evidence_links(&mut entry.evidence_links);
+        sort_related_edges(&mut entry.related_edges);
     }
 
     // Construct the manifest document.
@@ -127,12 +129,33 @@ fn build_parent_map(edges: &[scryrs_types::GraphEdge]) -> HashMap<&str, &str> {
     map
 }
 
+#[cfg(feature = "graph")]
+fn build_related_edges_map(
+    edges: &[scryrs_types::GraphEdge],
+) -> HashMap<String, Vec<RouteRelatedEdge>> {
+    let mut map: HashMap<String, Vec<RouteRelatedEdge>> = HashMap::new();
+    for edge in edges {
+        if edge.relationship == "contains" {
+            continue;
+        }
+        map.entry(edge.source_node_id.clone())
+            .or_default()
+            .push(RouteRelatedEdge {
+                relationship: edge.relationship.clone(),
+                target_route_id: edge.target_node_id.clone(),
+                evidence_links: edge.evidence_links.clone(),
+            });
+    }
+    map
+}
+
 /// Build a `RouteEntry` from a single graph node with optional grouping
 /// from the parent lookup map.
 #[cfg(feature = "graph")]
 fn build_route_entry(
     node: &scryrs_types::GraphNode,
     parent_map: &HashMap<&str, &str>,
+    related_edges_map: &HashMap<String, Vec<RouteRelatedEdge>>,
 ) -> Result<RouteEntry, String> {
     let grouping = parent_map.get(node.id.as_str()).map(|parent_id| {
         // We don't have the parent's label accessible here — we only mapped
@@ -147,6 +170,7 @@ fn build_route_entry(
     });
     let subject = raw_subject(node);
     let load_target = Some(derive_load_target(node, &subject)?);
+    let related_edges = related_edges_map.get(&node.id).cloned().unwrap_or_default();
 
     Ok(RouteEntry {
         id: node.id.clone(),
@@ -157,6 +181,7 @@ fn build_route_entry(
         load_target,
         kind: node.kind.clone(),
         evidence_links: node.evidence_links.clone(),
+        related_edges,
         grouping,
         metadata: node.metadata.clone(),
     })
@@ -268,6 +293,18 @@ fn sort_evidence_links(links: &mut [EvidenceLink]) {
             .then_with(|| a.description.cmp(&b.description))
             .then_with(|| a.row_ids.cmp(&b.row_ids))
             .then_with(|| a.score.cmp(&b.score))
+    });
+}
+
+#[cfg(feature = "graph")]
+fn sort_related_edges(edges: &mut [RouteRelatedEdge]) {
+    for edge in edges.iter_mut() {
+        sort_evidence_links(&mut edge.evidence_links);
+    }
+    edges.sort_by(|a, b| {
+        a.relationship
+            .cmp(&b.relationship)
+            .then_with(|| a.target_route_id.cmp(&b.target_route_id))
     });
 }
 
@@ -431,7 +468,7 @@ mod tests {
         };
 
         let parent_map = HashMap::new();
-        let entry = build_route_entry(&node, &parent_map).expect("route entry");
+        let entry = build_route_entry(&node, &parent_map, &HashMap::new()).expect("route entry");
 
         assert_eq!(entry.id, "file:src/main.rs");
         assert_eq!(entry.subject_kind, "file");
@@ -471,7 +508,7 @@ mod tests {
         let mut parent_map = HashMap::new();
         parent_map.insert("doc_page:graph", "technical");
 
-        let entry = build_route_entry(&node, &parent_map).expect("route entry");
+        let entry = build_route_entry(&node, &parent_map, &HashMap::new()).expect("route entry");
 
         assert_eq!(entry.id, "doc_page:graph");
         assert!(entry.grouping.is_some());
@@ -492,7 +529,8 @@ mod tests {
             metadata: None,
         };
 
-        let entry = build_route_entry(&node, &HashMap::new()).expect("route entry");
+        let entry =
+            build_route_entry(&node, &HashMap::new(), &HashMap::new()).expect("route entry");
 
         assert_eq!(entry.subject_kind, "domain_term");
         assert_eq!(entry.subject, "auth");
@@ -524,6 +562,7 @@ mod tests {
             }),
             kind: "doc_page".into(),
             evidence_links: vec![],
+            related_edges: vec![],
             grouping: Some(RouteGrouping {
                 group_id: "technical".into(),
                 group_label: String::new(),
@@ -670,6 +709,197 @@ mod tests {
 
         // Artifact was written.
         assert!(tmp.path().join(".scryrs/routes.json").exists());
+    }
+
+    #[test]
+    fn related_edges_are_projected_on_source_routes_only_and_preserve_contains_grouping() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().expect("tempdir");
+        let scryrs_dir = tmp.path().join(".scryrs");
+        fs::create_dir(&scryrs_dir).expect("create .scryrs");
+
+        let graph_doc = make_test_doc(
+            vec![
+                GraphNode {
+                    id: "domain_term:auth".into(),
+                    label: "Auth".into(),
+                    description: None,
+                    kind: "domain_term".into(),
+                    tags: vec![],
+                    aliases: vec![],
+                    evidence_links: vec![],
+                    metadata: None,
+                },
+                GraphNode {
+                    id: "file:src/auth.rs".into(),
+                    label: "src/auth.rs".into(),
+                    description: None,
+                    kind: "file".into(),
+                    tags: vec![],
+                    aliases: vec![],
+                    evidence_links: vec![EvidenceLink {
+                        source_kind: EvidenceSourceKind::LocalTraceRow,
+                        subject: "src/auth.rs".into(),
+                        row_ids: vec![1],
+                        doc_ref: None,
+                        description: None,
+                        score: Some(10),
+                        metadata: None,
+                    }],
+                    metadata: None,
+                },
+                GraphNode {
+                    id: "doc_page:graph".into(),
+                    label: "graph".into(),
+                    description: None,
+                    kind: "doc_page".into(),
+                    tags: vec![],
+                    aliases: vec![],
+                    evidence_links: vec![EvidenceLink {
+                        source_kind: EvidenceSourceKind::DocReference,
+                        subject: "graph".into(),
+                        row_ids: vec![],
+                        doc_ref: Some("graph".into()),
+                        description: None,
+                        score: None,
+                        metadata: None,
+                    }],
+                    metadata: None,
+                },
+                GraphNode {
+                    id: "symbol:Authenticator".into(),
+                    label: "Authenticator".into(),
+                    description: None,
+                    kind: "symbol".into(),
+                    tags: vec![],
+                    aliases: vec![],
+                    evidence_links: vec![EvidenceLink {
+                        source_kind: EvidenceSourceKind::LocalTraceRow,
+                        subject: "Authenticator".into(),
+                        row_ids: vec![2],
+                        doc_ref: None,
+                        description: None,
+                        score: Some(8),
+                        metadata: None,
+                    }],
+                    metadata: None,
+                },
+            ],
+            vec![
+                GraphEdge {
+                    id: "domain_term:auth_contains_file:src/auth.rs".into(),
+                    source_node_id: "domain_term:auth".into(),
+                    target_node_id: "file:src/auth.rs".into(),
+                    relationship: "contains".into(),
+                    label: None,
+                    tags: vec![],
+                    evidence_links: vec![],
+                    metadata: None,
+                },
+                GraphEdge {
+                    id: "search_result_file:src/auth.rs_doc_page:graph".into(),
+                    source_node_id: "file:src/auth.rs".into(),
+                    target_node_id: "doc_page:graph".into(),
+                    relationship: "search_result".into(),
+                    label: None,
+                    tags: vec![],
+                    evidence_links: vec![EvidenceLink {
+                        source_kind: EvidenceSourceKind::LocalTraceRow,
+                        subject: "graph".into(),
+                        row_ids: vec![3],
+                        doc_ref: None,
+                        description: None,
+                        score: None,
+                        metadata: None,
+                    }],
+                    metadata: None,
+                },
+                GraphEdge {
+                    id:
+                        "symbol_inspected_during_file_context_file:src/auth.rs_symbol:Authenticator"
+                            .into(),
+                    source_node_id: "file:src/auth.rs".into(),
+                    target_node_id: "symbol:Authenticator".into(),
+                    relationship: "symbol_inspected_during_file_context".into(),
+                    label: None,
+                    tags: vec![],
+                    evidence_links: vec![EvidenceLink {
+                        source_kind: EvidenceSourceKind::LocalTraceRow,
+                        subject: "src/auth.rs".into(),
+                        row_ids: vec![1],
+                        doc_ref: None,
+                        description: None,
+                        score: None,
+                        metadata: None,
+                    }],
+                    metadata: None,
+                },
+            ],
+        );
+
+        fs::write(
+            scryrs_dir.join("graph.json"),
+            serde_json::to_string(&graph_doc).expect("serialize graph"),
+        )
+        .expect("write graph.json");
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(
+            write_route_json(&mut out, &mut err, tmp.path().to_str().expect("utf8 path")),
+            0
+        );
+
+        let manifest_json: serde_json::Value =
+            serde_json::from_slice(&out).expect("must be valid JSON value");
+        let routes = manifest_json["routes"].as_array().expect("routes array");
+        let file_route = routes
+            .iter()
+            .find(|route| route["id"].as_str() == Some("file:src/auth.rs"))
+            .expect("file route exists");
+        assert_eq!(
+            file_route["grouping"]["groupId"].as_str(),
+            Some("domain_term:auth")
+        );
+        assert_eq!(file_route["grouping"]["groupLabel"].as_str(), Some("Auth"));
+        let related_edges = file_route["relatedEdges"]
+            .as_array()
+            .expect("related edges");
+        assert_eq!(related_edges.len(), 2);
+        assert_eq!(
+            related_edges[0]["relationship"].as_str(),
+            Some("search_result")
+        );
+        assert_eq!(
+            related_edges[0]["targetRouteId"].as_str(),
+            Some("doc_page:graph")
+        );
+        assert_eq!(
+            related_edges[1]["relationship"].as_str(),
+            Some("symbol_inspected_during_file_context")
+        );
+        assert_eq!(
+            related_edges[1]["targetRouteId"].as_str(),
+            Some("symbol:Authenticator")
+        );
+
+        let symbol_route = routes
+            .iter()
+            .find(|route| route["id"].as_str() == Some("symbol:Authenticator"))
+            .expect("symbol route exists");
+        assert!(symbol_route.get("grouping").is_none());
+        assert!(symbol_route.get("relatedEdges").is_none());
+
+        let doc_route = routes
+            .iter()
+            .find(|route| route["id"].as_str() == Some("doc_page:graph"))
+            .expect("doc route exists");
+        assert!(doc_route.get("grouping").is_none());
+        assert!(doc_route.get("relatedEdges").is_none());
+        assert!(String::from_utf8_lossy(&err).is_empty());
     }
 
     #[test]

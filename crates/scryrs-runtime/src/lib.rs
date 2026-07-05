@@ -272,6 +272,7 @@ mod tests {
             load_target: Some(default_load_target(subject_kind, label)),
             kind: subject_kind.into(),
             evidence_links: evidence,
+            related_edges: vec![],
             grouping: None,
             metadata: None,
         }
@@ -524,6 +525,7 @@ mod tests {
             }),
             kind: "file".into(),
             evidence_links: vec![],
+            related_edges: vec![],
             grouping: None,
             metadata: None,
         };
@@ -805,6 +807,7 @@ mod tests {
             }),
             kind: "file".into(),
             evidence_links: vec![],
+            related_edges: vec![],
             grouping: None,
             metadata: None,
         };
@@ -820,6 +823,7 @@ mod tests {
             }),
             kind: "file".into(),
             evidence_links: vec![],
+            related_edges: vec![],
             grouping: None,
             metadata: None,
         };

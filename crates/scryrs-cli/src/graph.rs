@@ -2,17 +2,19 @@ use std::io::Write;
 
 #[cfg(feature = "graph")]
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashMap, HashSet},
     ffi::OsStr,
     path::{Path, PathBuf},
 };
 
 #[cfg(feature = "graph")]
+use scryrs_core::{QueryError, TraceQuery};
+#[cfg(feature = "graph")]
 use scryrs_graph::KnowledgeGraph;
 #[cfg(feature = "graph")]
 use scryrs_types::{
     EvidenceLink, EvidenceSourceKind, GraphEdge, GraphNode, ProposalReviewDecision,
-    ProposalTargetType, ProposedContent, ReviewOutcome,
+    ProposalTargetType, ProposedContent, ReviewOutcome, TraceEventPayload,
 };
 
 #[cfg(feature = "graph")]
@@ -85,6 +87,11 @@ pub(crate) fn write_graph_json(out: &mut impl Write, err: &mut impl Write, path:
     }
 
     if let Err(error) = load_accepted_evidence(&repo_root, &mut kg, err) {
+        let _ = writeln!(err, "scryrs graph: {error}");
+        return 2;
+    }
+
+    if let Err(error) = derive_cross_domain_edges(&repo_root, &mut kg) {
         let _ = writeln!(err, "scryrs graph: {error}");
         return 2;
     }
@@ -407,6 +414,464 @@ fn load_accepted_evidence(
 }
 
 #[cfg(feature = "graph")]
+#[derive(Clone, Debug)]
+struct NodeTraceBinding {
+    node_id: String,
+    subject: String,
+}
+
+#[cfg(feature = "graph")]
+#[derive(Clone, Debug)]
+struct NodeObservation {
+    subject: String,
+    row_ids: Vec<u64>,
+}
+
+#[cfg(feature = "graph")]
+#[derive(Clone, Debug)]
+struct SearchObservation {
+    subject: String,
+    normalized: String,
+    row_ids: Vec<u64>,
+}
+
+#[cfg(feature = "graph")]
+#[derive(Clone, Debug)]
+struct DocumentObservation {
+    subject: String,
+    normalized: String,
+    row_ids: Vec<u64>,
+}
+
+#[cfg(feature = "graph")]
+#[derive(Clone, Debug)]
+struct DocPageTarget {
+    node_id: String,
+    evidence_links: Vec<EvidenceLink>,
+}
+
+#[cfg(feature = "graph")]
+fn derive_cross_domain_edges(repo_root: &Path, kg: &mut KnowledgeGraph) -> Result<(), String> {
+    let query = match TraceQuery::open(repo_root) {
+        Ok(query) => query,
+        Err(QueryError::MissingStore | QueryError::EmptyStore) => return Ok(()),
+        Err(error) => return Err(format!("cannot open local trace store: {error}")),
+    };
+
+    let events = match query.iter_events_with_ids_ordered() {
+        Ok(events) => events,
+        Err(QueryError::EmptyStore) => return Ok(()),
+        Err(error) => return Err(format!("cannot query local trace store: {error}")),
+    };
+
+    let mut file_row_bindings = HashMap::new();
+    let mut symbol_row_bindings = HashMap::new();
+    let mut search_row_bindings = HashMap::new();
+    let mut document_row_bindings = HashMap::new();
+    let mut doc_page_targets: BTreeMap<String, Vec<DocPageTarget>> = BTreeMap::new();
+
+    for node in kg.nodes() {
+        let subject = graph_node_subject(node);
+        match node.kind.as_str() {
+            "file" => index_node_trace_rows(&mut file_row_bindings, node, &subject),
+            "symbol" => index_node_trace_rows(&mut symbol_row_bindings, node, &subject),
+            "search" => index_node_trace_rows(&mut search_row_bindings, node, &subject),
+            "document" => index_node_trace_rows(&mut document_row_bindings, node, &subject),
+            "doc_page" => {
+                let doc_reference_links: Vec<EvidenceLink> = node
+                    .evidence_links
+                    .iter()
+                    .filter(|link| link.source_kind == EvidenceSourceKind::DocReference)
+                    .cloned()
+                    .collect();
+                if !doc_reference_links.is_empty() {
+                    doc_page_targets
+                        .entry(normalize_search_match_value(&subject))
+                        .or_default()
+                        .push(DocPageTarget {
+                            node_id: node.id.clone(),
+                            evidence_links: doc_reference_links,
+                        });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut file_sessions: BTreeMap<String, BTreeMap<String, NodeObservation>> = BTreeMap::new();
+    let mut symbol_sessions: BTreeMap<String, BTreeMap<String, NodeObservation>> = BTreeMap::new();
+    let mut search_sessions: BTreeMap<String, BTreeMap<String, SearchObservation>> =
+        BTreeMap::new();
+    let mut document_sessions: BTreeMap<String, BTreeMap<String, DocumentObservation>> =
+        BTreeMap::new();
+    let mut doc_trace_sessions: BTreeMap<String, BTreeMap<String, BTreeMap<String, Vec<u64>>>> =
+        BTreeMap::new();
+
+    for (row_id, event) in &events {
+        match &event.payload {
+            TraceEventPayload::FileOpened(payload) => {
+                if let Some(binding) = file_row_bindings.get(row_id) {
+                    if payload.path == binding.subject {
+                        record_node_observation(
+                            &mut file_sessions,
+                            &event.session_id,
+                            &binding.node_id,
+                            &binding.subject,
+                            *row_id,
+                        );
+                    }
+                }
+            }
+            TraceEventPayload::SymbolInspected(payload) => {
+                if let Some(binding) = symbol_row_bindings.get(row_id) {
+                    if payload.name == binding.subject {
+                        record_node_observation(
+                            &mut symbol_sessions,
+                            &event.session_id,
+                            &binding.node_id,
+                            &binding.subject,
+                            *row_id,
+                        );
+                    }
+                }
+            }
+            TraceEventPayload::SearchRun(payload) => {
+                if let Some(binding) = search_row_bindings.get(row_id) {
+                    if payload.query == binding.subject {
+                        record_search_observation(
+                            &mut search_sessions,
+                            &event.session_id,
+                            &binding.node_id,
+                            &binding.subject,
+                            *row_id,
+                        );
+                    }
+                }
+            }
+            TraceEventPayload::DocRetrieved(payload) => {
+                if let Some(binding) = document_row_bindings.get(row_id) {
+                    if payload.doc_ref == binding.subject {
+                        record_document_observation(
+                            &mut document_sessions,
+                            &event.session_id,
+                            &binding.node_id,
+                            &binding.subject,
+                            *row_id,
+                        );
+                    }
+                }
+                record_doc_trace_observation(
+                    &mut doc_trace_sessions,
+                    &event.session_id,
+                    &payload.doc_ref,
+                    *row_id,
+                );
+            }
+            _ => {}
+        }
+    }
+
+    let mut derived_edges: BTreeMap<String, GraphEdge> = BTreeMap::new();
+
+    for (session_id, file_observations) in &file_sessions {
+        let Some(symbol_observations) = symbol_sessions.get(session_id) else {
+            continue;
+        };
+
+        for (file_node_id, file_observation) in file_observations {
+            for (symbol_node_id, symbol_observation) in symbol_observations {
+                let edge = derived_edges
+                    .entry(derived_edge_id(
+                        "symbol_inspected_during_file_context",
+                        file_node_id,
+                        symbol_node_id,
+                    ))
+                    .or_insert_with(|| GraphEdge {
+                        id: derived_edge_id(
+                            "symbol_inspected_during_file_context",
+                            file_node_id,
+                            symbol_node_id,
+                        ),
+                        source_node_id: file_node_id.clone(),
+                        target_node_id: symbol_node_id.clone(),
+                        relationship: "symbol_inspected_during_file_context".into(),
+                        label: None,
+                        tags: vec![],
+                        evidence_links: vec![],
+                        metadata: None,
+                    });
+                add_trace_evidence(
+                    &mut edge.evidence_links,
+                    &file_observation.subject,
+                    &file_observation.row_ids,
+                );
+                add_trace_evidence(
+                    &mut edge.evidence_links,
+                    &symbol_observation.subject,
+                    &symbol_observation.row_ids,
+                );
+            }
+        }
+    }
+
+    for (session_id, search_observations) in &search_sessions {
+        for (search_node_id, search_observation) in search_observations {
+            if let Some(document_observations) = document_sessions.get(session_id) {
+                for (document_node_id, document_observation) in document_observations {
+                    if search_observation.normalized != document_observation.normalized {
+                        continue;
+                    }
+                    let edge = derived_edges
+                        .entry(derived_edge_id(
+                            "search_result",
+                            search_node_id,
+                            document_node_id,
+                        ))
+                        .or_insert_with(|| GraphEdge {
+                            id: derived_edge_id("search_result", search_node_id, document_node_id),
+                            source_node_id: search_node_id.clone(),
+                            target_node_id: document_node_id.clone(),
+                            relationship: "search_result".into(),
+                            label: None,
+                            tags: vec![],
+                            evidence_links: vec![],
+                            metadata: None,
+                        });
+                    add_trace_evidence(
+                        &mut edge.evidence_links,
+                        &search_observation.subject,
+                        &search_observation.row_ids,
+                    );
+                    add_trace_evidence(
+                        &mut edge.evidence_links,
+                        &document_observation.subject,
+                        &document_observation.row_ids,
+                    );
+                }
+            }
+
+            let Some(doc_trace_targets) = doc_trace_sessions
+                .get(session_id)
+                .and_then(|by_normalized| by_normalized.get(&search_observation.normalized))
+            else {
+                continue;
+            };
+            let Some(doc_pages) = doc_page_targets.get(&search_observation.normalized) else {
+                continue;
+            };
+
+            for doc_page in doc_pages {
+                let edge = derived_edges
+                    .entry(derived_edge_id(
+                        "search_result",
+                        search_node_id,
+                        &doc_page.node_id,
+                    ))
+                    .or_insert_with(|| GraphEdge {
+                        id: derived_edge_id("search_result", search_node_id, &doc_page.node_id),
+                        source_node_id: search_node_id.clone(),
+                        target_node_id: doc_page.node_id.clone(),
+                        relationship: "search_result".into(),
+                        label: None,
+                        tags: vec![],
+                        evidence_links: vec![],
+                        metadata: None,
+                    });
+                add_trace_evidence(
+                    &mut edge.evidence_links,
+                    &search_observation.subject,
+                    &search_observation.row_ids,
+                );
+                for (doc_ref, row_ids) in doc_trace_targets {
+                    add_trace_evidence(&mut edge.evidence_links, doc_ref, row_ids);
+                }
+                for evidence_link in &doc_page.evidence_links {
+                    merge_evidence_link(&mut edge.evidence_links, evidence_link.clone());
+                }
+            }
+        }
+    }
+
+    for edge in derived_edges.into_values() {
+        kg.add_edge(edge);
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "graph")]
+fn index_node_trace_rows(
+    bindings: &mut HashMap<u64, NodeTraceBinding>,
+    node: &GraphNode,
+    subject: &str,
+) {
+    for row_id in local_trace_row_ids(node) {
+        bindings.insert(
+            row_id,
+            NodeTraceBinding {
+                node_id: node.id.clone(),
+                subject: subject.to_string(),
+            },
+        );
+    }
+}
+
+#[cfg(feature = "graph")]
+fn local_trace_row_ids(node: &GraphNode) -> Vec<u64> {
+    node.evidence_links
+        .iter()
+        .filter(|link| link.source_kind == EvidenceSourceKind::LocalTraceRow)
+        .flat_map(|link| link.row_ids.iter().copied())
+        .collect()
+}
+
+#[cfg(feature = "graph")]
+fn graph_node_subject(node: &GraphNode) -> String {
+    node.id
+        .split_once(':')
+        .map(|(_, subject)| subject.to_string())
+        .unwrap_or_else(|| node.label.clone())
+}
+
+#[cfg(feature = "graph")]
+fn normalize_search_match_value(value: &str) -> String {
+    let lower = value.to_ascii_lowercase();
+    let without_leading_slash = lower.strip_prefix('/').unwrap_or(&lower);
+    let without_extension = without_leading_slash
+        .strip_suffix(".mdx")
+        .or_else(|| without_leading_slash.strip_suffix(".md"))
+        .unwrap_or(without_leading_slash);
+    without_extension.to_string()
+}
+
+#[cfg(feature = "graph")]
+fn record_node_observation(
+    sessions: &mut BTreeMap<String, BTreeMap<String, NodeObservation>>,
+    session_id: &str,
+    node_id: &str,
+    subject: &str,
+    row_id: u64,
+) {
+    let observation = sessions
+        .entry(session_id.to_string())
+        .or_default()
+        .entry(node_id.to_string())
+        .or_insert_with(|| NodeObservation {
+            subject: subject.to_string(),
+            row_ids: vec![],
+        });
+    push_unique_row_id(&mut observation.row_ids, row_id);
+}
+
+#[cfg(feature = "graph")]
+fn record_search_observation(
+    sessions: &mut BTreeMap<String, BTreeMap<String, SearchObservation>>,
+    session_id: &str,
+    node_id: &str,
+    subject: &str,
+    row_id: u64,
+) {
+    let observation = sessions
+        .entry(session_id.to_string())
+        .or_default()
+        .entry(node_id.to_string())
+        .or_insert_with(|| SearchObservation {
+            subject: subject.to_string(),
+            normalized: normalize_search_match_value(subject),
+            row_ids: vec![],
+        });
+    push_unique_row_id(&mut observation.row_ids, row_id);
+}
+
+#[cfg(feature = "graph")]
+fn record_document_observation(
+    sessions: &mut BTreeMap<String, BTreeMap<String, DocumentObservation>>,
+    session_id: &str,
+    node_id: &str,
+    subject: &str,
+    row_id: u64,
+) {
+    let observation = sessions
+        .entry(session_id.to_string())
+        .or_default()
+        .entry(node_id.to_string())
+        .or_insert_with(|| DocumentObservation {
+            subject: subject.to_string(),
+            normalized: normalize_search_match_value(subject),
+            row_ids: vec![],
+        });
+    push_unique_row_id(&mut observation.row_ids, row_id);
+}
+
+#[cfg(feature = "graph")]
+fn record_doc_trace_observation(
+    sessions: &mut BTreeMap<String, BTreeMap<String, BTreeMap<String, Vec<u64>>>>,
+    session_id: &str,
+    doc_ref: &str,
+    row_id: u64,
+) {
+    let normalized = normalize_search_match_value(doc_ref);
+    let row_ids = sessions
+        .entry(session_id.to_string())
+        .or_default()
+        .entry(normalized)
+        .or_default()
+        .entry(doc_ref.to_string())
+        .or_default();
+    push_unique_row_id(row_ids, row_id);
+}
+
+#[cfg(feature = "graph")]
+fn derived_edge_id(relationship: &str, source_node_id: &str, target_node_id: &str) -> String {
+    format!("{relationship}_{source_node_id}_{target_node_id}")
+}
+
+#[cfg(feature = "graph")]
+fn add_trace_evidence(links: &mut Vec<EvidenceLink>, subject: &str, row_ids: &[u64]) {
+    if row_ids.is_empty() {
+        return;
+    }
+    merge_evidence_link(
+        links,
+        EvidenceLink {
+            source_kind: EvidenceSourceKind::LocalTraceRow,
+            subject: subject.to_string(),
+            row_ids: row_ids.to_vec(),
+            doc_ref: None,
+            description: None,
+            score: None,
+            metadata: None,
+        },
+    );
+}
+
+#[cfg(feature = "graph")]
+fn merge_evidence_link(links: &mut Vec<EvidenceLink>, link: EvidenceLink) {
+    if let Some(existing) = links.iter_mut().find(|existing| {
+        existing.source_kind == link.source_kind
+            && existing.subject == link.subject
+            && existing.doc_ref == link.doc_ref
+            && existing.description == link.description
+            && existing.score == link.score
+            && existing.metadata == link.metadata
+    }) {
+        for row_id in link.row_ids {
+            push_unique_row_id(&mut existing.row_ids, row_id);
+        }
+        return;
+    }
+
+    links.push(link);
+}
+
+#[cfg(feature = "graph")]
+fn push_unique_row_id(row_ids: &mut Vec<u64>, row_id: u64) {
+    if !row_ids.contains(&row_id) {
+        row_ids.push(row_id);
+    }
+}
+
+#[cfg(feature = "graph")]
 fn load_accepted_decision(path: &Path) -> Result<ProposalReviewDecision, String> {
     let json = std::fs::read_to_string(path)
         .map_err(|error| format!("cannot read accepted artifact {}: {error}", path.display()))?;
@@ -499,9 +964,12 @@ pub(crate) fn write_graph_json(_out: &mut impl Write, err: &mut impl Write, _pat
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+    use scryrs_core::EventStore;
     use scryrs_types::{
-        EvidenceSourceKind, GraphNode, KnowledgeGraphDocument, ProposalReviewDecision,
-        ProposalTargetType, ProposedContent, ReviewOutcome, SemanticGraphGrouping,
+        DocRetrievedPayload, EvidenceSourceKind, FileOpenedPayload, GraphEdge, GraphNode,
+        KnowledgeGraphDocument, Outcome, ProposalReviewDecision, ProposalTargetType,
+        ProposedContent, ReviewOutcome, SCHEMA_VERSION, SearchRunPayload, SemanticGraphGrouping,
+        SymbolInspectedPayload, TraceEvent, TraceEventPayload, TraceEventType,
     };
 
     fn write_hotspots_json(
@@ -566,6 +1034,93 @@ mod tests {
                 },
             )),
         }
+    }
+
+    fn make_file_opened(session_id: &str, path: &str, timestamp: &str) -> TraceEvent {
+        TraceEvent {
+            schema_version: SCHEMA_VERSION.into(),
+            timestamp: timestamp.into(),
+            session_id: session_id.into(),
+            event_type: TraceEventType::FileOpened,
+            tool_name: Some("read".into()),
+            payload: TraceEventPayload::FileOpened(FileOpenedPayload { path: path.into() }),
+            outcome: Outcome::Success,
+        }
+    }
+
+    fn make_search_run(session_id: &str, query: &str, timestamp: &str) -> TraceEvent {
+        TraceEvent {
+            schema_version: SCHEMA_VERSION.into(),
+            timestamp: timestamp.into(),
+            session_id: session_id.into(),
+            event_type: TraceEventType::SearchRun,
+            tool_name: Some("search".into()),
+            payload: TraceEventPayload::SearchRun(SearchRunPayload {
+                query: query.into(),
+            }),
+            outcome: Outcome::Success,
+        }
+    }
+
+    fn make_symbol_inspected(session_id: &str, name: &str, timestamp: &str) -> TraceEvent {
+        TraceEvent {
+            schema_version: SCHEMA_VERSION.into(),
+            timestamp: timestamp.into(),
+            session_id: session_id.into(),
+            event_type: TraceEventType::SymbolInspected,
+            tool_name: Some("inspect".into()),
+            payload: TraceEventPayload::SymbolInspected(SymbolInspectedPayload {
+                name: name.into(),
+            }),
+            outcome: Outcome::Success,
+        }
+    }
+
+    fn make_doc_retrieved(session_id: &str, doc_ref: &str, timestamp: &str) -> TraceEvent {
+        TraceEvent {
+            schema_version: SCHEMA_VERSION.into(),
+            timestamp: timestamp.into(),
+            session_id: session_id.into(),
+            event_type: TraceEventType::DocRetrieved,
+            tool_name: Some("read".into()),
+            payload: TraceEventPayload::DocRetrieved(DocRetrievedPayload {
+                doc_ref: doc_ref.into(),
+            }),
+            outcome: Outcome::Success,
+        }
+    }
+
+    fn populate_store(repo_root: &std::path::Path, events: &[TraceEvent]) {
+        let scryrs_dir = repo_root.join(".scryrs");
+        std::fs::create_dir_all(&scryrs_dir).expect("create .scryrs");
+        let store_path = scryrs_dir.join("scryrs.db");
+        let mut store = EventStore::open(&store_path).expect("open store");
+        store.begin_transaction().expect("begin transaction");
+        for event in events {
+            store.append(event).expect("append event");
+        }
+        store.commit_transaction().expect("commit transaction");
+    }
+
+    fn write_docs_fixture(repo_root: &std::path::Path, slug: &str) {
+        let docs_dir = repo_root.join(".devagent/docs/docs");
+        std::fs::create_dir_all(&docs_dir).expect("create docs dir");
+        std::fs::write(docs_dir.join(format!("{slug}.md")), format!("# {slug}"))
+            .expect("write docs page");
+        std::fs::write(
+            docs_dir.join("_nav.json"),
+            serde_json::to_string(&serde_json::json!([{"text": "Technical", "items": [{"text": slug, "link": format!("/{slug}")}]}]))
+                .expect("serialize nav"),
+        )
+        .expect("write nav");
+    }
+
+    fn edge_by_id<'a>(document: &'a KnowledgeGraphDocument, edge_id: &str) -> &'a GraphEdge {
+        document
+            .edges
+            .iter()
+            .find(|edge| edge.id == edge_id)
+            .unwrap_or_else(|| panic!("missing edge {edge_id}"))
     }
 
     fn run_graph_build_raw(repo_root: &std::path::Path) -> (i32, Vec<u8>, Vec<u8>) {
@@ -757,45 +1312,304 @@ mod tests {
     }
 
     #[test]
-    fn no_cross_domain_edges_in_v1() {
-        let nav = vec![NavGroup {
-            text: "Tech".into(),
-            items: vec![NavItem {
-                text: "Graph".into(),
-                link: "/graph".into(),
-            }],
-        }];
+    fn missing_local_trace_store_skips_cross_domain_derivation() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        write_hotspots_json(
+            tmp.path(),
+            serde_json::json!([
+                {
+                    "rank": 1,
+                    "subjectKind": "file",
+                    "subject": "src/auth.rs",
+                    "score": 10,
+                    "counts": {"eventType": {}, "outcome": {}},
+                    "sessionCount": 1,
+                    "firstSeen": "2026-01-01T00:00:00Z",
+                    "lastSeen": "2026-01-01T00:00:00Z",
+                    "evidence": {"rowIds": [1]}
+                },
+                {
+                    "rank": 2,
+                    "subjectKind": "symbol",
+                    "subject": "Authenticator",
+                    "score": 8,
+                    "counts": {"eventType": {}, "outcome": {}},
+                    "sessionCount": 1,
+                    "firstSeen": "2026-01-01T00:00:00Z",
+                    "lastSeen": "2026-01-01T00:00:00Z",
+                    "evidence": {"rowIds": [2]}
+                }
+            ]),
+        );
 
-        let mut kg = KnowledgeGraph::new();
+        let (exit_code, _, err, document) = run_graph_build(tmp.path());
+        assert_eq!(exit_code, 0, "stderr: {}", String::from_utf8_lossy(&err));
+        assert!(document.edges.is_empty());
+    }
 
-        // Add a hotspot node.
-        kg.add_node(GraphNode {
-            id: "file:src/main.rs".into(),
-            label: "src/main.rs".into(),
-            description: None,
-            kind: "file".into(),
-            tags: vec![],
-            aliases: vec![],
-            evidence_links: vec![],
-            metadata: None,
-        });
+    #[test]
+    fn file_and_symbol_hotspots_derive_cross_domain_edge_from_same_session() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        write_hotspots_json(
+            tmp.path(),
+            serde_json::json!([
+                {
+                    "rank": 1,
+                    "subjectKind": "file",
+                    "subject": "src/auth.rs",
+                    "score": 10,
+                    "counts": {"eventType": {"FileOpened": 1}, "outcome": {"success": 1}},
+                    "sessionCount": 1,
+                    "firstSeen": "2026-01-01T00:00:00Z",
+                    "lastSeen": "2026-01-01T00:00:00Z",
+                    "evidence": {"rowIds": [1]}
+                },
+                {
+                    "rank": 2,
+                    "subjectKind": "symbol",
+                    "subject": "Authenticator",
+                    "score": 8,
+                    "counts": {"eventType": {"SymbolInspected": 1}, "outcome": {"success": 1}},
+                    "sessionCount": 1,
+                    "firstSeen": "2026-01-01T00:00:01Z",
+                    "lastSeen": "2026-01-01T00:00:01Z",
+                    "evidence": {"rowIds": [2]}
+                }
+            ]),
+        );
+        populate_store(
+            tmp.path(),
+            &[
+                make_file_opened("s1", "src/auth.rs", "2026-01-01T00:00:00Z"),
+                make_symbol_inspected("s1", "Authenticator", "2026-01-01T00:00:01Z"),
+            ],
+        );
 
-        build_doc_layer(&mut kg, &nav);
+        let (exit_code, _, err, document) = run_graph_build(tmp.path());
+        assert_eq!(exit_code, 0, "stderr: {}", String::from_utf8_lossy(&err));
 
-        // Validate — should not reject dangling edges (no edges connect hotspot to doc).
-        assert!(kg.validate().is_ok());
+        let edge = edge_by_id(
+            &document,
+            "symbol_inspected_during_file_context_file:src/auth.rs_symbol:Authenticator",
+        );
+        assert_eq!(edge.relationship, "symbol_inspected_during_file_context");
+        assert_eq!(edge.source_node_id, "file:src/auth.rs");
+        assert_eq!(edge.target_node_id, "symbol:Authenticator");
+        assert!(edge.evidence_links.iter().any(|link| {
+            link.source_kind == EvidenceSourceKind::LocalTraceRow
+                && link.subject == "src/auth.rs"
+                && link.row_ids == vec![1]
+        }));
+        assert!(edge.evidence_links.iter().any(|link| {
+            link.source_kind == EvidenceSourceKind::LocalTraceRow
+                && link.subject == "Authenticator"
+                && link.row_ids == vec![2]
+        }));
+    }
 
-        // No edges should involve the hotspot node.
-        for edge in kg.edges() {
-            assert_ne!(
-                edge.source_node_id, "file:src/main.rs",
-                "no edge should originate from hotspot node"
-            );
-            assert_ne!(
-                edge.target_node_id, "file:src/main.rs",
-                "no edge should target hotspot node"
-            );
-        }
+    #[test]
+    fn search_result_edges_aggregate_duplicates_and_preserve_separate_targets() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        write_hotspots_json(
+            tmp.path(),
+            serde_json::json!([
+                {
+                    "rank": 1,
+                    "subjectKind": "search",
+                    "subject": "Graph",
+                    "score": 9,
+                    "counts": {"eventType": {"SearchRun": 2}, "outcome": {"success": 2}},
+                    "sessionCount": 2,
+                    "firstSeen": "2026-01-01T00:00:00Z",
+                    "lastSeen": "2026-01-01T00:01:00Z",
+                    "evidence": {"rowIds": [1, 3]}
+                },
+                {
+                    "rank": 2,
+                    "subjectKind": "document",
+                    "subject": "/graph.mdx",
+                    "score": 7,
+                    "counts": {"eventType": {"DocRetrieved": 2}, "outcome": {"success": 2}},
+                    "sessionCount": 2,
+                    "firstSeen": "2026-01-01T00:00:01Z",
+                    "lastSeen": "2026-01-01T00:01:01Z",
+                    "evidence": {"rowIds": [2, 4]}
+                }
+            ]),
+        );
+        write_docs_fixture(tmp.path(), "graph");
+        populate_store(
+            tmp.path(),
+            &[
+                make_search_run("s1", "Graph", "2026-01-01T00:00:00Z"),
+                make_doc_retrieved("s1", "/graph.mdx", "2026-01-01T00:00:01Z"),
+                make_search_run("s2", "Graph", "2026-01-01T00:01:00Z"),
+                make_doc_retrieved("s2", "/graph.mdx", "2026-01-01T00:01:01Z"),
+            ],
+        );
+
+        let (exit_code, _, err, document) = run_graph_build(tmp.path());
+        assert_eq!(exit_code, 0, "stderr: {}", String::from_utf8_lossy(&err));
+
+        let document_edge = edge_by_id(&document, "search_result_search:Graph_document:/graph.mdx");
+        assert_eq!(document_edge.relationship, "search_result");
+        assert!(
+            document_edge
+                .evidence_links
+                .iter()
+                .any(|link| { link.subject == "Graph" && link.row_ids == vec![1, 3] })
+        );
+        assert!(
+            document_edge
+                .evidence_links
+                .iter()
+                .any(|link| { link.subject == "/graph.mdx" && link.row_ids == vec![2, 4] })
+        );
+
+        let doc_page_edge = edge_by_id(&document, "search_result_search:Graph_doc_page:graph");
+        assert_eq!(doc_page_edge.relationship, "search_result");
+        assert!(doc_page_edge.evidence_links.iter().any(|link| {
+            link.source_kind == EvidenceSourceKind::DocReference
+                && link.doc_ref.as_deref() == Some("graph")
+        }));
+        assert!(
+            doc_page_edge
+                .evidence_links
+                .iter()
+                .any(|link| { link.subject == "Graph" && link.row_ids == vec![1, 3] })
+        );
+        assert!(
+            doc_page_edge
+                .evidence_links
+                .iter()
+                .any(|link| { link.subject == "/graph.mdx" && link.row_ids == vec![2, 4] })
+        );
+
+        assert_eq!(
+            document
+                .edges
+                .iter()
+                .filter(|edge| edge.id == "search_result_search:Graph_doc_page:graph")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn search_result_rule_requires_exact_normalized_match_and_existing_target() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        write_hotspots_json(
+            tmp.path(),
+            serde_json::json!([
+                {
+                    "rank": 1,
+                    "subjectKind": "search",
+                    "subject": "graph routing",
+                    "score": 9,
+                    "counts": {"eventType": {"SearchRun": 1}, "outcome": {"success": 1}},
+                    "sessionCount": 1,
+                    "firstSeen": "2026-01-01T00:00:00Z",
+                    "lastSeen": "2026-01-01T00:00:00Z",
+                    "evidence": {"rowIds": [1]}
+                },
+                {
+                    "rank": 2,
+                    "subjectKind": "document",
+                    "subject": "/graph.mdx",
+                    "score": 7,
+                    "counts": {"eventType": {"DocRetrieved": 1}, "outcome": {"success": 1}},
+                    "sessionCount": 1,
+                    "firstSeen": "2026-01-01T00:00:01Z",
+                    "lastSeen": "2026-01-01T00:00:01Z",
+                    "evidence": {"rowIds": [2]}
+                }
+            ]),
+        );
+        write_docs_fixture(tmp.path(), "graph");
+        populate_store(
+            tmp.path(),
+            &[
+                make_search_run("s1", "graph routing", "2026-01-01T00:00:00Z"),
+                make_doc_retrieved("s1", "/graph.mdx", "2026-01-01T00:00:01Z"),
+            ],
+        );
+
+        let (exit_code, _, err, document) = run_graph_build(tmp.path());
+        assert_eq!(exit_code, 0, "stderr: {}", String::from_utf8_lossy(&err));
+        assert!(
+            document
+                .edges
+                .iter()
+                .all(|edge| edge.relationship != "search_result")
+        );
+    }
+
+    #[test]
+    fn cross_domain_derivation_is_deterministic() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        write_hotspots_json(
+            tmp.path(),
+            serde_json::json!([
+                {
+                    "rank": 1,
+                    "subjectKind": "file",
+                    "subject": "src/auth.rs",
+                    "score": 10,
+                    "counts": {"eventType": {"FileOpened": 1}, "outcome": {"success": 1}},
+                    "sessionCount": 1,
+                    "firstSeen": "2026-01-01T00:00:00Z",
+                    "lastSeen": "2026-01-01T00:00:00Z",
+                    "evidence": {"rowIds": [1]}
+                },
+                {
+                    "rank": 2,
+                    "subjectKind": "symbol",
+                    "subject": "Authenticator",
+                    "score": 8,
+                    "counts": {"eventType": {"SymbolInspected": 1}, "outcome": {"success": 1}},
+                    "sessionCount": 1,
+                    "firstSeen": "2026-01-01T00:00:01Z",
+                    "lastSeen": "2026-01-01T00:00:01Z",
+                    "evidence": {"rowIds": [2]}
+                },
+                {
+                    "rank": 3,
+                    "subjectKind": "search",
+                    "subject": "graph",
+                    "score": 7,
+                    "counts": {"eventType": {"SearchRun": 1}, "outcome": {"success": 1}},
+                    "sessionCount": 1,
+                    "firstSeen": "2026-01-01T00:00:02Z",
+                    "lastSeen": "2026-01-01T00:00:02Z",
+                    "evidence": {"rowIds": [3]}
+                },
+                {
+                    "rank": 4,
+                    "subjectKind": "document",
+                    "subject": "/graph.mdx",
+                    "score": 6,
+                    "counts": {"eventType": {"DocRetrieved": 1}, "outcome": {"success": 1}},
+                    "sessionCount": 1,
+                    "firstSeen": "2026-01-01T00:00:03Z",
+                    "lastSeen": "2026-01-01T00:00:03Z",
+                    "evidence": {"rowIds": [4]}
+                }
+            ]),
+        );
+        write_docs_fixture(tmp.path(), "graph");
+        populate_store(
+            tmp.path(),
+            &[
+                make_file_opened("s1", "src/auth.rs", "2026-01-01T00:00:00Z"),
+                make_symbol_inspected("s1", "Authenticator", "2026-01-01T00:00:01Z"),
+                make_search_run("s1", "graph", "2026-01-01T00:00:02Z"),
+                make_doc_retrieved("s1", "/graph.mdx", "2026-01-01T00:00:03Z"),
+            ],
+        );
+
+        let (_, out1, _, _) = run_graph_build(tmp.path());
+        let (_, out2, _, _) = run_graph_build(tmp.path());
+        assert_eq!(out1, out2, "repeated runs must be byte-identical");
     }
 
     #[test]
