@@ -4,7 +4,7 @@ Route manifests are scryrs' machine-readable loading map. They flatten graph nod
 
 ## What a Route Manifest Represents
 
-A **route manifest** is not ranking logic and not retrieval output. It is a stable artifact derived from `.scryrs/graph.json` that preserves node identity in `target`, adds optional structured `loadTarget` retrieval context, carries optional doc grouping, and copies evidence backlinks. Later runtime code can use that artifact to decide what context to load and explain why without reinterpreting the graph.
+A **route manifest** is not ranking logic and not retrieval output. It is a stable artifact derived from `.scryrs/graph.json` that preserves node identity in `target`, adds optional structured `loadTarget` retrieval context, carries optional `grouping`, exposes outgoing non-`contains` adjacency through `relatedEdges`, and copies evidence backlinks. Later runtime code can use that artifact to decide what context to load and explain why without reinterpreting the graph.
 
 ## Core Concepts
 
@@ -32,12 +32,13 @@ Each **route entry** is one graph node rendered as one route target.
 | `loadTarget` | Optional structured retrieval context. `file` uses repository-relative `reference`, `doc_page` uses canonical `project-docs/<slug>`, and `non_loadable` carries no fake reference. |
 | `kind` | Repeated node kind for additive downstream evolution. |
 | `evidenceLinks` | Provenance backlinks copied from source graph node. |
+| `relatedEdges` | Optional summaries of outgoing non-`contains` graph edges from this route's source node. Each item carries `relationship`, `targetRouteId`, and copied edge `evidenceLinks`. |
 | `grouping` | Optional parent grouping, only from explicit `contains` edge. |
 | `metadata` | Optional extension map. |
 
 ### Grouping
 
-Grouping is intentionally narrow in v1. `grouping` appears only when route source node is target of explicit `contains` edge in graph. That includes both docs navigation hierarchy and accepted semantic grouping already materialized during graph build:
+Grouping is intentionally narrow in v1. `grouping` appears only when route source node is target of explicit `contains` edge in graph. Non-`contains` edges never create grouping; they surface only through `relatedEdges` on the source route. That includes both docs navigation hierarchy and accepted semantic grouping already materialized during graph build:
 
 - `docs_root -> Technical`
 - `Technical -> doc_page:graph`
@@ -62,6 +63,13 @@ That means these remain distinct in manifest:
 
 Shared text is not enough to merge entries. Higher-level grouping needs explicit graph evidence first.
 
+In the current shipped graph pipeline, `relatedEdges` most commonly surface the two local-trace-backed relationships produced by `scryrs graph <PATH>`:
+
+- `symbol_inspected_during_file_context` — e.g. `file:src/auth.rs -> symbol:Authenticator`
+- `search_result` — e.g. `search:graph -> document:/graph.mdx` and `search:graph -> doc_page:graph`
+
+Those edges exist only when graph build had a readable local `.scryrs/scryrs.db` and same-session trace evidence matched the rule. For `search_result`, the graph step uses exact normalization (`lowercase + strip one leading / + strip trailing .md/.mdx`) before route projection ever runs.
+
 ## Current Command and Artifact
 
 `scryrs route <PATH>` resolves `<PATH>` to repository root, loads `.scryrs/graph.json`, validates `GRAPH_SCHEMA_VERSION`, then emits single-line `RouteManifestDocument` JSON to stdout and writes same bytes to `.scryrs/routes.json`. It does not inspect `.scryrs/accepted/`, `.scryrs/rejected/`, or `.scryrs/proposals/` directly.
@@ -70,9 +78,11 @@ Output rules:
 
 - `routes` sort by `id` ascending.
 - `evidenceLinks` within each route sort by `(sourceKind, subject, docRef, description, rowIds, score)` ascending.
+- `relatedEdges`, when present, sort by `(relationship, targetRouteId)` ascending, and each `relatedEdges[*].evidenceLinks` uses the same evidence-link ordering rule.
 - `file` routes derive `loadTarget.reference` from the `file:` subject using syntax-only validation: non-empty, not absolute, and no parent traversal. The command does **not** check on-disk existence.
 - `doc_page` routes derive `loadTarget.reference` from the first usable `doc_reference` evidence link and normalize both `graph` and `project-docs/graph` to canonical `project-docs/<slug>`.
 - `search`, `symbol`, `domain_term`, and `doc_group` routes stay explicit via `loadTarget.kind = "non_loadable"` with no fake `reference`.
+- Routes with no outgoing non-`contains` edges omit `relatedEdges` entirely.
 - Output contains no wall-clock timestamps, random IDs, or hidden ranking fields.
 - Missing, malformed, or schema-mismatched `.scryrs/graph.json` fails fast with exit code `2`.
 - Invalid promised load targets also fail fast with exit code `2` — malformed `file:` subjects report that routes must resolve to a non-empty repository-relative path without parent traversal, and `doc_page` routes without a usable docs reference report that they must provide a canonical docs reference.
@@ -81,10 +91,11 @@ Output rules:
 
 | Shipped | Deferred |
 | --- | --- |
-| `RouteManifestDocument`, `RouteEntry`, `RouteGrouping` contracts in `crates/scryrs-types/src/lib.rs` | Runtime ranking and retrieval decisions |
+| `RouteManifestDocument`, `RouteEntry`, `RouteGrouping`, and `RouteRelatedEdge` contracts in `crates/scryrs-types/src/lib.rs` | Runtime ranking and retrieval decisions |
 | `scryrs route <PATH>` CLI command in `crates/scryrs-cli/src/route.rs` | Inferred semantic grouping from shared labels alone |
 | One route entry per graph node | Any graph mutation during route generation |
 | Grouping only from explicit `contains` edges, including accepted semantic grouping already materialized in `.scryrs/graph.json` | |
+| Outgoing non-`contains` graph edges projected to source-route `relatedEdges` only | |
 | Deterministic artifact output at `.scryrs/routes.json` | |
 | `RouteHintDocument`, `RouteHintItem` contract in `crates/scryrs-types/src/lib.rs` | |
 | `hints_from_manifest` deterministic producer in `crates/scryrs-runtime/src/lib.rs` | |

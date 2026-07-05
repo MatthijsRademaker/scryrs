@@ -19,7 +19,7 @@ A **node** is a stable, identifiable concept. Nodes represent the entities the c
 Each node carries:
 
 | Field | Purpose |
-|-------|---------|
+| ------- | --------- |
 | `id` | Stable unique identifier — the lookup key other nodes and edges reference |
 | `label` | Human-readable display name for filtering and UI presentation |
 | `description` | Optional longer explanation of what this node represents |
@@ -38,7 +38,7 @@ An **edge** is a relationship assertion between two nodes. Direction is meaningf
 Each edge carries:
 
 | Field | Purpose |
-|-------|---------|
+| ------- | --------- |
 | `id` | Stable unique edge identifier |
 | `sourceNodeId` | The node the relationship originates from |
 | `targetNodeId` | The node the relationship points to |
@@ -57,7 +57,7 @@ An **evidence link** attaches provenance to a node or edge. It answers "why does
 Every evidence link carries a `sourceKind` from a closed set of five provenance categories:
 
 | Source Kind | What it captures |
-|-------------|-----------------|
+| ------------- | ----------------- |
 | `hotspot_subject` | A hotspot subject identity — evidence that this concept appeared as a hotspot (score, subject name, no row-level granularity) |
 | `local_trace_row` | One or more local `trace_events` row IDs — concrete agent actions that demonstrate this node or relationship |
 | `server_trace_row` | One or more live `server_trace_events` row IDs — same evidence pattern, but from live server-owned persistence |
@@ -83,9 +83,9 @@ Graph output is deterministic: the same nodes and edges always produce the same 
 
 Given the same input, the graph materializes to the same JSON every time — there is no randomness, no model inference, and no time-dependent behavior beyond the `schemaVersion` field carried as `GRAPH_SCHEMA_VERSION`.
 
-## Semantic Grouping Boundary
+## Identity Boundary and Shipped Cross-Domain Rules
 
-Low-level graph identity stays exact. Current graph build keys hotspot-backed nodes by `(subjectKind, subject)`, so `file:auth`, `search:auth`, and `symbol:auth` remain three distinct nodes unless explicit evidence creates a higher-level relationship.
+Low-level graph identity stays exact. Graph build still keys hotspot-backed nodes by `(subjectKind, subject)`, so `file:auth`, `search:auth`, and `symbol:auth` remain three distinct nodes. Derived edges add context between those nodes; they do not merge, rewrite, or collapse identities.
 
 That boundary matters because scryrs distinguishes three different things:
 
@@ -93,7 +93,16 @@ That boundary matters because scryrs distinguishes three different things:
 - **route projection** — deterministic route entries derived from graph truth
 - **proposal candidates** — review-only suggestions such as `domain_term:auth`
 
-A future higher-level domain node is valid only when it comes from deterministic derivation rules or accepted reviewable evidence. Shared labels alone are not enough.
+Shipped v1 cross-domain derivation is deliberately narrow. After hotspot nodes, docs nodes, and accepted semantic-grouping nodes exist, `scryrs graph <PATH>` reads local trace events from `.scryrs/scryrs.db` and applies exactly two directed rules:
+
+1. **`symbol_inspected_during_file_context`** — from `file:<path>` to `symbol:<name>` when qualifying `FileOpened(path)` and `SymbolInspected(name)` evidence appears in the same `session_id`.
+2. **`search_result`** — from `search:<query>` to `document:<doc_ref>` and/or `doc_page:<slug>` when qualifying `SearchRun(query)` and `DocRetrieved(doc_ref)` evidence appears in the same `session_id` and the normalized values match exactly.
+
+Search/document normalization is fixed and deterministic: lowercase the value, strip one leading `/`, and strip a trailing `.md` or `.mdx` extension before comparison. So `graph`, `/graph.md`, and `/graph.mdx` all normalize to `graph`, but `graph routing` does not match `graph`.
+
+Derived edges are deduplicated by `(relationship, sourceNodeId, targetNodeId)`, use stable ids of the form `{relationship}_{sourceNodeId}_{targetNodeId}`, and aggregate evidence links from qualifying observations. Existing accepted `contains` edges remain untouched.
+
+If `.scryrs/scryrs.db` is missing, empty, or lacks qualifying evidence for a rule, graph build still succeeds and emits no derived cross-domain edge for that case. Shared labels alone are still not enough.
 
 ## How the Graph Fits the Product Loop
 
@@ -113,11 +122,11 @@ capture traces  →    scores repeated  →   turn evidence      ───┘
 ```
 
 - **Observe → Detect:** Traces and hotspots provide raw evidence. Every time an agent opens a file, searches a term, or fails to find a concept, scryrs records a trace event. Hotspot analysis identifies the subjects that consume repeated agent effort.
-- **Detect → Graph:** `scryrs graph <PATH>` turns hotspot output into low-level graph nodes, adds doc-group/doc-page structure when docs navigation metadata is valid, and optionally projects accepted semantic grouping evidence from `.scryrs/accepted/*.json` into explicit group nodes plus `contains` edges.
-- **Graph → Route:** `scryrs route <PATH>` already ships as deterministic projection over `.scryrs/graph.json`. It preserves node identity, copies evidence backlinks, and adds grouping only where explicit `contains` edges justify it.
+- **Detect → Graph:** `scryrs graph <PATH>` turns hotspot output into low-level graph nodes, adds doc-group/doc-page structure when docs navigation metadata is valid, projects accepted semantic grouping evidence from `.scryrs/accepted/*.json`, and derives the shipped same-session cross-domain edges from local trace evidence in `.scryrs/scryrs.db`.
+- **Graph → Route:** `scryrs route <PATH>` ships as deterministic projection over `.scryrs/graph.json`. It preserves node identity, copies evidence backlinks, keeps `grouping` reserved for explicit `contains` parents, and exposes outgoing non-`contains` adjacency via `relatedEdges`.
 - **Route → Runtime retrieval (future):** Runtime explanation and context-loading decisions remain separate downstream work. Current route manifests are retrieval-ready artifacts, not retrieval policy.
 
-**Important:** `scryrs graph <PATH>` and `scryrs route <PATH>` are shipped. Accepted semantic grouping as graph input is now part of graph build; broader cross-domain edge derivation, other accepted target-type projections, and `scryrs route explain ...` runtime behavior remain deferred.
+**Important:** `scryrs graph <PATH>` and `scryrs route <PATH>` are shipped. Accepted semantic grouping and the two deterministic cross-domain rules above are part of graph build today; broader rule sets, other accepted target-type projections, and higher-level retrieval policy remain deferred.
 
 ## Illustrated JSON Example
 
@@ -180,25 +189,30 @@ Key points illustrated:
 Graph build and route projection now exist, but both stay deliberately structural.
 
 | Shipped | Deferred |
-|---------|----------|
-| `KnowledgeGraphDocument` wire contract (`GRAPH_SCHEMA_VERSION = "1.0.0"`) | Cross-domain edge derivation such as `symbol:Authenticator -> file:auth.rs` |
+| --------- | ---------- |
+| `KnowledgeGraphDocument` wire contract (`GRAPH_SCHEMA_VERSION = "1.0.0"`) | Additional cross-domain rules beyond the two shipped v1 relationships |
 | `GraphNode`, `GraphEdge`, `EvidenceLink`, `EvidenceSourceKind` types | Automatic semantic grouping from shared labels alone |
 | `KnowledgeGraph` container: add nodes/edges, validate structural references, materialize deterministic document | Projection rules for accepted non-semantic target types |
-| `scryrs graph <PATH>` CLI command | Runtime retrieval and `scryrs route explain ...` |
+| `scryrs graph <PATH>` CLI command | Runtime retrieval and `scryrs route explain ...` policy decisions |
 | Graph build from `.scryrs/hotspots.json` for all five hotspot subject kinds | Server-side graph query or retrieval APIs |
 | Optional docs layer from `.devagent/docs/docs/_nav.json` with `docs_root`, `doc_group`, and `doc_page` nodes plus `contains` edges | Adapter publishing of graph/route knowledge |
 | Optional accepted-evidence layer from `.scryrs/accepted/*.json`, processed in sorted filename order and projecting only accepted `semantic_graph_grouping` decisions | |
+| Local-trace-backed derivation of `symbol_inspected_during_file_context` and `search_result` edges | |
+| Stable derived edge ids, tuple-based deduplication, and aggregated evidence links from qualifying observations | |
 | Pending `.scryrs/proposals/` and rejected `.scryrs/rejected/` are ignored by graph build | |
 | Hotspot-only fallback when docs directory or `_nav.json` is missing, empty, or malformed (warning on stderr) | |
+| Silent skip for missing/empty local trace store or non-qualifying rule evidence | |
 | Deterministic output to `.scryrs/graph.json` and `.scryrs/routes.json` | |
 
-`scryrs graph <PATH>` requires `.scryrs/hotspots.json`. Docs metadata is optional: if `.devagent/docs/docs/` or `_nav.json` is missing, empty, or malformed, scryrs warns on stderr and still emits hotspot-only graph. Accepted review decisions are also optional: if `.scryrs/accepted/` is absent, graph build proceeds from hotspot and docs input only. When accepted evidence is present, scryrs validates every artifact before projection, creates accepted group nodes with `recorded_evidence` provenance naming the accepted decision artifact, copies decision `sourceEvidence` onto grouping edges, and fails fast on malformed artifacts, missing source nodes, invalid target-group IDs, or duplicate accepted targets. `scryrs route <PATH>` then maps every graph node to one route entry, enriching grouping only from explicit `contains` edges already present in graph.
+`scryrs graph <PATH>` requires `.scryrs/hotspots.json`. Docs metadata is optional: if `.devagent/docs/docs/` or `_nav.json` is missing, empty, or malformed, scryrs warns on stderr and still emits hotspot-only graph. Accepted review decisions are also optional: if `.scryrs/accepted/` is absent, graph build proceeds from hotspot and docs input only. When accepted evidence is present, scryrs validates every artifact before projection, creates accepted group nodes with `recorded_evidence` provenance naming the accepted decision artifact, copies decision `sourceEvidence` onto grouping edges, and fails fast on malformed artifacts, missing source nodes, invalid target-group IDs, or duplicate accepted targets.
+
+Cross-domain derivation is optional but deterministic. If `.scryrs/scryrs.db` is missing or empty, graph build emits no derived cross-domain edges and still succeeds. When the local trace store exists, scryrs reconstructs same-session observations with `TraceQuery::iter_events_with_ids_ordered()`, derives only the two shipped rules described above, deduplicates by `(relationship, sourceNodeId, targetNodeId)`, and aggregates evidence from the qualifying trace rows (plus `doc_reference` evidence for `doc_page` targets). `scryrs route <PATH>` then maps every graph node to one route entry, keeps `grouping` reserved for explicit `contains` edges, and projects outgoing non-`contains` adjacency into `relatedEdges`.
 
 ## Deferred Scope
 
 Next graph-layer work is narrower than "make it smarter":
 
-- derive explicit cross-domain edges from stable rules or accepted evidence beyond semantic grouping
+- add additional deterministic cross-domain rules beyond `symbol_inspected_during_file_context` and `search_result`
 - project additional accepted target types without teaching route generation about proposal directories
 - add runtime retrieval and explanation over route manifests without hiding provenance
 

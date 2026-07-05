@@ -916,6 +916,19 @@ pub struct RouteLoadTarget {
     pub reference: Option<String>,
 }
 
+/// Summary of an outgoing non-`contains` graph edge for route consumers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteRelatedEdge {
+    /// Relationship kind copied from the source graph edge.
+    pub relationship: String,
+    /// Target route entry id copied from the source graph edge target node id.
+    pub target_route_id: String,
+    /// Evidence provenance links copied from the source graph edge.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub evidence_links: Vec<EvidenceLink>,
+}
+
 /// A single route entry with identity, target, and evidence backlinks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -938,6 +951,9 @@ pub struct RouteEntry {
     /// Evidence provenance links for this route.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub evidence_links: Vec<EvidenceLink>,
+    /// Outgoing non-`contains` graph edges projected for route consumers.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub related_edges: Vec<RouteRelatedEdge>,
     /// Optional grouping derived from an explicit `contains` edge
     /// from a parent group node.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2742,6 +2758,7 @@ mod tests {
                     score: Some(10),
                     metadata: None,
                 }],
+                related_edges: vec![],
                 grouping: None,
                 metadata: None,
             }],
@@ -2783,6 +2800,7 @@ mod tests {
                 score: None,
                 metadata: None,
             }],
+            related_edges: vec![],
             grouping: Some(RouteGrouping {
                 group_id: "technical".into(),
                 group_label: "Technical".into(),
@@ -2801,6 +2819,44 @@ mod tests {
     }
 
     #[test]
+    fn route_entry_with_related_edges_round_trip() {
+        let entry = RouteEntry {
+            id: "file:src/auth.rs".into(),
+            subject_kind: "file".into(),
+            subject: "src/auth.rs".into(),
+            label: "src/auth.rs".into(),
+            target: "file:src/auth.rs".into(),
+            load_target: Some(RouteLoadTarget {
+                kind: RouteLoadTargetKind::File,
+                reference: Some("src/auth.rs".into()),
+            }),
+            kind: "file".into(),
+            evidence_links: vec![],
+            related_edges: vec![RouteRelatedEdge {
+                relationship: "symbol_inspected_during_file_context".into(),
+                target_route_id: "symbol:Authenticator".into(),
+                evidence_links: vec![EvidenceLink {
+                    source_kind: EvidenceSourceKind::LocalTraceRow,
+                    subject: "src/auth.rs".into(),
+                    row_ids: vec![1, 2],
+                    doc_ref: None,
+                    description: None,
+                    score: None,
+                    metadata: None,
+                }],
+            }],
+            grouping: None,
+            metadata: None,
+        };
+
+        let json = serialize_json(&entry);
+        assert!(json.contains("\"relatedEdges\""));
+        assert!(json.contains("\"targetRouteId\":\"symbol:Authenticator\""));
+        let reconstructed: RouteEntry = deserialize_json(&json);
+        assert_eq!(reconstructed, entry);
+    }
+
+    #[test]
     fn route_entry_without_grouping_omits_field() {
         let entry = RouteEntry {
             id: "search:routing".into(),
@@ -2814,6 +2870,7 @@ mod tests {
             }),
             kind: "search".into(),
             evidence_links: vec![],
+            related_edges: vec![],
             grouping: None,
             metadata: None,
         };
@@ -2839,6 +2896,7 @@ mod tests {
             }),
             kind: "symbol".into(),
             evidence_links: vec![],
+            related_edges: vec![],
             grouping: None,
             metadata: None,
         };
@@ -2877,6 +2935,7 @@ mod tests {
                     }),
                     kind: "file".into(),
                     evidence_links: vec![],
+                    related_edges: vec![],
                     grouping: None,
                     metadata: None,
                 },
@@ -2900,6 +2959,7 @@ mod tests {
                         score: Some(42),
                         metadata: None,
                     }],
+                    related_edges: vec![],
                     grouping: None,
                     metadata: None,
                 },
