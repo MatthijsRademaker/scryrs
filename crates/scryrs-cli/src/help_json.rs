@@ -4,7 +4,7 @@ use serde_json::json;
 
 /// Version of the `--help-json` surface document format, independent of
 /// `SCHEMA_VERSION` which governs command output envelopes.
-const SURFACE_VERSION: &str = "0.17.0";
+const SURFACE_VERSION: &str = "0.18.0";
 
 pub(crate) fn cli_surface_doc() -> String {
     let doc = json!({
@@ -431,7 +431,7 @@ pub(crate) fn cli_surface_doc() -> String {
             },
             {
                 "name": "route",
-                "description": "Generate the route manifest from a knowledge graph artifact, or query the manifest for matching entries",
+                "description": "Generate the route manifest from a knowledge graph artifact, or query the manifest for diagnostic matches and bounded bundles",
                 "arguments": [
                     {
                         "name": "PATH",
@@ -478,6 +478,41 @@ pub(crate) fn cli_surface_doc() -> String {
                             "1": "Serialization or stdout write failure",
                             "2": "Usage error, missing .scryrs/routes.json, malformed JSON, or schema version mismatch"
                         }
+                    },
+                    {
+                        "name": "bundle",
+                        "description": "Emit a bounded context-loading plan by reusing explain ordering before truncation; bundle is the bounded planning surface while explain remains the unbounded diagnostic surface",
+                        "arguments": [
+                            {
+                                "name": "PATH",
+                                "type": "string",
+                                "required": true,
+                                "description": "Path to the repository root directory"
+                            },
+                            {
+                                "name": "query",
+                                "flag": "--query",
+                                "type": "string",
+                                "required": true,
+                                "description": "Query text for case-insensitive substring matching against label, subject, id, target, kind, and evidence_links[].subject"
+                            },
+                            {
+                                "name": "limit",
+                                "flag": "--limit",
+                                "type": "number",
+                                "required": true,
+                                "description": "Positive maximum number of explain-ordered targets to emit"
+                            }
+                        ],
+                        "output": {
+                            "mimeType": "application/json",
+                            "description": "Single-line RouteBundleDocument JSON with schemaVersion, query, limit, and targets array. targets reuse the explain-derived RouteHintItem field shape (routeId, target, loadTarget, label, rank, relevance, reason, evidence). bundle consumes only .scryrs/routes.json, preserves non_loadable targets, reuses the explain ordering before truncation, and emits an empty targets array on zero matches."
+                        },
+                        "exitCodes": {
+                            "0": "Success (including zero-match results)",
+                            "1": "Serialization or stdout write failure",
+                            "2": "Usage error, missing .scryrs/routes.json, malformed JSON, schema version mismatch, or invalid/non-positive --limit"
+                        }
                     }
                 ],
                 "output": {
@@ -486,7 +521,7 @@ pub(crate) fn cli_surface_doc() -> String {
                 },
                 "routeHintOutput": {
                     "mimeType": "application/json",
-                    "description": "Deterministic RouteHintDocument projection derived from the route manifest. Each route entry produces one RouteHintItem with identity, stable target node id, optional loadTarget, label, 1-based ordinal rank, evidence citations, and a template-derived reason that names the load target kind. Plain route projection omits relevance; `scryrs route explain <PATH> --query <TEXT>` populates it with the packed explain score tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999).",
+                    "description": "Deterministic RouteHintDocument projection derived from the route manifest. Each route entry produces one RouteHintItem with identity, stable target node id, optional loadTarget, label, 1-based ordinal rank, evidence citations, and a template-derived reason that names the load target kind. Plain route projection omits relevance; `scryrs route explain <PATH> --query <TEXT>` populates it with the packed explain score tier * 1_000_000_000 + min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999). `scryrs route bundle <PATH> --query <TEXT> --limit <N>` reuses the same per-target fields inside a bounded targets array.",
                     "fields": [
                         {"name": "schemaVersion", "type": "string", "description": "Route hint schema version (always HINT_SCHEMA_VERSION = 1.0.0)", "optional": false},
                         {"name": "hints", "type": "array", "description": "Deterministically ordered array of RouteHintItem objects", "optional": false}
@@ -522,6 +557,16 @@ pub(crate) fn cli_surface_doc() -> String {
                         ]
                     },
                     "rankingPolicy": "Rank is a deterministic 1-based ordinal derived from manifest entry sort order (by id ascending). Explain ordering uses (tier DESC, score DESC, count DESC, manifest_index ASC, route_id ASC); packed relevance is a display-friendly derivative of that tuple, not the sort key. Plain route projection still omits relevance, while reason strings mention load target kind."
+                },
+                "routeBundleOutput": {
+                    "mimeType": "application/json",
+                    "description": "Deterministic RouteBundleDocument emitted by `scryrs route bundle`. The top-level document adds query and limit metadata around explain-derived RouteHintItem targets.",
+                    "fields": [
+                        {"name": "schemaVersion", "type": "string", "description": "Route bundle schema version (always BUNDLE_SCHEMA_VERSION = 1.0.0)", "optional": false},
+                        {"name": "query", "type": "string", "description": "Original query text used to derive the bundle", "optional": false},
+                        {"name": "limit", "type": "number", "description": "Positive caller-requested maximum number of emitted targets", "optional": false},
+                        {"name": "targets", "type": "array", "description": "Explain-ordered RouteHintItem targets truncated after ranking; non_loadable targets remain explicit and count toward the limit", "optional": false}
+                    ]
                 }
             }
         ],

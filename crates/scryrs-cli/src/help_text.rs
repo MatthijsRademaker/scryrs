@@ -64,6 +64,13 @@ COMMANDS\n\
       Returns single-line RouteHintDocument JSON. Zero matches produces valid\n\
       document with empty hints array. Example: scryrs route explain . --query\n\
       \"authentication\"\n\
+  scryrs route bundle <PATH> --query <TEXT> --limit <N>\n\
+      Emit a bounded context-loading plan from explain-ranked route hints.\n\
+      Reuses explain ordering before truncation, returns single-line\n\
+      RouteBundleDocument JSON with schemaVersion, query, limit, and targets,\n\
+      and stays read-only over .scryrs/routes.json. bundle versus explain:\n\
+      bundle is the bounded planning surface; explain stays the unbounded\n\
+      diagnostic ranking surface.\n\
 \n\
       Route hint contract: Each route entry projects to a RouteHintItem\n\
       (HINT_SCHEMA_VERSION 1.0.0) with routeId, stable target node id,\n\
@@ -75,7 +82,9 @@ COMMANDS\n\
       \"; query match on <fields>\". rank remains the manifest ordinal; explain\n\
       relevance is the packed score tier * 1_000_000_000 +\n\
       min(total_evidence_score, 999_999) * 1_000 + min(evidence_count, 999).\n\
-      plain route projection omits relevance.\n\
+      plain route projection omits relevance. RouteBundleDocument reuses the\n\
+      same per-target fields inside a bounded targets array and preserves\n\
+      non_loadable targets explicitly.\n\
   scryrs propose <PATH>\n\
       Generate reviewable knowledge proposals from hotspot and graph evidence.\n\
       Writes validated ProposalDocument files under .scryrs/proposals/.\n\
@@ -100,8 +109,7 @@ COMMANDS\n\
   scryrs dashboard [--mode live|local] [--port <PORT>] [--bind <ADDR>] [--server-url <URL>] [--repository-id <ID>] [--no-open] [--dev]\n\
       Start dashboard server and open the browser dashboard (live by default).\n\
   scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]\n\
-      Start the central trace ingest server with live hotspot query
-\
+      Start the central trace ingest server with live hotspot query\n\
       and signal streaming endpoints.\n\n\
 RECORD MODES\n\
   Remote mode (default): submits to the configured ingest server.\n\
@@ -185,9 +193,10 @@ EXAMPLES\n\
   scryrs server --port 9091\n\
   scryrs publish markdown . --output ./published-markdown\n\
   scryrs publish rspress . --docs-root ./.devagent/docs/docs\n\
-  scryrs graph .
-  scryrs route .
-  scryrs route explain . --query \"authentication\"\n\n\
+  scryrs graph .\n\
+  scryrs route .\n\
+  scryrs route explain . --query \"authentication\"\n\
+  scryrs route bundle . --query \"authentication\" --limit 5\n\n\
 OPTIONS\n\
   -h, --help       Print this help message and exit\n\
   -V, --version    Print version and exit\n\
@@ -195,7 +204,7 @@ OPTIONS\n\
 EXIT CODES\n\
   0    Success (hotspots: JSON written; record local: all events accepted; record remote: no rejections or failures; init: hook installed; up: workspace-managed compose stack started; doctor: only ok/warn findings; propose/proposals: artifacts written or listed successfully; publish: accepted knowledge published successfully; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)\n\
   1    Hotspots: storage error or artifact write failure. Record: rejected events or I/O error (local or server rejections). Init: I/O error. Up: docker invocation failure. Doctor: output write failure. Proposals: serialization or filesystem write failure. Publish: runtime or filesystem failure. Dashboard: port in use or artifact read error. Server: port in use or store error.\n\
-  2    Usage error; hotspots: missing/unsupported local store, unknown mode, missing live identity, live timeout/connection failure, non-2xx response, malformed live response, or live schema/repository mismatch; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, or self-install refusal; setup: unknown/missing mode, source-checkout refusal (live), or missing/invalid/conflicting live configuration; up: missing scaffold files, missing external network, or unexpected arguments; doctor: one or more structural error findings; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; publish: usage error or publish-input validation failure (invalid accepted artifacts, malformed _nav.json); route explain: missing PATH, missing --query, missing/malformed/schema-mismatched routes.json; dashboard: invalid flags, bind failure, or partial live-mode configuration; server: invalid flags or bind failure",
+  2    Usage error; hotspots: missing/unsupported local store, unknown mode, missing live identity, live timeout/connection failure, non-2xx response, malformed live response, or live schema/repository mismatch; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, or self-install refusal; setup: unknown/missing mode, source-checkout refusal (live), or missing/invalid/conflicting live configuration; up: missing scaffold files, missing external network, or unexpected arguments; doctor: one or more structural error findings; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; publish: usage error or publish-input validation failure (invalid accepted artifacts, malformed _nav.json); route explain: missing PATH, missing required --query, or missing/malformed/schema-mismatched routes.json; route bundle: missing PATH, missing required flags, missing/malformed/schema-mismatched routes.json, or invalid --limit; dashboard: invalid flags, bind failure, or partial live-mode configuration; server: invalid flags or bind failure",
         SCHEMA_VERSION, SCHEMA_VERSION, HOTSPOT_SCHEMA_VERSION
     )
 }

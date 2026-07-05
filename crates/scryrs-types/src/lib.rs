@@ -47,6 +47,13 @@ pub const REVIEW_DECISION_SCHEMA_VERSION: &str = "1.0.0";
 /// `REVIEW_DECISION_SCHEMA_VERSION`.
 pub const HINT_SCHEMA_VERSION: &str = "1.0.0";
 
+/// Version for the route bundle contract, independent of
+/// `SCHEMA_VERSION`, `HOTSPOT_SCHEMA_VERSION`,
+/// `LIVE_HOTSPOT_SCHEMA_VERSION`, `GRAPH_SCHEMA_VERSION`,
+/// `ROUTE_SCHEMA_VERSION`, `PROPOSAL_SCHEMA_VERSION`,
+/// `REVIEW_DECISION_SCHEMA_VERSION`, and `HINT_SCHEMA_VERSION`.
+pub const BUNDLE_SCHEMA_VERSION: &str = "1.0.0";
+
 /// Suite component metadata used by feature-gated crates and CLI output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FeatureDescriptor {
@@ -1014,6 +1021,22 @@ pub struct RouteHintDocument {
     pub schema_version: String,
     /// Deterministically ordered route hint items.
     pub hints: Vec<RouteHintItem>,
+}
+
+/// Versioned route bundle document — the top-level wire contract for
+/// bounded explain-derived route bundles. Reuses `RouteHintItem` inside
+/// `targets` and carries an independent `BUNDLE_SCHEMA_VERSION`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteBundleDocument {
+    /// Schema version, always equal to `BUNDLE_SCHEMA_VERSION`.
+    pub schema_version: String,
+    /// Original query text used to derive the bundle.
+    pub query: String,
+    /// Positive upper bound requested by the caller.
+    pub limit: u32,
+    /// Deterministically ordered, explain-derived targets after truncation.
+    pub targets: Vec<RouteHintItem>,
 }
 
 #[cfg(test)]
@@ -3928,5 +3951,47 @@ mod tests {
         assert!(json.contains("\"schemaVersion\""));
         assert!(json.contains("\"hints\""));
         assert!(json.contains(HINT_SCHEMA_VERSION));
+    }
+
+    #[test]
+    fn route_bundle_document_round_trips() {
+        let targets = vec![RouteHintItem {
+            route_id: "search:auth".into(),
+            target: "search:auth".into(),
+            load_target: Some(RouteLoadTarget {
+                kind: RouteLoadTargetKind::NonLoadable,
+                reference: None,
+            }),
+            label: "auth".into(),
+            rank: 1,
+            relevance: Some(3_000_000_001),
+            reason: "Route 'auth' (search:auth): 1 evidence link(s), subject kind search, load target non_loadable; query match on id, label, subject, target".into(),
+            evidence: vec![make_hint_evidence_link(EvidenceSourceKind::LocalTraceRow, "auth")],
+        }];
+        let doc = RouteBundleDocument {
+            schema_version: BUNDLE_SCHEMA_VERSION.into(),
+            query: "auth".into(),
+            limit: 5,
+            targets: targets.clone(),
+        };
+        let json = serialize_json(&doc);
+        let reconstructed: RouteBundleDocument = deserialize_json(&json);
+        assert_eq!(reconstructed, doc);
+    }
+
+    #[test]
+    fn route_bundle_document_json_uses_camel_case() {
+        let doc = RouteBundleDocument {
+            schema_version: BUNDLE_SCHEMA_VERSION.into(),
+            query: "auth".into(),
+            limit: 5,
+            targets: vec![],
+        };
+        let json = serialize_json(&doc);
+        assert!(json.contains("\"schemaVersion\""));
+        assert!(json.contains("\"query\""));
+        assert!(json.contains("\"limit\""));
+        assert!(json.contains("\"targets\""));
+        assert!(json.contains(BUNDLE_SCHEMA_VERSION));
     }
 }

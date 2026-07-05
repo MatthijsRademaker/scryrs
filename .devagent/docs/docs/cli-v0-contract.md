@@ -235,7 +235,7 @@ Builds deterministic `KnowledgeGraphDocument` artifact from hotspot evidence and
 
 ### `scryrs route <PATH>`
 
-Projects `.scryrs/graph.json` into deterministic `RouteManifestDocument` artifact for downstream runtime retrieval. Also accepts `scryrs route explain <PATH> --query <TEXT>` subcommand (see below).
+Projects `.scryrs/graph.json` into deterministic `RouteManifestDocument` artifact for downstream runtime retrieval. Also accepts `scryrs route explain <PATH> --query <TEXT>` and `scryrs route bundle <PATH> --query <TEXT> --limit <N>` subcommands (see below).
 
 | Field | Value |
 | ------- | ------- |
@@ -366,6 +366,40 @@ scryrs route explain . --query "auth"
 ```
 
 **Artifact dependency:** Reads only `.scryrs/routes.json`. Does not inspect `.scryrs/graph.json`, proposals, or any other artifact directory. The explain command is a read-only operation — it never creates, modifies, or deletes filesystem artifacts.
+
+### `scryrs route bundle <PATH> --query <TEXT> --limit <N>`
+
+Emits a bounded context-loading plan by reusing the exact `scryrs route explain` ranking and truncating after the requested positive limit.
+
+| Field | Value |
+| ------- | ------- |
+| Input | Required local directory `<PATH>` containing `.scryrs/routes.json`. Required `--query <TEXT>` argument. Required positive `--limit <N>` argument. |
+| Output | Single-line `RouteBundleDocument` JSON on stdout with `schemaVersion`, `query`, `limit`, and `targets`. Each `targets[]` item reuses the explain-derived `RouteHintItem` field shape: `routeId`, `target`, `loadTarget`, `label`, `rank`, `relevance`, `reason`, and `evidence`. |
+| Exit 0 | Bundle emitted successfully (including zero-match results) |
+| Exit 1 | Serialization or stdout write failure |
+| Exit 2 | Missing PATH, missing `--query`, missing/invalid/non-positive `--limit`, route artifact missing, malformed route artifact, or route schema version mismatch |
+
+**Behavior notes:**
+
+- Reads only `.scryrs/routes.json`. Never falls back to `.scryrs/graph.json`, never loads source/docs content automatically, and never mutates `.scryrs/` artifacts.
+- Reuses the explain ordering `(tier DESC, score DESC, count DESC, manifest_index ASC, route_id ASC)` exactly, then truncates after ranking.
+- `targets.len() <= limit` always holds. If more matches exist than `limit`, bundle emits exactly the first `limit` explain-ordered matches.
+- `non_loadable` targets remain explicit in output and count toward the limit.
+- Zero matches emits a valid `RouteBundleDocument` with `targets: []`.
+
+**Example invocation:**
+
+```bash
+scryrs route bundle . --query "auth" --limit 5
+```
+
+**Example output:**
+
+```json
+{"schemaVersion":"1.0.0","query":"auth","limit":5,"targets":[{"routeId":"file:auth","target":"file:auth","loadTarget":{"kind":"file","reference":"auth"},"label":"auth","rank":1,"relevance":3000000001,"reason":"Route 'auth' (file:auth): 1 evidence link(s), subject kind file, load target file; query match on id, label, subject, target","evidence":[{"sourceKind":"local_trace_row","subject":"auth","rowIds":[1]}]}]}
+```
+
+**When to use bundle versus explain:** Use `bundle` when the caller needs a bounded, explainable plan for what to inspect next. Use `explain` when the caller needs the full diagnostic ranking of all matches.
 
 ### `scryrs propose <PATH>`
 

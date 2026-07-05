@@ -101,6 +101,7 @@ Output rules:
 | `hints_from_manifest` deterministic producer in `crates/scryrs-runtime/src/lib.rs` | |
 | `explain_hints` query-aware hint producer in `crates/scryrs-runtime/src/lib.rs` | |
 | `scryrs route explain <PATH> --query <TEXT>` CLI command in `crates/scryrs-cli/src/route_explain.rs` | |
+| `scryrs route bundle <PATH> --query <TEXT> --limit <N>` bounded planning CLI in `crates/scryrs-cli/src/route_bundle.rs` | |
 
 ## Route Hint Contract
 
@@ -148,6 +149,33 @@ Explain ordering is authoritative on `(tier DESC, score DESC, count DESC, manife
 **Zero-match contract:** No matches produces a valid `RouteHintDocument` with empty `hints` array and exit code 0.
 
 **Artifact dependency:** The explain command reads only `.scryrs/routes.json`. It does not inspect `.scryrs/graph.json` or any other artifact.
+
+## Route Bundle Contract
+
+`RouteBundleDocument` is the bounded planning envelope derived from the same explain-ranked hints. It exists for callers that need a small, explicit context-loading plan rather than the full unbounded diagnostic surface.
+
+| Field | Purpose |
+| --- | --- |
+| `schemaVersion` | Bundle contract version. Current value: `1.0.0` (`BUNDLE_SCHEMA_VERSION`). |
+| `query` | Original query text used to derive the bundle. |
+| `limit` | Positive caller-requested maximum target count. |
+| `targets` | Ordered `RouteHintItem` array truncated after explain ranking. |
+
+### Bundle behavior
+
+- `scryrs route bundle <PATH> --query <TEXT> --limit <N>` reads only `.scryrs/routes.json`, validates `ROUTE_SCHEMA_VERSION`, calls the same `explain_hints` ranking as `scryrs route explain`, then truncates with `take(limit)`.
+- `limit` is required and must be positive. Missing, malformed, zero, or negative values fail fast with exit code `2`.
+- `targets` preserves the exact explain-derived per-target fields: `routeId`, `target`, `loadTarget`, `label`, `rank`, `relevance`, `reason`, and `evidence`.
+- `non_loadable` targets remain explicit and still count toward the limit.
+- Zero matches returns a valid `RouteBundleDocument` with `targets: []` and exit code `0`.
+- The command is read-only: it never regenerates `.scryrs/routes.json`, never falls back to `.scryrs/graph.json`, and never loads source files or docs automatically.
+
+### When to use bundle versus explain
+
+- **Use `bundle`** when an agent needs a bounded, explainable plan for what to inspect next.
+- **Use `explain`** when an agent or operator needs the full diagnostic ranking of all matches.
+
+Both commands preserve the same evidence chain and ranking semantics; `bundle` just adds `query` + `limit` metadata and truncates after ranking.
 
 ## Why Route Manifests Exist
 

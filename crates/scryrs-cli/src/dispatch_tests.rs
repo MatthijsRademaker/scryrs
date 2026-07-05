@@ -12,6 +12,10 @@ fn help_flag_prints_help_and_exits_0() {
         help.contains("partial live-mode configuration"),
         "--help must document dashboard partial live-mode configuration exit 2, got:\n{help}"
     );
+    assert!(
+        help.contains("route explain: missing PATH, missing required --query, or missing/malformed/schema-mismatched routes.json; route bundle: missing PATH, missing required flags, missing/malformed/schema-mismatched routes.json, or invalid --limit"),
+        "--help must distinguish route explain from route bundle exit-2 causes, got:\n{help}"
+    );
     insta::assert_snapshot!(help);
 }
 
@@ -484,8 +488,8 @@ fn doctor_and_publish_appear_in_help_and_help_json_output() {
         "--help-json must list doctor command, got:\n{help_json}"
     );
     assert!(
-        help_json.contains("\"surfaceVersion\":\"0.17.0\""),
-        "--help-json must bump surfaceVersion to 0.17.0, got:\n{help_json}"
+        help_json.contains("\"surfaceVersion\":\"0.18.0\""),
+        "--help-json must bump surfaceVersion to 0.18.0, got:\n{help_json}"
     );
     assert!(
         help_json.contains("\"name\":\"publish\""),
@@ -1570,8 +1574,8 @@ fn help_json_contains_grouped_proposals_surface_and_bumped_version() {
     assert!(err.is_empty());
     let json_str = String::from_utf8_lossy(&out);
     assert!(
-        json_str.contains("\"surfaceVersion\":\"0.17.0\""),
-        "--help-json must bump surfaceVersion to 0.17.0, got:\n{json_str}"
+        json_str.contains("\"surfaceVersion\":\"0.18.0\""),
+        "--help-json must bump surfaceVersion to 0.18.0, got:\n{json_str}"
     );
     assert!(
         json_str.contains("\"name\":\"proposals\""),
@@ -2098,4 +2102,422 @@ fn route_explain_with_extra_args_exits_2() {
         err_str.contains("unexpected extra argument"),
         "got: {err_str}"
     );
+}
+
+#[test]
+#[allow(clippy::unwrap_used)]
+fn bare_route_path_named_bundle_still_dispatches_to_manifest_generation() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    std::fs::create_dir(dir.path().join("bundle"))
+        .unwrap_or_else(|e| panic!("create bundle dir: {e}"));
+
+    crate::test_support::with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(run_with_writers(["route", "bundle"], &mut out, &mut err), 2);
+        assert!(out.is_empty());
+        let err_str = String::from_utf8_lossy(&err);
+        assert!(
+            err_str.contains("scryrs route: graph artifact not found"),
+            "bare route PATH named 'bundle' must still hit route manifest generation, got: {err_str}"
+        );
+        assert!(
+            !err_str.contains("scryrs route bundle:"),
+            "bare route PATH named 'bundle' must not be intercepted as the bundle subcommand, got: {err_str}"
+        );
+    });
+}
+
+#[test]
+fn route_bundle_help_flag_prints_help_and_exits_0() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(["route", "bundle", "--help"], &mut out, &mut err),
+        0
+    );
+    assert!(err.is_empty());
+    let help = String::from_utf8_lossy(&out);
+    assert!(help.contains("scryrs route bundle"));
+    assert!(help.contains("--query <TEXT>"));
+    assert!(help.contains("--limit <N>"));
+    assert!(help.contains("bounded context-loading plan"));
+    assert!(help.contains("RouteBundleDocument"));
+    assert!(help.contains("bundle reuses the explain ordering before truncation"));
+}
+
+#[test]
+fn route_bundle_missing_limit_exits_2() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(
+            ["route", "bundle", "/tmp", "--query", "auth"],
+            &mut out,
+            &mut err
+        ),
+        2
+    );
+    assert!(out.is_empty());
+    let err_str = String::from_utf8_lossy(&err);
+    assert!(err_str.contains("missing required --limit argument"));
+    assert!(err_str.contains("Usage: scryrs route bundle <PATH> --query <TEXT> --limit <N>"));
+    assert!(err_str.contains("See `scryrs --help`"));
+}
+
+#[test]
+fn route_bundle_zero_limit_exits_2() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(
+            ["route", "bundle", "/tmp", "--query", "auth", "--limit", "0"],
+            &mut out,
+            &mut err,
+        ),
+        2
+    );
+    assert!(out.is_empty());
+    let err_str = String::from_utf8_lossy(&err);
+    assert!(err_str.contains("--limit must be positive"));
+}
+
+#[test]
+fn route_bundle_invalid_limit_exits_2() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(
+            [
+                "route", "bundle", "/tmp", "--query", "auth", "--limit", "nope"
+            ],
+            &mut out,
+            &mut err,
+        ),
+        2
+    );
+    assert!(out.is_empty());
+    let err_str = String::from_utf8_lossy(&err);
+    assert!(err_str.contains("--limit must be a positive integer"));
+}
+
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[test]
+fn route_bundle_missing_routes_json_exits_2() {
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(
+            [
+                "route",
+                "bundle",
+                tmp.path().to_str().unwrap(),
+                "--query",
+                "auth",
+                "--limit",
+                "5",
+            ],
+            &mut out,
+            &mut err,
+        ),
+        2
+    );
+    assert!(out.is_empty());
+    assert!(String::from_utf8_lossy(&err).contains("route artifact not found"));
+}
+
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[test]
+fn route_bundle_malformed_routes_json_exits_2() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let scryrs_dir = tmp.path().join(".scryrs");
+    fs::create_dir(&scryrs_dir).expect("create .scryrs");
+    fs::write(scryrs_dir.join("routes.json"), "not json").expect("write routes.json");
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(
+            [
+                "route",
+                "bundle",
+                tmp.path().to_str().unwrap(),
+                "--query",
+                "auth",
+                "--limit",
+                "5",
+            ],
+            &mut out,
+            &mut err,
+        ),
+        2
+    );
+    assert!(out.is_empty());
+    assert!(String::from_utf8_lossy(&err).contains("malformed route artifact"));
+}
+
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[test]
+fn route_bundle_schema_version_mismatch_exits_2() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let scryrs_dir = tmp.path().join(".scryrs");
+    fs::create_dir(&scryrs_dir).expect("create .scryrs");
+    fs::write(
+        scryrs_dir.join("routes.json"),
+        serde_json::to_string(&serde_json::json!({
+            "schemaVersion": "99.0.0",
+            "metadata": {},
+            "routes": []
+        }))
+        .expect("serialize routes"),
+    )
+    .expect("write routes.json");
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(
+            [
+                "route",
+                "bundle",
+                tmp.path().to_str().unwrap(),
+                "--query",
+                "auth",
+                "--limit",
+                "5",
+            ],
+            &mut out,
+            &mut err,
+        ),
+        2
+    );
+    assert!(out.is_empty());
+    assert!(String::from_utf8_lossy(&err).contains("schema version mismatch"));
+}
+
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[test]
+fn route_bundle_successful_output_truncates_explain_order_and_reads_manifest_only() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let scryrs_dir = tmp.path().join(".scryrs");
+    fs::create_dir(&scryrs_dir).expect("create .scryrs");
+
+    let routes = serde_json::json!({
+        "schemaVersion": "1.0.0",
+        "metadata": {},
+        "routes": [
+            {
+                "id": "search:auth",
+                "subjectKind": "search",
+                "subject": "auth",
+                "label": "auth",
+                "target": "search:auth",
+                "loadTarget": {"kind": "non_loadable"},
+                "kind": "search",
+                "evidenceLinks": [
+                    {
+                        "sourceKind": "local_trace_row",
+                        "subject": "auth",
+                        "rowIds": [1],
+                        "score": 50
+                    }
+                ]
+            },
+            {
+                "id": "file:authentication",
+                "subjectKind": "file",
+                "subject": "authentication",
+                "label": "Authentication",
+                "target": "file:authentication",
+                "loadTarget": {"kind": "file", "reference": "authentication"},
+                "kind": "file",
+                "evidenceLinks": [
+                    {
+                        "sourceKind": "local_trace_row",
+                        "subject": "authentication",
+                        "rowIds": [2],
+                        "score": 10
+                    }
+                ]
+            },
+            {
+                "id": "file:zzz_auth_zzz",
+                "subjectKind": "file",
+                "subject": "zzz_auth_zzz",
+                "label": "zzz_auth_zzz",
+                "target": "file:zzz_auth_zzz",
+                "loadTarget": {"kind": "file", "reference": "zzz_auth_zzz"},
+                "kind": "file",
+                "evidenceLinks": []
+            }
+        ]
+    });
+    let routes_path = scryrs_dir.join("routes.json");
+    fs::write(
+        &routes_path,
+        serde_json::to_string(&routes).expect("serialize"),
+    )
+    .expect("write routes.json");
+    let original_routes = fs::read_to_string(&routes_path).expect("read routes.json");
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(
+            [
+                "route",
+                "bundle",
+                tmp.path().to_str().unwrap(),
+                "--query",
+                "auth",
+                "--limit",
+                "2",
+            ],
+            &mut out,
+            &mut err,
+        ),
+        0
+    );
+
+    let stdout = String::from_utf8_lossy(&out);
+    let doc: serde_json::Value = serde_json::from_str(stdout.trim()).expect("must be valid JSON");
+    assert_eq!(doc["schemaVersion"].as_str(), Some("1.0.0"));
+    assert_eq!(doc["query"].as_str(), Some("auth"));
+    assert_eq!(doc["limit"].as_u64(), Some(2));
+    let targets = doc["targets"].as_array().expect("targets array");
+    assert_eq!(
+        targets.len(),
+        2,
+        "bundle must truncate to the requested limit"
+    );
+    assert_eq!(targets[0]["routeId"].as_str(), Some("search:auth"));
+    assert_eq!(
+        targets[0]["loadTarget"]["kind"].as_str(),
+        Some("non_loadable")
+    );
+    assert_eq!(targets[1]["routeId"].as_str(), Some("file:authentication"));
+    assert_eq!(targets[1]["loadTarget"]["kind"].as_str(), Some("file"));
+    assert!(
+        targets[0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("query match on")
+    );
+    assert!(String::from_utf8_lossy(&err).is_empty());
+    assert_eq!(
+        fs::read_to_string(&routes_path).expect("read routes.json after bundle"),
+        original_routes,
+        "bundle must leave .scryrs/routes.json byte-identical"
+    );
+    assert!(
+        !tmp.path().join(".scryrs/graph.json").exists(),
+        "bundle must succeed without graph.json"
+    );
+}
+
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[test]
+fn route_bundle_zero_match_emits_empty_targets_exits_0() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let scryrs_dir = tmp.path().join(".scryrs");
+    fs::create_dir(&scryrs_dir).expect("create .scryrs");
+
+    let routes = serde_json::json!({
+        "schemaVersion": "1.0.0",
+        "metadata": {},
+        "routes": [
+            {
+                "id": "file:auth",
+                "subjectKind": "file",
+                "subject": "auth",
+                "label": "auth",
+                "target": "file:auth",
+                "loadTarget": {"kind": "file", "reference": "auth"},
+                "kind": "file",
+                "evidenceLinks": []
+            }
+        ]
+    });
+    fs::write(
+        scryrs_dir.join("routes.json"),
+        serde_json::to_string(&routes).expect("serialize"),
+    )
+    .expect("write routes.json");
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(
+            [
+                "route",
+                "bundle",
+                tmp.path().to_str().unwrap(),
+                "--query",
+                "zzz_nonexistent",
+                "--limit",
+                "5",
+            ],
+            &mut out,
+            &mut err,
+        ),
+        0
+    );
+
+    let stdout = String::from_utf8_lossy(&out);
+    let doc: serde_json::Value = serde_json::from_str(stdout.trim()).expect("must be valid JSON");
+    assert_eq!(doc["query"].as_str(), Some("zzz_nonexistent"));
+    assert_eq!(doc["limit"].as_u64(), Some(5));
+    assert!(doc["targets"].as_array().expect("targets array").is_empty());
+    assert!(String::from_utf8_lossy(&err).is_empty());
+}
+
+#[test]
+#[allow(clippy::unwrap_used)]
+fn route_bundle_help_json_and_help_text_are_discoverable() {
+    let mut help_out = Vec::new();
+    let mut json_out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(run_with_writers(["--help"], &mut help_out, &mut err), 0);
+    assert!(err.is_empty());
+    let help = String::from_utf8_lossy(&help_out);
+    assert!(help.contains("scryrs route bundle <PATH> --query <TEXT> --limit <N>"));
+    assert!(help.contains("bounded context-loading plan"));
+    assert!(help.contains("bundle versus explain"));
+
+    assert_eq!(
+        run_with_writers(["--help-json"], &mut json_out, &mut err),
+        0
+    );
+    assert!(err.is_empty());
+    let json_str = String::from_utf8_lossy(&json_out);
+    assert!(json_str.contains("\"name\":\"bundle\""));
+    assert!(json_str.contains("\"flag\":\"--limit\""));
+    assert!(json_str.contains("RouteBundleDocument"));
+    assert!(json_str.contains("bounded context-loading plan"));
 }

@@ -1,9 +1,11 @@
 use std::io::Write;
-use std::path::Path;
 
+use crate::route_common::{load_route_manifest, resolve_repo_root, warn_if_route_artifact_changed};
+
+#[cfg(feature = "runtime")]
 use scryrs_runtime::explain_hints;
-use scryrs_types::{ROUTE_SCHEMA_VERSION, RouteManifestDocument};
 
+#[cfg(feature = "runtime")]
 pub(crate) fn execute_route_explain(
     out: &mut impl Write,
     err: &mut impl Write,
@@ -16,12 +18,10 @@ pub(crate) fn execute_route_explain(
         );
     }
 
-    // --help / -h
     if args.len() == 1 && (args[0] == "--help" || args[0] == "-h") {
         return write_route_explain_help(out).map_or(1, |_| 0);
     }
 
-    // Parse PATH and --query.
     let mut path_arg: Option<&str> = None;
     let mut query: Option<&str> = None;
     let mut i = 0;
@@ -36,7 +36,7 @@ pub(crate) fn execute_route_explain(
                     "scryrs route explain: --query requires a value",
                 );
             }
-        } else if args[i].starts_with("-") && args[i] != "--query" {
+        } else if args[i].starts_with('-') && args[i] != "--query" {
             return route_explain_usage_err(
                 err,
                 &format!("scryrs route explain: unexpected argument '{}'", args[i]),
@@ -49,9 +49,8 @@ pub(crate) fn execute_route_explain(
         }
     }
 
-    // Missing PATH.
     let path = match path_arg {
-        Some(p) => p,
+        Some(path) => path,
         None => {
             return route_explain_usage_err(
                 err,
@@ -59,10 +58,8 @@ pub(crate) fn execute_route_explain(
             );
         }
     };
-
-    // Missing --query.
     let query = match query {
-        Some(q) => q,
+        Some(query) => query,
         None => {
             return route_explain_usage_err(
                 err,
@@ -71,83 +68,30 @@ pub(crate) fn execute_route_explain(
         }
     };
 
-    // Resolve PATH to absolute repo root.
-    let repo_root = match std::path::absolute(path) {
-        Ok(p) => p,
-        Err(e) => {
-            let _ = writeln!(
-                err,
-                "scryrs route explain: cannot resolve path '{path}': {e}"
-            );
-            return 2;
-        }
+    let repo_root = match resolve_repo_root(err, "scryrs route explain", path) {
+        Ok(repo_root) => repo_root,
+        Err(exit_code) => return exit_code,
+    };
+    let loaded = match load_route_manifest(err, "scryrs route explain", &repo_root) {
+        Ok(loaded) => loaded,
+        Err(exit_code) => return exit_code,
     };
 
-    // Load .scryrs/routes.json (required).
-    let routes_path = repo_root.join(".scryrs/routes.json");
-    let routes_json = match std::fs::read_to_string(&routes_path) {
-        Ok(s) => s,
-        Err(_) => {
-            let _ = writeln!(
-                err,
-                "scryrs route explain: route artifact not found at {}",
-                routes_path.display()
-            );
-            let _ = writeln!(
-                err,
-                "Run `scryrs route <PATH>` first to generate the route manifest."
-            );
-            let _ = writeln!(err, "See `scryrs --help`");
-            return 2;
-        }
-    };
-
-    let manifest: RouteManifestDocument = match serde_json::from_str(&routes_json) {
-        Ok(d) => d,
-        Err(e) => {
-            let _ = writeln!(err, "scryrs route explain: malformed route artifact: {e}");
-            let _ = writeln!(
-                err,
-                "Run `scryrs route <PATH>` to regenerate the route manifest."
-            );
-            let _ = writeln!(err, "See `scryrs --help`");
-            return 2;
-        }
-    };
-
-    // Validate schema version.
-    if manifest.schema_version != ROUTE_SCHEMA_VERSION {
-        let _ = writeln!(
-            err,
-            "scryrs route explain: route schema version mismatch: got '{}', expected '{}'",
-            manifest.schema_version, ROUTE_SCHEMA_VERSION
-        );
-        let _ = writeln!(
-            err,
-            "Run `scryrs route <PATH>` to regenerate the route manifest."
-        );
-        let _ = writeln!(err, "See `scryrs --help`");
-        return 2;
-    }
-
-    // Verify explain didn't change the artifact on disk.
-    // Read routes.json again to confirm it's byte-identical.
-    if let Err(e) = check_artifact_unchanged(&routes_path, &routes_json, err) {
-        let _ = writeln!(
-            err,
-            "scryrs route explain: warning: cannot verify route artifact unchanged: {e}"
-        );
-    }
-
-    // Call explain_hints and serialize.
-    let hint_doc = explain_hints(&manifest, query);
+    let hint_doc = explain_hints(&loaded.manifest, query);
     let json = match serde_json::to_string(&hint_doc) {
-        Ok(j) => j,
-        Err(e) => {
-            let _ = writeln!(err, "scryrs route explain: serialization error: {e}");
+        Ok(json) => json,
+        Err(error) => {
+            let _ = writeln!(err, "scryrs route explain: serialization error: {error}");
             return 1;
         }
     };
+
+    warn_if_route_artifact_changed(
+        err,
+        "scryrs route explain",
+        &loaded.routes_path,
+        &loaded.routes_json,
+    );
 
     if writeln!(out, "{json}").is_err() {
         return 1;
@@ -156,19 +100,22 @@ pub(crate) fn execute_route_explain(
     0
 }
 
-fn check_artifact_unchanged(
-    routes_path: &Path,
-    original: &str,
+#[cfg(not(feature = "runtime"))]
+pub(crate) fn execute_route_explain(
+    out: &mut impl Write,
     err: &mut impl Write,
-) -> std::io::Result<()> {
-    std::fs::read_to_string(routes_path).map(|after| {
-        if after != original {
-            let _ = writeln!(
-                err,
-                "scryrs route explain: warning: route artifact was modified during execution"
-            );
-        }
-    })
+    args: &[String],
+) -> i32 {
+    if args.len() == 1 && (args[0] == "--help" || args[0] == "-h") {
+        return write_route_explain_help(out).map_or(1, |_| 0);
+    }
+
+    let _ = writeln!(
+        err,
+        "scryrs route explain: unavailable (runtime feature not enabled)"
+    );
+    let _ = writeln!(err, "See `scryrs --help`");
+    2
 }
 
 fn route_explain_usage_err(err: &mut impl Write, msg: &str) -> i32 {

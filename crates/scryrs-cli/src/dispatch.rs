@@ -87,6 +87,10 @@ where
         return crate::route_explain::execute_route_explain(&mut out, &mut err, &args[2..]);
     }
 
+    if args.len() >= 3 && args[0] == "route" && args[1] == "bundle" {
+        return crate::route_bundle::execute_route_bundle(&mut out, &mut err, &args[2..]);
+    }
+
     // Unknown command check before clap dispatch.
     // Only known root-level entrypoints pass through to clap.
     // Everything else produces the contract error: "unknown command: 'X'".
@@ -441,6 +445,29 @@ where
                                 .action(clap::ArgAction::Set)
                                 .help("Query text for case-insensitive substring matching"),
                         ),
+                )
+                .subcommand(
+                    Command::new("bundle")
+                        .about("Emit a bounded context-loading plan from route hints")
+                        .disable_help_flag(true)
+                        .disable_version_flag(true)
+                        .arg(Arg::new("PATH").value_name("PATH"))
+                        .arg(
+                            Arg::new("query")
+                                .long("query")
+                                .value_name("TEXT")
+                                .num_args(1)
+                                .action(clap::ArgAction::Set)
+                                .help("Query text for case-insensitive substring matching"),
+                        )
+                        .arg(
+                            Arg::new("limit")
+                                .long("limit")
+                                .value_name("N")
+                                .num_args(1)
+                                .action(clap::ArgAction::Set)
+                                .help("Positive maximum number of explain-ordered targets to emit"),
+                        ),
                 ),
         )
         .subcommand(
@@ -599,12 +626,10 @@ where
                     write_graph_json(&mut out, &mut err, path)
                 }
                 Some(("route", m)) => {
-                    // route explain is intercepted pre-clap, so we only get here
-                    // for bare `scryrs route <PATH>`.
+                    // route explain and route bundle are intercepted pre-clap,
+                    // so we only get here for bare `scryrs route <PATH>`.
                     match m.subcommand() {
                         Some(("explain", _)) => {
-                            // Should not be reached — pre-clap intercept catches this.
-                            // If it does, treat as usage error.
                             if writeln!(err, "scryrs route explain: internal dispatch error").is_err()
                                 || writeln!(err, "See `scryrs --help`").is_err()
                             {
@@ -613,6 +638,7 @@ where
                                 2
                             }
                         }
+                        Some(("bundle", _)) => write_route_json(&mut out, &mut err, "bundle"),
                         _ => {
                             match m.get_one::<String>("PATH") {
                                 Some(path) => write_route_json(&mut out, &mut err, path),
