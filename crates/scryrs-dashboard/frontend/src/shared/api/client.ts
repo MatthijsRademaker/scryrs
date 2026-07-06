@@ -133,3 +133,42 @@ export function getEvents(
 export function getSignalStreamUrl(after: number): string {
 	return `/api/signals?after=${encodeURIComponent(String(after))}`;
 }
+
+// ── Route explain DTOs ────────────────────────────────────────────────
+
+export interface RouteLoadTarget {
+	kind: "file" | "doc_page" | "non_loadable";
+	reference?: string;
+}
+
+export interface EvidenceLink {
+	sourceKind: string;
+	subject: string;
+	rowIds: number[];
+	docRef?: string;
+	description?: string;
+	score?: number;
+	metadata?: Record<string, unknown>;
+}
+
+export interface RouteHintItem {
+	routeId: string;
+	target: string;
+	loadTarget?: RouteLoadTarget;
+	label: string;
+	rank: number;
+	relevance?: number;
+	reason: string;
+	evidence?: EvidenceLink[];
+}
+
+export interface RouteHintDocument {
+	schemaVersion: string;
+	hints: RouteHintItem[];
+}
+
+export function getRouteHints(query: string): Promise<RouteHintDocument> {
+	return fetchJson<RouteHintDocument>(
+		`/api/routes/explain?query=${encodeURIComponent(query)}`,
+	);
+}

@@ -19,6 +19,7 @@ describe("navigationForMode", () => {
 			"Hotspots",
 			"Sessions",
 			"Events",
+			"Routes",
 			"About",
 		]);
 	});

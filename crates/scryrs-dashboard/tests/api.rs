@@ -473,6 +473,206 @@ async fn live_mode_rejects_local_only_endpoints() {
     );
 }
 
+// ── Route explain tests ────────────────────────────────────────────────────
+
+fn minimal_routes_json() -> serde_json::Value {
+    serde_json::json!({
+        "schemaVersion": "1.0.0",
+        "metadata": {},
+        "routes": [
+            {
+                "id": "file:auth",
+                "subjectKind": "file",
+                "subject": "auth_handler",
+                "label": "auth_handler",
+                "target": "file:auth",
+                "loadTarget": { "kind": "file", "reference": "auth_handler" },
+                "kind": "file",
+                "evidenceLinks": [
+                    {
+                        "sourceKind": "local_trace_row",
+                        "subject": "auth_handler",
+                        "rowIds": [1, 2]
+                    }
+                ],
+                "relatedEdges": []
+            },
+            {
+                "id": "search:auth",
+                "subjectKind": "search",
+                "subject": "authentication",
+                "label": "authentication",
+                "target": "search:auth",
+                "loadTarget": { "kind": "non_loadable" },
+                "kind": "search",
+                "evidenceLinks": [
+                    {
+                        "sourceKind": "local_trace_row",
+                        "subject": "authentication",
+                        "rowIds": [3]
+                    }
+                ],
+                "relatedEdges": []
+            }
+        ]
+    })
+}
+
+fn write_routes_json(dir: &std::path::Path, json: &serde_json::Value) {
+    let scryrs = dir.join(".scryrs");
+    std::fs::create_dir_all(&scryrs).unwrap_or_else(|err| panic!("create .scryrs: {err}"));
+    std::fs::write(
+        scryrs.join("routes.json"),
+        serde_json::to_string(json).unwrap_or_else(|err| panic!("serialize routes: {err}")),
+    )
+    .unwrap_or_else(|err| panic!("write routes: {err}"));
+}
+
+#[tokio::test]
+async fn route_explain_success_returns_route_hint_document() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+    write_routes_json(dir.path(), &minimal_routes_json());
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(request("/api/routes/explain?query=auth"))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_json(response).await;
+    assert_eq!(json["schemaVersion"], "1.0.0");
+    let hints = json["hints"].as_array().unwrap_or_else(|| panic!("hints is array"));
+    // "auth" should match both "auth_handler" (file:auth) and "authentication" (search:auth)
+    assert_eq!(hints.len(), 2);
+    // file:auth matches exact in target; search:auth matches substring
+    assert!(hints.iter().any(|h| h["routeId"] == "file:auth"));
+    assert!(hints.iter().any(|h| h["routeId"] == "search:auth"));
+}
+
+#[tokio::test]
+async fn route_explain_missing_artifact_returns_404() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(request("/api/routes/explain?query=auth"))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let json = response_json(response).await;
+    let error = json["error"].as_str().unwrap_or_else(|| panic!("error field"));
+    assert!(error.contains("route artifact not found"));
+    assert!(error.contains("scryrs route"));
+}
+
+#[tokio::test]
+async fn route_explain_malformed_json_returns_502() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+    let scryrs = dir.path().join(".scryrs");
+    std::fs::create_dir_all(&scryrs).unwrap_or_else(|err| panic!("create .scryrs: {err}"));
+    std::fs::write(scryrs.join("routes.json"), "not json").unwrap_or_else(|err| panic!("write: {err}"));
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(request("/api/routes/explain?query=auth"))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let json = response_json(response).await;
+    let error = json["error"].as_str().unwrap_or_else(|| panic!("error field"));
+    assert!(error.contains("malformed"));
+}
+
+#[tokio::test]
+async fn route_explain_schema_version_mismatch_returns_502() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+    let bad = serde_json::json!({
+        "schemaVersion": "99.0.0",
+        "metadata": {},
+        "routes": []
+    });
+    write_routes_json(dir.path(), &bad);
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(request("/api/routes/explain?query=auth"))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let json = response_json(response).await;
+    let error = json["error"].as_str().unwrap_or_else(|| panic!("error field"));
+    assert!(error.contains("schema version mismatch"));
+    assert!(error.contains("99.0.0"));
+    assert!(error.contains("1.0.0"));
+}
+
+#[tokio::test]
+async fn route_explain_empty_query_returns_400() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+    write_routes_json(dir.path(), &minimal_routes_json());
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(request("/api/routes/explain?query="))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = response_json(response).await;
+    assert!(json["error"].as_str().is_some_and(|msg| msg.contains("non-empty")));
+}
+
+#[tokio::test]
+async fn route_explain_missing_query_returns_400() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+    write_routes_json(dir.path(), &minimal_routes_json());
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(request("/api/routes/explain"))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = response_json(response).await;
+    assert!(json["error"].as_str().is_some_and(|msg| msg.contains("non-empty")));
+}
+
+#[tokio::test]
+async fn route_explain_live_mode_returns_404() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+
+    let response = router(live_config(
+        dir.path().to_path_buf(),
+        "http://localhost:8081",
+        "repo-a",
+    ))
+    .oneshot(request("/api/routes/explain?query=auth"))
+    .await
+    .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let json = response_json(response).await;
+    assert!(json["error"]
+        .as_str()
+        .is_some_and(|msg| msg.contains("unavailable in live mode")));
+}
+
+#[tokio::test]
+async fn route_explain_zero_match_returns_empty_hints() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+    write_routes_json(dir.path(), &minimal_routes_json());
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(request("/api/routes/explain?query=zzz_nonexistent"))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_json(response).await;
+    assert_eq!(json["schemaVersion"], "1.0.0");
+    let hints = json["hints"].as_array().unwrap_or_else(|| panic!("hints is array"));
+    assert!(hints.is_empty());
+}
+
 #[tokio::test]
 async fn live_signals_proxy_forwards_after_cursor_and_streams_first_chunk() {
     let requests = Arc::new(Mutex::new(Vec::new()));
