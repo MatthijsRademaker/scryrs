@@ -22,6 +22,7 @@ const LOCAL_NAV: DashboardNavItem[] = [
 		match: ["sessions", "session-detail"],
 	},
 	{ to: "/events", label: "Events", icon: "activity", match: ["events"] },
+	{ to: "/routes", label: "Routes", icon: "activity", match: ["routes"] },
 	{ to: "/about", label: "About", icon: "info", match: ["about"] },
 ];
 
@@ -67,6 +68,9 @@ export function routeUnavailableMessage(
 		}
 		if (routeName === "events") {
 			return "Events are not available in live mode. Use Signals for replayed and live hotspot activity.";
+		}
+		if (routeName === "routes") {
+			return "Route explain is not available in live mode. Use the local-mode dashboard with .scryrs artifacts to inspect routes.";
 		}
 	}
 

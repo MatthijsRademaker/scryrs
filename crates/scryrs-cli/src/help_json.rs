@@ -392,7 +392,7 @@ pub(crate) fn cli_surface_doc() -> String {
                 ],
                 "output": {
                     "mimeType": "text/html",
-                    "description": "Vue.js SPA served over HTTP. REST API at GET /api/meta, GET /api/hotspots, GET /api/signals (live mode only), GET /api/sessions (local mode only), GET /api/sessions/:sessionId (local mode only), GET /api/events (local mode only)."
+                    "description": "Vue.js SPA served over HTTP. REST API at GET /api/meta, GET /api/hotspots, GET /api/signals (live mode only), GET /api/sessions (local mode only), GET /api/sessions/:sessionId (local mode only), GET /api/events (local mode only), GET /api/routes/explain (local mode only)."
                 }
             },
             {

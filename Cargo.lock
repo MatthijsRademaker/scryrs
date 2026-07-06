@@ -1311,6 +1311,7 @@ dependencies = [
  "rusqlite",
  "rust-embed",
  "scryrs-core",
+ "scryrs-runtime",
  "scryrs-types",
  "serde",
  "serde_json",

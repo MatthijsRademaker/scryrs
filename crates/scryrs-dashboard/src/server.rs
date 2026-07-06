@@ -15,6 +15,7 @@ use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::route_explain::route_explain;
 use crate::{Config, DashboardError, SourceMode};
 
 #[derive(RustEmbed)]
@@ -22,9 +23,9 @@ use crate::{Config, DashboardError, SourceMode};
 struct EmbeddedAssets;
 
 #[derive(Clone)]
-struct AppState {
-    config: Config,
-    http_client: reqwest::Client,
+pub(crate) struct AppState {
+    pub(crate) config: Config,
+    pub(crate) http_client: reqwest::Client,
 }
 
 #[derive(Serialize)]
@@ -33,20 +34,20 @@ struct ErrorBody {
 }
 
 #[derive(Debug)]
-struct ApiError {
-    status: StatusCode,
-    message: String,
+pub(crate) struct ApiError {
+    pub(crate) status: StatusCode,
+    pub(crate) message: String,
 }
 
 impl ApiError {
-    fn missing(message: impl Into<String>) -> Self {
+    pub(crate) fn missing(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::NOT_FOUND,
             message: message.into(),
         }
     }
 
-    fn bad_gateway(message: impl Into<String>) -> Self {
+    pub(crate) fn bad_gateway(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::BAD_GATEWAY,
             message: message.into(),
@@ -145,6 +146,7 @@ pub fn router(config: Config) -> Router {
         .route("/api/sessions", get(sessions))
         .route("/api/sessions/:session_id", get(session_detail))
         .route("/api/events", get(events))
+        .route("/api/routes/explain", get(route_explain))
         .route("/api/*path", get(api_not_found))
         .fallback(spa_fallback)
         .with_state(state)
