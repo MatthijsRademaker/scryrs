@@ -44,6 +44,11 @@ export const router = createRouter({
 			component: () => import("@/views/SignalsView.vue"),
 		},
 		{
+			path: "/routes",
+			name: "routes",
+			component: () => import("@/views/RouteView.vue"),
+		},
+		{
 			path: "/about",
 			name: "about",
 			component: () => import("@/views/AboutView.vue"),

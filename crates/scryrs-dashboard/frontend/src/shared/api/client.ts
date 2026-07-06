@@ -134,7 +134,14 @@ export function getSignalStreamUrl(after: number): string {
 	return `/api/signals?after=${encodeURIComponent(String(after))}`;
 }
 
-// --- Proposal DTOs ---
+// --- Route explain DTOs ---
+
+export interface RouteLoadTarget {
+	kind: "file" | "doc_page" | "non_loadable";
+	reference?: string;
+}
+
+// --- Shared evidence type ---
 
 export interface EvidenceLink {
 	sourceKind: string;
@@ -146,6 +153,32 @@ export interface EvidenceLink {
 	metadata?: Record<string, unknown> | null;
 }
 
+// --- Route hint DTOs ---
+
+export interface RouteHintItem {
+	routeId: string;
+	target: string;
+	loadTarget?: RouteLoadTarget;
+	label: string;
+	rank: number;
+	relevance?: number;
+	reason: string;
+	evidence?: EvidenceLink[];
+}
+
+export interface RouteHintDocument {
+	schemaVersion: string;
+	hints: RouteHintItem[];
+}
+
+export function getRouteHints(query: string): Promise<RouteHintDocument> {
+	return fetchJson<RouteHintDocument>(
+		`/api/routes/explain?query=${encodeURIComponent(query)}`,
+	);
+}
+
+// --- Proposal DTOs ---
+
 export interface ProposalListRow {
 	proposalId: string;
 	title: string;
@@ -154,16 +187,13 @@ export interface ProposalListRow {
 	state: "pending" | "accepted" | "rejected";
 }
 
-export interface ProposedContent {
-	type: "markdown" | "semantic_graph_grouping" | "memory_patch";
-	value: unknown;
-}
-
 export interface ProposalReviewDecisionMeta {
 	reviewer: string;
 	outcome: string;
 	decidedAt: string;
 	rationale: string;
+	acceptedContent?: unknown;
+	targetType?: string;
 }
 
 export interface ProposalDetail {

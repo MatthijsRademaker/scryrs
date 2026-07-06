@@ -3,6 +3,7 @@
 use std::net::IpAddr;
 use std::path::PathBuf;
 
+pub mod route_explain;
 pub mod server;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

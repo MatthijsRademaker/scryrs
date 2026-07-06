@@ -23,7 +23,7 @@ REST API\n\
   GET /api/signals (live mode only)\n\
   GET /api/sessions (local mode only)\n\
   GET /api/sessions/:sessionId (local mode only)\n\
-  GET /api/events (local mode only)\n"
+  GET /api/events (local mode only)\n  GET /api/routes/explain (local mode only)\n"
     )
 }
 

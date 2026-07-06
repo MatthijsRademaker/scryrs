@@ -20,6 +20,7 @@ describe("navigationForMode", () => {
 			"Sessions",
 			"Proposals",
 			"Events",
+			"Routes",
 			"About",
 		]);
 	});
@@ -70,6 +71,9 @@ describe("routeUnavailableMessage", () => {
 		);
 		expect(routeUnavailableMessage("proposal-detail", "live")).toContain(
 			"not available in live mode",
+		);
+		expect(routeUnavailableMessage("routes", "live")).toContain(
+			"Route explain is not available",
 		);
 	});
 
