@@ -101,6 +101,9 @@ onUnmounted(() => {
     :animate="entranceAnimate"
     :exit="{ opacity: 0, scale: 0.98 }"
     :transition="entranceTransition"
+    :data-signal-id="signal.id"
+    :data-signal-phase="signal.live ? 'live' : 'replay'"
+    :data-motion-path="reduced === true ? 'reduced' : 'full'"
     class="glass-surface relative flex items-center gap-4 overflow-hidden rounded-xl px-4 py-3"
   >
     <!-- One-shot heat flare on live arrival; magnitude scales with delta. -->
