@@ -43,7 +43,7 @@ The next roadmap tranche should optimize for loop closure:
 | P1. Acceptance ledger | Proposal files can become reviewed evidence without silent mutation | Define accepted/rejected artifact contract and CLI review workflow |
 | P2. Accepted-evidence graph | Reviewed semantic groupings and docs notes influence graph deterministically | Teach graph build to consume accepted evidence with provenance |
 | P3. Live dashboard | Multi-agent live hotspots are visible without manual API calls | Add dashboard live-server mode, signal timeline, reconnect/resume UX |
-| P4. Runtime explain | Agents can ask what context to load and why | Define route hint contract and implement `scryrs route explain` |
+| P4. Runtime explain | Agents can ask what context to load and why | Route explain shipped; semantic ranking and automatic context loading remain deferred |
 | P5. Publishing adapters | Reviewed knowledge leaves `.scryrs/` and reaches docs systems | Publish accepted proposals to Markdown first, then Rspress/llms surfaces |
 | P6. LLM assist UX | Models improve proposal quality but never own truth | Expose bounded model assist only over proposal inbox / accepted evidence flow |
 | P7. Release hardening | Suite can ship as production toolchain | Add diagnostics, packaging checks, multi-agent E2E, security/privacy gates |
@@ -206,7 +206,7 @@ LLMs may help suggest semantic groupings later, but they must not become authori
 
 This phase turns evidence into reviewable change suggestions.
 
-**Partial delivery (2026-06-27):** Proposal contract and inbox are shipped. `scryrs propose <PATH>` is shipped, generating validated deterministic `ProposalDocument` files under `.scryrs/proposals/` from `.scryrs/hotspots.json` and `.scryrs/graph.json`. Current deterministic generator emits `docs_note`, `skill`, `memory_patch`, `adr`, and qualifying `semantic_graph_grouping` candidates while keeping writes confined to proposal inbox artifacts only. `debugging_playbook` remains excluded from v1 generation.
+**Partial delivery (2026-06-27):** Proposal contract, inbox, and review CLI are shipped. `scryrs propose <PATH>` generates validated deterministic `ProposalDocument` files under `.scryrs/proposals/` from `.scryrs/hotspots.json` and `.scryrs/graph.json`, emitting `docs_note`, `skill`, `memory_patch`, `adr`, `debugging_playbook` (when FailedLookup count >= 2), and qualifying `semantic_graph_grouping` candidates. `scryrs proposals list|accept|reject` provides a deterministic review CLI with explicit reviewer provenance and conflict detection. Remaining gaps: no dashboard review UX, no broader accepted-evidence consumers beyond publishing adapters.
 
 Required deliverables:
 
@@ -220,6 +220,8 @@ Do not skip straight to automatic doc mutation. That would destroy trust.
 
 Adapters come after proposals because scryrs should publish approved knowledge, not invent source-of-truth content on its own.
 
+**Partial delivery (2026-06-27):** `scryrs publish markdown` and `scryrs publish rspress` are shipped. Both commands read only `.scryrs/accepted/*.json` and produce deterministic output: Markdown to a caller-chosen output root, Rspress to `.devagent/docs/docs/accepted-knowledge/` with `_nav.json` updates. Remaining gap: broader docs-surface targets beyond Markdown/Rspress.
+
 Recommended order:
 
 1. `crates/scryrs-adapter-markdown`
@@ -232,13 +234,7 @@ Why: Markdown keeps product core honest. If adapter logic only works when tied t
 
 Runtime work should consume prior artifacts, not bypass them.
 
-Required deliverables:
-
-- Explainable `scryrs route explain ...` behavior.
-- Retrieval-friendly route manifests.
-- Stable reason strings pointing back to graph links, hotspot evidence, and approved docs outputs.
-
-This phase is when future agents should start reading less junk and loading more relevant context.
+**Partial delivery (2026-06-27):** `scryrs route explain <PATH> --query <TEXT>`, `scryrs route bundle <PATH> --query <TEXT> --limit <N>`, route hint schema (`RouteHintDocument` / `RouteHintItem`), and `explain_hints` deterministic matching are shipped. Explain uses case-insensitive tiered matching (exact/prefix/substring) across label, subject, id, target, kind, and evidence-link subjects. **This is NOT product-complete.** Retrieval is deterministic manifest matching with packed display relevance, explicit `non_loadable` targets, and no automatic source/docs context loading. Semantic ranking, autonomous context loading, and runtime optimizer behavior remain deferred.
 
 ## Future Direction: Runtime Optimizer (RTK-style Rewrite)
 
@@ -294,10 +290,10 @@ If roadmap starts to sprawl, cut work using these rules:
 | M4 - Live hotspot server beta | Point multiple agents at one scryrs server and watch hotspot signals update without manually running `scryrs hotspots` |
 | M5 - Routing data beta | Export graph and route manifests for downstream consumers |
 | M6 - Proposal inbox beta | Generate reviewable docs, memory, ADR, skill, and grouping proposals from evidence |
-| M7 - Review loop beta | Accept or reject proposals and convert accepted output into recorded evidence |
+| M7 - Review loop beta ✅ | Accept or reject proposals and convert accepted output into recorded evidence |
 | M8 - Live dashboard beta | Browse multi-agent live hotspots and replay/resume signal history from `scryrs dashboard --server-url <URL> --repository-id <ID>` |
-| M9 - Runtime explain beta | Ask `scryrs route explain` what context to read and inspect evidence-backed reasons |
-| M10 - Adapter suite beta | Publish approved knowledge into Markdown, Rspress, and llms surfaces |
+| M9 - Runtime explain beta ✅ | Ask `scryrs route explain` what context to read and inspect evidence-backed reasons |
+| M10 - Adapter suite beta ✅ | Publish approved knowledge into Markdown, Rspress, and llms surfaces |
 | M11 - LLM assist beta | Use bounded model drafting/grouping over proposal inbox without auto-acceptance |
 | M12 - Production release | Install, diagnose, test, and operate the full suite through documented release paths |
 
