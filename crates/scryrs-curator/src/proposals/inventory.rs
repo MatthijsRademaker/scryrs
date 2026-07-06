@@ -173,6 +173,10 @@ pub fn load_proposals(
                 path_a: path,
                 path_b: {
                     // Reconstruct the path for the earlier entry.
+                    // validate_proposal_document (called above) guarantees
+                    // that every proposal file is named `{id}.json`, so this
+                    // reconstruction yields the exact filesystem path of the
+                    // earlier entry.
                     let mut pb = proposals_dir.clone();
                     pb.push(inbox_json_filename(&existing));
                     pb
@@ -291,6 +295,10 @@ pub fn validate_proposal_document(
             path: path.to_path_buf(),
             message: error,
         })?;
+    validate_rfc3339(&proposal.created_at).map_err(|message| InventoryError::Validation {
+        path: path.to_path_buf(),
+        message: format!("createdAt {message}"),
+    })?;
 
     let expected_filename = inbox_json_filename(proposal);
     let actual_filename = path.file_name().and_then(OsStr::to_str).unwrap_or_default();

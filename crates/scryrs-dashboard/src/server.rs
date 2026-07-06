@@ -375,32 +375,18 @@ fn load_proposal_detail(
     repo_root: &std::path::Path,
     proposal_id: &str,
 ) -> Result<ProposalDetail, ApiError> {
-    use scryrs_types::{ProposalDocument, ProposedContent};
+    use scryrs_types::ProposedContent;
 
-    let proposal_path = repo_root
-        .join(".scryrs/proposals")
-        .join(format!("{proposal_id}.json"));
-    if !proposal_path.is_file() {
-        return Err(ApiError::missing(format!(
-            "proposal not found: {proposal_id}"
-        )));
-    }
-
-    let json = std::fs::read_to_string(&proposal_path).map_err(|err| {
-        ApiError::bad_gateway(format!(
-            "cannot read proposal document {}: {err}",
-            proposal_path.display()
-        ))
-    })?;
-    let proposal: ProposalDocument = serde_json::from_str(&json).map_err(|err| {
-        ApiError::bad_gateway(format!(
-            "invalid proposal document {}: {err}",
-            proposal_path.display()
-        ))
-    })?;
-
-    scryrs_curator::proposals::inventory::validate_proposal_document(&proposal_path, &proposal)
+    // Use the shared inventory loader so validation is identical to the list
+    // endpoint.  load_proposals validates every proposal document in the inbox
+    // (schema version, filename match, deterministic-id match, RFC 3339
+    // timestamps) and detects duplicate proposal IDs.
+    let proposals = scryrs_curator::proposals::inventory::load_proposals(repo_root)
         .map_err(map_inventory_error)?;
+
+    let proposal = proposals
+        .get(proposal_id)
+        .ok_or_else(|| ApiError::missing(format!("proposal not found: {proposal_id}")))?;
 
     let proposed_content_json = match &proposal.proposed_content {
         ProposedContent::Markdown(text) => serde_json::Value::String(text.clone()),
@@ -410,17 +396,17 @@ fn load_proposal_detail(
         ProposedContent::MemoryPatch(v) => v.clone(),
     };
 
-    let review_decision = load_optional_review_decision(repo_root, &proposal)?;
+    let review_decision = load_optional_review_decision(repo_root, proposal)?;
 
     Ok(ProposalDetail {
-        schema_version: proposal.schema_version,
-        id: proposal.id,
-        target_type: proposal.target_type,
-        title: proposal.title,
-        rationale: proposal.rationale,
+        schema_version: proposal.schema_version.clone(),
+        id: proposal.id.clone(),
+        target_type: proposal.target_type.clone(),
+        title: proposal.title.clone(),
+        rationale: proposal.rationale.clone(),
         proposed_content: proposed_content_json,
-        evidence: proposal.evidence,
-        created_at: proposal.created_at,
+        evidence: proposal.evidence.clone(),
+        created_at: proposal.created_at.clone(),
         review_decision,
     })
 }
