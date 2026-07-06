@@ -541,7 +541,9 @@ async fn route_explain_success_returns_route_hint_document() {
     assert_eq!(response.status(), StatusCode::OK);
     let json = response_json(response).await;
     assert_eq!(json["schemaVersion"], "1.0.0");
-    let hints = json["hints"].as_array().unwrap_or_else(|| panic!("hints is array"));
+    let hints = json["hints"]
+        .as_array()
+        .unwrap_or_else(|| panic!("hints is array"));
     // "auth" should match both "auth_handler" (file:auth) and "authentication" (search:auth)
     assert_eq!(hints.len(), 2);
     // file:auth matches exact in target; search:auth matches substring
@@ -560,7 +562,9 @@ async fn route_explain_missing_artifact_returns_404() {
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     let json = response_json(response).await;
-    let error = json["error"].as_str().unwrap_or_else(|| panic!("error field"));
+    let error = json["error"]
+        .as_str()
+        .unwrap_or_else(|| panic!("error field"));
     assert!(error.contains("route artifact not found"));
     assert!(error.contains("scryrs route"));
 }
@@ -570,7 +574,8 @@ async fn route_explain_malformed_json_returns_502() {
     let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
     let scryrs = dir.path().join(".scryrs");
     std::fs::create_dir_all(&scryrs).unwrap_or_else(|err| panic!("create .scryrs: {err}"));
-    std::fs::write(scryrs.join("routes.json"), "not json").unwrap_or_else(|err| panic!("write: {err}"));
+    std::fs::write(scryrs.join("routes.json"), "not json")
+        .unwrap_or_else(|err| panic!("write: {err}"));
 
     let response = router(config(dir.path().to_path_buf()))
         .oneshot(request("/api/routes/explain?query=auth"))
@@ -579,7 +584,9 @@ async fn route_explain_malformed_json_returns_502() {
 
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
     let json = response_json(response).await;
-    let error = json["error"].as_str().unwrap_or_else(|| panic!("error field"));
+    let error = json["error"]
+        .as_str()
+        .unwrap_or_else(|| panic!("error field"));
     assert!(error.contains("malformed"));
 }
 
@@ -600,7 +607,9 @@ async fn route_explain_schema_version_mismatch_returns_502() {
 
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
     let json = response_json(response).await;
-    let error = json["error"].as_str().unwrap_or_else(|| panic!("error field"));
+    let error = json["error"]
+        .as_str()
+        .unwrap_or_else(|| panic!("error field"));
     assert!(error.contains("schema version mismatch"));
     assert!(error.contains("99.0.0"));
     assert!(error.contains("1.0.0"));
@@ -618,7 +627,11 @@ async fn route_explain_empty_query_returns_400() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let json = response_json(response).await;
-    assert!(json["error"].as_str().is_some_and(|msg| msg.contains("non-empty")));
+    assert!(
+        json["error"]
+            .as_str()
+            .is_some_and(|msg| msg.contains("non-empty"))
+    );
 }
 
 #[tokio::test]
@@ -633,7 +646,11 @@ async fn route_explain_missing_query_returns_400() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let json = response_json(response).await;
-    assert!(json["error"].as_str().is_some_and(|msg| msg.contains("non-empty")));
+    assert!(
+        json["error"]
+            .as_str()
+            .is_some_and(|msg| msg.contains("non-empty"))
+    );
 }
 
 #[tokio::test]
@@ -651,9 +668,11 @@ async fn route_explain_live_mode_returns_404() {
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     let json = response_json(response).await;
-    assert!(json["error"]
-        .as_str()
-        .is_some_and(|msg| msg.contains("unavailable in live mode")));
+    assert!(
+        json["error"]
+            .as_str()
+            .is_some_and(|msg| msg.contains("unavailable in live mode"))
+    );
 }
 
 #[tokio::test]
@@ -669,7 +688,9 @@ async fn route_explain_zero_match_returns_empty_hints() {
     assert_eq!(response.status(), StatusCode::OK);
     let json = response_json(response).await;
     assert_eq!(json["schemaVersion"], "1.0.0");
-    let hints = json["hints"].as_array().unwrap_or_else(|| panic!("hints is array"));
+    let hints = json["hints"]
+        .as_array()
+        .unwrap_or_else(|| panic!("hints is array"));
     assert!(hints.is_empty());
 }
 

@@ -65,6 +65,9 @@ describe("routeUnavailableMessage", () => {
 		expect(routeUnavailableMessage("events", "live")).toContain(
 			"not available in live mode",
 		);
+		expect(routeUnavailableMessage("routes", "live")).toContain(
+			"Route explain is not available",
+		);
 	});
 
 	it("keeps live-capable routes available", () => {

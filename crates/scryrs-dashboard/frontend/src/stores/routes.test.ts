@@ -35,6 +35,7 @@ describe("useRouteStore", () => {
 		expect(store.loading).toBe(false);
 		expect(store.hints).toEqual([]);
 		expect(store.error).toBeNull();
+		expect(store.errorStatus).toBe(0);
 
 		const promise = store.search("auth");
 		expect(store.loading).toBe(true);
@@ -44,11 +45,12 @@ describe("useRouteStore", () => {
 		expect(store.loading).toBe(false);
 		expect(store.hints).toEqual([hint]);
 		expect(store.error).toBeNull();
+		expect(store.errorStatus).toBe(0);
 		expect(store.query).toBe("auth");
 		expect(spy).toHaveBeenCalledWith("auth");
 	});
 
-	it("search handles API error", async () => {
+	it("search handles API error and preserves status code (404)", async () => {
 		const apiError = new client.ApiError(404, "route artifact not found");
 		vi.spyOn(client, "getRouteHints").mockRejectedValue(apiError);
 
@@ -57,10 +59,24 @@ describe("useRouteStore", () => {
 
 		expect(store.loading).toBe(false);
 		expect(store.error).toBe("route artifact not found");
+		expect(store.errorStatus).toBe(404);
 		expect(store.hints).toEqual([]);
 	});
 
-	it("search handles generic error", async () => {
+	it("search handles 502 API error and preserves status code", async () => {
+		const apiError = new client.ApiError(502, "route artifact is malformed");
+		vi.spyOn(client, "getRouteHints").mockRejectedValue(apiError);
+
+		const store = useRouteStore();
+		await store.search("auth");
+
+		expect(store.loading).toBe(false);
+		expect(store.error).toBe("route artifact is malformed");
+		expect(store.errorStatus).toBe(502);
+		expect(store.hints).toEqual([]);
+	});
+
+	it("search handles generic error with errorStatus 0", async () => {
 		vi.spyOn(client, "getRouteHints").mockRejectedValue(
 			new Error("network failure"),
 		);
@@ -70,6 +86,7 @@ describe("useRouteStore", () => {
 
 		expect(store.loading).toBe(false);
 		expect(store.error).toBe("network failure");
+		expect(store.errorStatus).toBe(0);
 		expect(store.hints).toEqual([]);
 	});
 

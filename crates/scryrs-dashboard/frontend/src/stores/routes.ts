@@ -1,11 +1,16 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import { getRouteHints, type RouteHintItem } from "@/shared/api/client";
+import {
+	ApiError,
+	getRouteHints,
+	type RouteHintItem,
+} from "@/shared/api/client";
 
 export const useRouteStore = defineStore("routes", () => {
 	const hints = ref<RouteHintItem[]>([]);
 	const loading = ref(false);
 	const error = ref<string | null>(null);
+	const errorStatus = ref<number>(0);
 	const query = ref("");
 
 	async function search(q: string) {
@@ -18,6 +23,7 @@ export const useRouteStore = defineStore("routes", () => {
 
 		loading.value = true;
 		error.value = null;
+		errorStatus.value = 0;
 		try {
 			const doc = await getRouteHints(q);
 			hints.value = doc.hints;
@@ -27,11 +33,13 @@ export const useRouteStore = defineStore("routes", () => {
 					? unknownError.message
 					: "Route explain request failed";
 			error.value = message;
+			errorStatus.value =
+				unknownError instanceof ApiError ? unknownError.status : 0;
 			hints.value = [];
 		} finally {
 			loading.value = false;
 		}
 	}
 
-	return { hints, loading, error, query, search };
+	return { hints, loading, error, errorStatus, query, search };
 });

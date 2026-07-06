@@ -15,8 +15,8 @@ use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{Config, DashboardError, SourceMode};
 use crate::route_explain::route_explain;
+use crate::{Config, DashboardError, SourceMode};
 
 #[derive(RustEmbed)]
 #[folder = "frontend/dist/"]

@@ -35,11 +35,11 @@ function isZeroMatch() {
 }
 
 function is404Error(): boolean {
-  return store.error !== null && store.error.includes("404");
+  return store.errorStatus === 404;
 }
 
 function is502Error(): boolean {
-  return store.error !== null && store.error.includes("502");
+  return store.errorStatus === 502;
 }
 
 function evidenceText(link: EvidenceLink): string {

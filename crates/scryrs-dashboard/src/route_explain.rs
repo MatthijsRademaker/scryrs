@@ -23,7 +23,6 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::Value;
 
-
 /// Query parameter deserialization for `GET /api/routes/explain?query=...`.
 #[derive(Deserialize)]
 pub(crate) struct RouteExplainQuery {
@@ -92,9 +91,7 @@ pub(crate) async fn route_explain(
 ) -> Result<Json<Value>, ApiError> {
     // Reject live mode — route explain requires local .scryrs artifacts.
     if state.config.source_mode.live_config().is_some() {
-        return Err(ApiError::missing(
-            "route explain unavailable in live mode",
-        ));
+        return Err(ApiError::missing("route explain unavailable in live mode"));
     }
 
     // Reject empty or missing query — empty queries match every route (unbounded).
