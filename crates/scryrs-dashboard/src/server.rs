@@ -144,6 +144,64 @@ pub struct ProposalListRow {
     pub state: ProposalStateStr,
 }
 
+// --- Accepted Knowledge DTOs ---
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishSurfaceStatus {
+    pub surface: PublishSurface,
+    pub status: PublishStatusStr,
+    pub reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublishSurface {
+    Rspress,
+    Markdown,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublishStatusStr {
+    Published,
+    #[serde(rename = "not_published")]
+    NotPublished,
+    #[serde(rename = "not_publishable")]
+    NotPublishable,
+    Unknown,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcceptedItemListRow {
+    pub proposal_id: String,
+    pub title: String,
+    pub target_type: scryrs_types::ProposalTargetType,
+    pub reviewer: String,
+    pub decided_at: String,
+    pub evidence_summary: Vec<serde_json::Value>,
+    pub publish_status: Vec<PublishSurfaceStatus>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcceptedItemDetail {
+    pub proposal_id: String,
+    pub title: String,
+    pub target_type: scryrs_types::ProposalTargetType,
+    pub accepted_content: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_proposed_content: Option<serde_json::Value>,
+    pub reviewer: String,
+    pub rationale: String,
+    pub decided_at: String,
+    pub evidence: Vec<scryrs_types::EvidenceLink>,
+    pub publish_status: Vec<PublishSurfaceStatus>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProposalStateStr {
@@ -198,6 +256,8 @@ pub fn router(config: Config) -> Router {
         .route("/api/events", get(events))
         .route("/api/proposals", get(proposals_list))
         .route("/api/proposals/:proposal_id", get(proposal_detail))
+        .route("/api/accepted", get(accepted_list))
+        .route("/api/accepted/:proposal_id", get(accepted_detail))
         .route("/api/routes/explain", get(route_explain))
         .route("/api/*path", get(api_not_found))
         .fallback(spa_fallback)
@@ -324,6 +384,249 @@ async fn events(
     let cursor = parse_cursor(query.cursor)?;
     let page = run_blocking(move || query_events(db_path, limit, cursor, query.session_id)).await?;
     Ok(Json(page))
+}
+
+async fn accepted_list(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<AcceptedItemListRow>>, ApiError> {
+    if state.config.source_mode.live_config().is_some() {
+        return Err(ApiError::missing("/api/accepted unavailable in live mode"));
+    }
+
+    let repo_root = state.config.repo_root.clone();
+    let rows = run_blocking(move || {
+        let accepted_dir = repo_root.join(".scryrs/accepted");
+        if !accepted_dir.exists() || !accepted_dir.is_dir() {
+            return Err(ApiError::missing(
+                "accepted decisions directory not found: .scryrs/accepted",
+            ));
+        }
+        let proposals =
+            scryrs_curator::proposals::inventory::load_proposals(&repo_root)
+                .map_err(|err| {
+                    // MissingDirectory maps to 404; everything else to 502.
+                    map_inventory_error(err)
+                })?;
+        let accepted =
+            scryrs_curator::proposals::inventory::load_review_decisions(
+                &repo_root,
+                scryrs_types::ReviewOutcome::Accepted,
+            )
+            .map_err(map_inventory_error)?;
+
+        // Detect conflicting accepted + rejected artifacts for the same ID.
+        let rejected_dir = repo_root.join(".scryrs/rejected");
+        if rejected_dir.exists() && rejected_dir.is_dir() {
+            for proposal_id in accepted.keys() {
+                let rejected_path = rejected_dir.join(format!("{proposal_id}.json"));
+                if rejected_path.exists() {
+                    let accepted_path = repo_root
+                        .join(".scryrs/accepted")
+                        .join(format!("{proposal_id}.json"));
+                    return Err(ApiError::bad_gateway(format!(
+                        "conflicting terminal state for proposal ID '{}': accepted at {} and rejected at {}",
+                        proposal_id,
+                        accepted_path.display(),
+                        rejected_path.display()
+                    )));
+                }
+            }
+        }
+
+        let mut rows: Vec<AcceptedItemListRow> = Vec::new();
+        for (proposal_id, decision) in &accepted {
+            let proposal = match proposals.get(proposal_id) {
+                Some(p) => p,
+                None => continue,
+            };
+            let evidence_summary: Vec<serde_json::Value> = decision
+                .source_evidence
+                .iter()
+                .map(|link| {
+                    serde_json::json!({
+                        "sourceKind": link.source_kind,
+                        "subject": link.subject,
+                        "rowIds": link.row_ids
+                    })
+                })
+                .collect();
+            let publish_status = compute_publish_status(&repo_root, proposal_id, &decision.target_type);
+            rows.push(AcceptedItemListRow {
+                proposal_id: proposal_id.clone(),
+                title: proposal.title.clone(),
+                target_type: proposal.target_type.clone(),
+                reviewer: decision.reviewer.clone(),
+                decided_at: decision.decided_at.clone(),
+                evidence_summary,
+                publish_status,
+            });
+        }
+        rows.sort_by(|a, b| a.proposal_id.cmp(&b.proposal_id));
+        Ok(rows)
+    })
+    .await?;
+    Ok(Json(rows))
+}
+
+async fn accepted_detail(
+    State(state): State<Arc<AppState>>,
+    AxumPath(proposal_id): AxumPath<String>,
+) -> Result<Json<AcceptedItemDetail>, ApiError> {
+    if state.config.source_mode.live_config().is_some() {
+        return Err(ApiError::missing(
+            "/api/accepted/:proposal_id unavailable in live mode",
+        ));
+    }
+
+    let repo_root = state.config.repo_root.clone();
+    let detail = run_blocking(move || {
+        let proposals = scryrs_curator::proposals::inventory::load_proposals(&repo_root)
+            .map_err(map_inventory_error)?;
+        let accepted = scryrs_curator::proposals::inventory::load_review_decisions(
+            &repo_root,
+            scryrs_types::ReviewOutcome::Accepted,
+        )
+        .map_err(map_inventory_error)?;
+
+        let decision = accepted.get(&proposal_id).ok_or_else(|| {
+            ApiError::missing(format!(
+                "proposal not found among accepted decisions: {proposal_id}"
+            ))
+        })?;
+        let proposal = match proposals.get(&proposal_id) {
+            Some(p) => p,
+            None => {
+                return Err(ApiError::bad_gateway(format!(
+                    "orphan accepted artifact: no matching proposal for {proposal_id}"
+                )));
+            }
+        };
+
+        let accepted_content = decision
+            .accepted_content
+            .as_ref()
+            .and_then(|content| serde_json::to_value(content).ok())
+            .unwrap_or(serde_json::Value::Null);
+
+        let proposed_content = serde_json::to_value(&proposal.proposed_content).ok();
+
+        let original_proposed_content = proposed_content.as_ref().and_then(|pc| {
+            if pc == &accepted_content {
+                None
+            } else {
+                Some(pc.clone())
+            }
+        });
+
+        let publish_status =
+            compute_publish_status(&repo_root, &proposal_id, &decision.target_type);
+
+        Ok(AcceptedItemDetail {
+            proposal_id: proposal_id.clone(),
+            title: proposal.title.clone(),
+            target_type: proposal.target_type.clone(),
+            accepted_content,
+            original_proposed_content,
+            reviewer: decision.reviewer.clone(),
+            rationale: decision.rationale.clone(),
+            decided_at: decision.decided_at.clone(),
+            evidence: decision.source_evidence.clone(),
+            publish_status,
+        })
+    })
+    .await?;
+    Ok(Json(detail))
+}
+
+fn compute_publish_status(
+    repo_root: &std::path::Path,
+    proposal_id: &str,
+    target_type: &Option<scryrs_types::ProposalTargetType>,
+) -> Vec<PublishSurfaceStatus> {
+    let mut statuses = Vec::new();
+
+    // Rspress status
+    let rspress_status = compute_rspress_status(repo_root, proposal_id, target_type);
+    statuses.push(rspress_status);
+
+    // Markdown status — always unknown
+    statuses.push(PublishSurfaceStatus {
+        surface: PublishSurface::Markdown,
+        status: PublishStatusStr::Unknown,
+        reason: "output root not persisted — publish path is operator-chosen at publish time"
+            .to_string(),
+        path: None,
+    });
+
+    statuses
+}
+
+fn compute_rspress_status(
+    repo_root: &std::path::Path,
+    proposal_id: &str,
+    target_type: &Option<scryrs_types::ProposalTargetType>,
+) -> PublishSurfaceStatus {
+    let rspress_slug = match target_type {
+        Some(tt) => target_type_slug(tt),
+        None => {
+            return PublishSurfaceStatus {
+                surface: PublishSurface::Rspress,
+                status: PublishStatusStr::NotPublishable,
+                reason: "target type unknown — accepted artifact missing targetType".to_string(),
+                path: None,
+            };
+        }
+    };
+
+    match target_type {
+        Some(
+            scryrs_types::ProposalTargetType::MemoryPatch
+            | scryrs_types::ProposalTargetType::SemanticGraphGrouping,
+        ) => PublishSurfaceStatus {
+            surface: PublishSurface::Rspress,
+            status: PublishStatusStr::NotPublishable,
+            reason: format!("target type '{rspress_slug}' is not publishable to Rspress"),
+            path: None,
+        },
+        _ => {
+            let expected_path = repo_root
+                .join(".devagent/docs/docs/accepted-knowledge")
+                .join(rspress_slug)
+                .join(format!("{proposal_id}.md"));
+            if expected_path.exists() {
+                PublishSurfaceStatus {
+                    surface: PublishSurface::Rspress,
+                    status: PublishStatusStr::Published,
+                    reason: String::new(),
+                    path: Some(
+                        expected_path
+                            .strip_prefix(repo_root)
+                            .unwrap_or(&expected_path)
+                            .to_string_lossy()
+                            .into_owned(),
+                    ),
+                }
+            } else {
+                PublishSurfaceStatus {
+                    surface: PublishSurface::Rspress,
+                    status: PublishStatusStr::NotPublished,
+                    reason: String::new(),
+                    path: None,
+                }
+            }
+        }
+    }
+}
+
+fn target_type_slug(target_type: &scryrs_types::ProposalTargetType) -> &'static str {
+    match target_type {
+        scryrs_types::ProposalTargetType::DocsNote => "docs_note",
+        scryrs_types::ProposalTargetType::Adr => "adr",
+        scryrs_types::ProposalTargetType::Skill => "skill",
+        scryrs_types::ProposalTargetType::DebuggingPlaybook => "debugging_playbook",
+        scryrs_types::ProposalTargetType::MemoryPatch => "memory_patch",
+        scryrs_types::ProposalTargetType::SemanticGraphGrouping => "semantic_graph_grouping",
+    }
 }
 
 async fn proposals_list(

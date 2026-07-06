@@ -1226,3 +1226,531 @@ async fn proposal_detail_returns_502_for_conflicting_terminal_state() {
             .is_some_and(|message| message.contains("conflicting"))
     );
 }
+
+// --- Accepted Knowledge API tests ---
+
+fn write_accepted_decision(
+    root: &std::path::Path,
+    proposal_id: &str,
+    reviewer: &str,
+    decided_at: &str,
+    rationale: &str,
+    target_type: &str,
+    accepted_content: Option<&serde_json::Value>,
+) {
+    let dir = root.join(".scryrs/accepted");
+    std::fs::create_dir_all(&dir).unwrap_or_else(|err| panic!("create accepted dir: {err}"));
+    let json = serde_json::json!({
+        "schemaVersion": "1.0.0",
+        "proposalId": proposal_id,
+        "reviewer": reviewer,
+        "decidedAt": decided_at,
+        "rationale": rationale,
+        "sourceEvidence": [{
+            "sourceKind": "hotspot_subject",
+            "subject": "test-subject",
+            "rowIds": [1]
+        }],
+        "outcome": "accepted",
+        "targetType": target_type,
+        "acceptedContent": accepted_content
+    });
+    std::fs::write(dir.join(format!("{proposal_id}.json")), json.to_string())
+        .unwrap_or_else(|err| panic!("write accepted: {err}"));
+}
+
+#[tokio::test]
+async fn accepted_list_returns_200_with_items() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+
+    let id = make_valid_proposal_id("accepted list test");
+    write_proposal(
+        dir.path(),
+        &id,
+        "Accepted Test",
+        "docs_note",
+        "accepted list test",
+        "2026-07-01T00:00:00Z",
+        vec![1],
+    );
+    write_accepted_decision(
+        dir.path(),
+        &id,
+        "alice",
+        "2026-07-02T00:00:00Z",
+        "ok",
+        "docs_note",
+        Some(&serde_json::Value::String("reviewed content".into())),
+    );
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(request("/api/accepted"))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_json(response).await;
+    let rows = json
+        .as_array()
+        .unwrap_or_else(|| panic!("expected array, got: {json}"));
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["proposalId"], id);
+    assert_eq!(rows[0]["title"], "Accepted Test");
+    assert_eq!(rows[0]["targetType"], "docs_note");
+    assert_eq!(rows[0]["reviewer"], "alice");
+    assert_eq!(rows[0]["decidedAt"], "2026-07-02T00:00:00Z");
+    let ps = &rows[0]["publishStatus"];
+    assert!(ps.is_array());
+}
+
+#[tokio::test]
+async fn accepted_list_returns_empty_when_accepted_dir_has_no_files() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+    std::fs::create_dir_all(dir.path().join(".scryrs/proposals"))
+        .unwrap_or_else(|err| panic!("create proposals dir: {err}"));
+    std::fs::create_dir_all(dir.path().join(".scryrs/accepted"))
+        .unwrap_or_else(|err| panic!("create accepted dir: {err}"));
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(request("/api/accepted"))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_json(response).await;
+    let rows = json
+        .as_array()
+        .unwrap_or_else(|| panic!("expected array, got: {json}"));
+    assert!(rows.is_empty());
+}
+
+#[tokio::test]
+async fn accepted_list_returns_404_when_accepted_dir_missing() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+    std::fs::create_dir_all(dir.path().join(".scryrs/proposals"))
+        .unwrap_or_else(|err| panic!("create proposals dir: {err}"));
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(request("/api/accepted"))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(
+        response_json(response).await["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("accepted decisions directory not found"))
+    );
+}
+
+#[tokio::test]
+async fn accepted_list_returns_502_for_malformed_json() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+
+    let id = make_valid_proposal_id("malformed test");
+    write_proposal(
+        dir.path(),
+        &id,
+        "Malformed Test",
+        "docs_note",
+        "malformed test",
+        "2026-07-01T00:00:00Z",
+        vec![1],
+    );
+    let accepted_dir = dir.path().join(".scryrs/accepted");
+    std::fs::create_dir_all(&accepted_dir)
+        .unwrap_or_else(|err| panic!("create accepted dir: {err}"));
+    std::fs::write(accepted_dir.join("bad.json"), "not json")
+        .unwrap_or_else(|err| panic!("write bad accepted: {err}"));
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(request("/api/accepted"))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert!(
+        response_json(response).await["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("invalid JSON"))
+    );
+}
+
+#[tokio::test]
+async fn accepted_list_returns_502_for_orphan() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+
+    let accepted_dir = dir.path().join(".scryrs/accepted");
+    std::fs::create_dir_all(&accepted_dir)
+        .unwrap_or_else(|err| panic!("create accepted dir: {err}"));
+    write_accepted_decision(
+        dir.path(),
+        "orphan-id",
+        "alice",
+        "2026-07-02T00:00:00Z",
+        "ok",
+        "docs_note",
+        Some(&serde_json::Value::String("content".into())),
+    );
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(request("/api/accepted"))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert!(
+        response_json(response).await["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("orphan"))
+    );
+}
+
+#[tokio::test]
+async fn accepted_list_returns_502_for_conflicting_accepted_rejected() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+
+    let id = make_valid_proposal_id("conflicting accepted");
+    write_proposal(
+        dir.path(),
+        &id,
+        "Conflicting",
+        "docs_note",
+        "conflicting accepted",
+        "2026-07-01T00:00:00Z",
+        vec![1],
+    );
+    write_accepted_decision(
+        dir.path(),
+        &id,
+        "alice",
+        "2026-07-02T00:00:00Z",
+        "ok",
+        "docs_note",
+        Some(&serde_json::Value::String("content".into())),
+    );
+    write_review(
+        dir.path(),
+        "rejected",
+        &id,
+        "bob",
+        "2026-07-02T00:00:00Z",
+        "no",
+    );
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(request("/api/accepted"))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert!(
+        response_json(response).await["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("conflicting"))
+    );
+}
+
+#[tokio::test]
+async fn accepted_detail_returns_accepted_content_as_primary() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+
+    let id = make_valid_proposal_id("original content");
+    write_proposal(
+        dir.path(),
+        &id,
+        "Detail Test",
+        "docs_note",
+        "original content",
+        "2026-07-01T00:00:00Z",
+        vec![1],
+    );
+    write_accepted_decision(
+        dir.path(),
+        &id,
+        "alice",
+        "2026-07-02T00:00:00Z",
+        "reviewed ok",
+        "docs_note",
+        Some(&serde_json::Value::String("reviewed content".into())),
+    );
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(request(&format!("/api/accepted/{id}")))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_json(response).await;
+    assert_eq!(json["proposalId"], id);
+    assert_eq!(json["acceptedContent"], "reviewed content");
+    assert_eq!(json["originalProposedContent"], "original content");
+    assert_eq!(json["reviewer"], "alice");
+    assert_eq!(json["rationale"], "reviewed ok");
+    assert_eq!(json["decidedAt"], "2026-07-02T00:00:00Z");
+}
+
+#[tokio::test]
+async fn accepted_detail_returns_404_when_not_accepted() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+
+    let id = make_valid_proposal_id("not accepted");
+    write_proposal(
+        dir.path(),
+        &id,
+        "Not Accepted",
+        "docs_note",
+        "not accepted",
+        "2026-07-01T00:00:00Z",
+        vec![1],
+    );
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(request(&format!("/api/accepted/{id}")))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(
+        response_json(response).await["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("not found among accepted"))
+    );
+}
+
+#[tokio::test]
+async fn accepted_list_returns_404_in_live_mode() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+    let config = live_config(dir.path().to_path_buf(), "http://localhost:8081", "repo-a");
+
+    let response = router(config)
+        .oneshot(request("/api/accepted"))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(
+        response_json(response).await["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("unavailable in live mode"))
+    );
+}
+
+#[tokio::test]
+async fn accepted_detail_returns_404_in_live_mode() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+    let config = live_config(dir.path().to_path_buf(), "http://localhost:8081", "repo-a");
+
+    let response = router(config)
+        .oneshot(request("/api/accepted/any-id"))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(
+        response_json(response).await["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("unavailable in live mode"))
+    );
+}
+
+#[tokio::test]
+async fn accepted_publish_status_rspress_published_when_file_exists() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+
+    let id = make_valid_proposal_id("rspress published");
+    write_proposal(
+        dir.path(),
+        &id,
+        "Rspress Published",
+        "docs_note",
+        "rspress published",
+        "2026-07-01T00:00:00Z",
+        vec![1],
+    );
+    write_accepted_decision(
+        dir.path(),
+        &id,
+        "alice",
+        "2026-07-02T00:00:00Z",
+        "ok",
+        "docs_note",
+        Some(&serde_json::Value::String("content".into())),
+    );
+
+    let publish_dir = dir
+        .path()
+        .join(".devagent/docs/docs/accepted-knowledge/docs_note");
+    std::fs::create_dir_all(&publish_dir).unwrap_or_else(|err| panic!("create publish dir: {err}"));
+    std::fs::write(publish_dir.join(format!("{id}.md")), "# Published")
+        .unwrap_or_else(|err| panic!("write published: {err}"));
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(request("/api/accepted"))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_json(response).await;
+    let ps = &json[0]["publishStatus"];
+    let rspress = ps
+        .as_array()
+        .unwrap_or_else(|| panic!("expected array"))
+        .iter()
+        .find(|s| s["surface"] == "rspress")
+        .unwrap_or_else(|| panic!("rspress status missing"));
+    assert_eq!(rspress["status"], "published");
+    assert!(rspress["path"].as_str().is_some_and(|p| p.contains(&id)));
+}
+
+#[tokio::test]
+async fn accepted_publish_status_rspress_not_published_when_file_missing() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+
+    let id = make_valid_proposal_id("rspress not published");
+    write_proposal(
+        dir.path(),
+        &id,
+        "Rspress Not Published",
+        "docs_note",
+        "rspress not published",
+        "2026-07-01T00:00:00Z",
+        vec![1],
+    );
+    write_accepted_decision(
+        dir.path(),
+        &id,
+        "alice",
+        "2026-07-02T00:00:00Z",
+        "ok",
+        "docs_note",
+        Some(&serde_json::Value::String("content".into())),
+    );
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(request("/api/accepted"))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_json(response).await;
+    let ps = &json[0]["publishStatus"];
+    let rspress = ps
+        .as_array()
+        .unwrap_or_else(|| panic!("expected array"))
+        .iter()
+        .find(|s| s["surface"] == "rspress")
+        .unwrap_or_else(|| panic!("rspress status missing"));
+    assert_eq!(rspress["status"], "not_published");
+}
+
+#[tokio::test]
+async fn accepted_publish_status_not_publishable_for_memory_patch() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+
+    let id = make_valid_memory_patch_proposal_id(serde_json::json!({"key": "value"}));
+    let proposals_dir = dir.path().join(".scryrs/proposals");
+    std::fs::create_dir_all(&proposals_dir)
+        .unwrap_or_else(|err| panic!("create proposals dir: {err}"));
+
+    let proposal_json = serde_json::json!({
+        "schemaVersion": "1.0.0",
+        "id": id,
+        "targetType": "memory_patch",
+        "title": "Memory Patch",
+        "rationale": "test",
+        "proposedContent": {"key": "value"},
+        "evidence": [{
+            "sourceKind": "hotspot_subject",
+            "subject": "test-subject",
+            "rowIds": [1]
+        }],
+        "createdAt": "2026-07-01T00:00:00Z"
+    });
+    std::fs::write(
+        proposals_dir.join(format!("{id}.json")),
+        proposal_json.to_string(),
+    )
+    .unwrap_or_else(|err| panic!("write proposal: {err}"));
+
+    write_accepted_decision(
+        dir.path(),
+        &id,
+        "alice",
+        "2026-07-02T00:00:00Z",
+        "ok",
+        "memory_patch",
+        Some(&serde_json::json!({"key": "value"})),
+    );
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(request("/api/accepted"))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_json(response).await;
+    let ps = &json[0]["publishStatus"];
+    let rspress = ps
+        .as_array()
+        .unwrap_or_else(|| panic!("expected array"))
+        .iter()
+        .find(|s| s["surface"] == "rspress")
+        .unwrap_or_else(|| panic!("rspress status missing"));
+    assert_eq!(rspress["status"], "not_publishable");
+}
+
+#[tokio::test]
+async fn accepted_publish_status_markdown_is_unknown() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+
+    let id = make_valid_proposal_id("markdown unknown");
+    write_proposal(
+        dir.path(),
+        &id,
+        "Markdown Unknown",
+        "docs_note",
+        "markdown unknown",
+        "2026-07-01T00:00:00Z",
+        vec![1],
+    );
+    write_accepted_decision(
+        dir.path(),
+        &id,
+        "alice",
+        "2026-07-02T00:00:00Z",
+        "ok",
+        "docs_note",
+        Some(&serde_json::Value::String("content".into())),
+    );
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(request("/api/accepted"))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_json(response).await;
+    let ps = &json[0]["publishStatus"];
+    let markdown = ps
+        .as_array()
+        .unwrap_or_else(|| panic!("expected array"))
+        .iter()
+        .find(|s| s["surface"] == "markdown")
+        .unwrap_or_else(|| panic!("markdown status missing"));
+    assert_eq!(markdown["status"], "unknown");
+    assert!(
+        markdown["reason"]
+            .as_str()
+            .is_some_and(|r| r.contains("output root not persisted"))
+    );
+}
+
+fn make_valid_memory_patch_proposal_id(content: serde_json::Value) -> String {
+    use scryrs_types::{ProposalDocument, ProposalTargetType, ProposedContent};
+    ProposalDocument::compute_id(
+        &ProposalTargetType::MemoryPatch,
+        &ProposedContent::MemoryPatch(content),
+    )
+    .unwrap_or_else(|err| panic!("compute proposal id: {err}"))
+}

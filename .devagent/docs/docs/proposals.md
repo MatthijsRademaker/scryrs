@@ -99,7 +99,28 @@ Low-level subject identities remain authoritative:
 
 A semantic grouping proposal such as `domain_term:auth` is review artifact only while it remains in `.scryrs/proposals/`. It cites exact source node IDs and evidence, but it does not rewrite graph truth by existing. That proposal can become graph input only after review records an accepted `ProposalReviewDecision` under `.scryrs/accepted/`.
 
-## Review-First Boundary
+## Accepted Knowledge Dashboard
+
+The local dashboard provides a dedicated Accepted Knowledge surface at `/accepted` (list) and `/accepted/:proposalId` (detail), showing only accepted review decisions from `.scryrs/accepted/*.json`. This surface is distinct from the Proposals inbox — it does not show pending or rejected proposals.
+
+### Accepted-versus-Published Boundary
+
+Acceptance is durable review state (`.scryrs/accepted/*.json`). Publishing is a separate, explicit operator action (`scryrs publish markdown` or `scryrs publish rspress`). The Accepted Knowledge dashboard distinguishes these phases via per-surface publish-status badges:
+
+| Status | Meaning |
+| --- | --- |
+| `published` (Rspress) | The accepted decision has been materialized at `.devagent/docs/docs/accepted-knowledge/<target-type>/<proposal-id>.md` |
+| `not_published` (Rspress) | The accepted decision is publishable via Rspress but the expected file does not exist |
+| `not_publishable` | Target types `memory_patch` and `semantic_graph_grouping` have no Rspress publish surface |
+| `unknown` (Markdown) | Generic Markdown publish status is always `unknown` because `scryrs publish markdown --output <DIR>` does not persist the operator-chosen output root |
+
+### Rspress Detection Heuristic
+
+Rspress publish status is determined by checking for the expected published file at `.devagent/docs/docs/accepted-knowledge/<target-type>/<proposal-id>.md` at query time. This reflects only the standard `.devagent/docs/docs/` root — non-standard `--docs-root` paths are not detected. No publish metadata artifact is created or persisted.
+
+### Markdown Discoverability Limit
+
+`scryrs publish markdown --output <DIR>` writes Markdown to an operator-chosen output root that is never persisted. The dashboard reports Markdown publish status as `unknown` with reason text indicating that the output root is not persisted.
 
 Proposal generation is fenced off from authoritative outputs.
 
@@ -258,6 +279,7 @@ Model output is proposal input only.
 ## Current Limitations
 
 - Proposal generation is deterministic and local-file based. A read-only dashboard review flow is available at `/proposals` and `/proposals/:proposalId` in local dashboard mode.
+- An Accepted Knowledge dashboard surface is available at `/accepted` and `/accepted/:proposalId` in local mode, showing accepted decisions from `.scryrs/accepted/*.json` with per-surface publish-status visibility.
 - Proposal inbox artifacts are still not consumed automatically by graph build, route generation, or adapters.
 - Accepted review decisions can affect graph build only through `.scryrs/accepted/`, and only accepted `semantic_graph_grouping` targets project into graph structure today.
 - Route generation still consumes `.scryrs/graph.json` only; it never reads proposal or review-artifact directories directly.

@@ -217,3 +217,51 @@ export function getProposal(proposalId: string): Promise<ProposalDetail> {
 		`/api/proposals/${encodeURIComponent(proposalId)}`,
 	);
 }
+
+// --- Accepted Knowledge DTOs ---
+
+export interface PublishSurfaceStatus {
+	surface: "rspress" | "markdown";
+	status: "published" | "not_published" | "not_publishable" | "unknown";
+	reason: string;
+	path?: string | null;
+}
+
+export interface AcceptedItemListRow {
+	proposalId: string;
+	title: string;
+	targetType: string;
+	reviewer: string;
+	decidedAt: string;
+	evidenceSummary: Array<{
+		sourceKind: string;
+		subject: string;
+		rowIds: number[];
+	}>;
+	publishStatus: PublishSurfaceStatus[];
+}
+
+export interface AcceptedItemDetail {
+	proposalId: string;
+	title: string;
+	targetType: string;
+	acceptedContent: unknown;
+	originalProposedContent?: unknown | null;
+	reviewer: string;
+	rationale: string;
+	decidedAt: string;
+	evidence: EvidenceLink[];
+	publishStatus: PublishSurfaceStatus[];
+}
+
+export function getAcceptedList(): Promise<AcceptedItemListRow[]> {
+	return fetchJson<AcceptedItemListRow[]>("/api/accepted");
+}
+
+export function getAcceptedDetail(
+	proposalId: string,
+): Promise<AcceptedItemDetail> {
+	return fetchJson<AcceptedItemDetail>(
+		`/api/accepted/${encodeURIComponent(proposalId)}`,
+	);
+}

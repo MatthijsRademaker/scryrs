@@ -4,7 +4,7 @@ import { formatSubject, type SubjectDisplay } from "@/shared/lib/subject";
 export interface DashboardNavItem {
 	to: string;
 	label: string;
-	icon: "flame" | "activity" | "tree" | "inbox" | "info";
+	icon: "flame" | "activity" | "tree" | "inbox" | "info" | "check";
 	match: string[];
 }
 
@@ -26,6 +26,12 @@ const LOCAL_NAV: DashboardNavItem[] = [
 		label: "Proposals",
 		icon: "inbox",
 		match: ["proposals", "proposal-detail"],
+	},
+	{
+		to: "/accepted",
+		label: "Accepted",
+		icon: "check",
+		match: ["accepted", "accepted-detail"],
 	},
 	{ to: "/events", label: "Events", icon: "activity", match: ["events"] },
 	{ to: "/routes", label: "Routes", icon: "activity", match: ["routes"] },
@@ -71,6 +77,9 @@ export function routeUnavailableMessage(
 	if (mode === "live") {
 		if (routeName === "proposals" || routeName === "proposal-detail") {
 			return "Proposals are not available in live mode. Review proposal artifacts through the file-based CLI workflow.";
+		}
+		if (routeName === "accepted" || routeName === "accepted-detail") {
+			return "Accepted knowledge is not available in live mode. Review accepted decisions through the file-based CLI workflow.";
 		}
 		if (routeName === "sessions" || routeName === "session-detail") {
 			return "Sessions are not available in live mode. This dashboard only proxies live hotspot rankings and signal streaming.";
