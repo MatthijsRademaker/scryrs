@@ -4,6 +4,11 @@
 //! and graph evidence. Applies concrete heuristics for six target types:
 //! `docs_note`, `skill`, `memory_patch`, `adr`,
 //! `semantic_graph_grouping`, and `debugging_playbook`.
+//!
+//! The `proposals::inventory` module loads and validates existing proposal
+//! artifacts from disk for read-only consumption by the CLI and dashboard.
+
+pub mod proposals;
 
 use std::collections::HashMap;
 

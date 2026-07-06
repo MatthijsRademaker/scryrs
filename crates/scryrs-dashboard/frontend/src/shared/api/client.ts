@@ -133,3 +133,57 @@ export function getEvents(
 export function getSignalStreamUrl(after: number): string {
 	return `/api/signals?after=${encodeURIComponent(String(after))}`;
 }
+
+// --- Proposal DTOs ---
+
+export interface EvidenceLink {
+	sourceKind: string;
+	subject: string;
+	rowIds: number[];
+	docRef?: string | null;
+	description?: string | null;
+	score?: number | null;
+	metadata?: Record<string, unknown> | null;
+}
+
+export interface ProposalListRow {
+	proposalId: string;
+	title: string;
+	targetType: string;
+	createdAt: string;
+	state: "pending" | "accepted" | "rejected";
+}
+
+export interface ProposedContent {
+	type: "markdown" | "semantic_graph_grouping" | "memory_patch";
+	value: unknown;
+}
+
+export interface ProposalReviewDecisionMeta {
+	reviewer: string;
+	outcome: string;
+	decidedAt: string;
+	rationale: string;
+}
+
+export interface ProposalDetail {
+	schemaVersion: string;
+	id: string;
+	targetType: string;
+	title: string;
+	rationale: string;
+	proposedContent: unknown;
+	evidence: EvidenceLink[];
+	createdAt: string;
+	reviewDecision?: ProposalReviewDecisionMeta | null;
+}
+
+export function getProposals(): Promise<ProposalListRow[]> {
+	return fetchJson<ProposalListRow[]>("/api/proposals");
+}
+
+export function getProposal(proposalId: string): Promise<ProposalDetail> {
+	return fetchJson<ProposalDetail>(
+		`/api/proposals/${encodeURIComponent(proposalId)}`,
+	);
+}
