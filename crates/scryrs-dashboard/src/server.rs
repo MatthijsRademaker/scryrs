@@ -173,6 +173,10 @@ pub struct ReviewDecisionMeta {
     pub outcome: String,
     pub decided_at: String,
     pub rationale: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accepted_content: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_type: Option<scryrs_types::ProposalTargetType>,
 }
 
 // --- Router ---
@@ -462,14 +466,23 @@ fn load_optional_review_decision(
     )
     .map_err(map_inventory_error)?;
 
+    let outcome_str = serde_json::to_string(&decision.outcome)
+        .unwrap_or_else(|_| String::from("unknown"))
+        .trim_matches('"')
+        .to_string();
+
+    let accepted_content = decision
+        .accepted_content
+        .as_ref()
+        .and_then(|content| serde_json::to_value(content).ok());
+
     Ok(Some(ReviewDecisionMeta {
         reviewer: decision.reviewer,
-        outcome: serde_json::to_string(&decision.outcome)
-            .unwrap_or_else(|_| String::from("unknown"))
-            .trim_matches('"')
-            .to_string(),
+        outcome: outcome_str,
         decided_at: decision.decided_at,
         rationale: decision.rationale,
+        accepted_content,
+        target_type: decision.target_type,
     }))
 }
 

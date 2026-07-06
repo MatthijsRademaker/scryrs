@@ -812,6 +812,8 @@ async fn proposal_detail_includes_review_decision_meta() {
     assert_eq!(rd["reviewer"], "alice");
     assert_eq!(rd["decidedAt"], "2026-07-02T12:00:00Z");
     assert_eq!(rd["rationale"], "looks good");
+    assert_eq!(rd["acceptedContent"], "reviewed content");
+    assert_eq!(rd["targetType"], "docs_note");
 }
 
 #[tokio::test]
