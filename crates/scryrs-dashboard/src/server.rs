@@ -457,6 +457,11 @@ fn load_optional_review_decision(
     )
     .map_err(map_inventory_error)?;
 
+    scryrs_curator::proposals::inventory::validate_review_decision_matches_proposal(
+        &decision, proposal,
+    )
+    .map_err(map_inventory_error)?;
+
     Ok(Some(ReviewDecisionMeta {
         reviewer: decision.reviewer,
         outcome: serde_json::to_string(&decision.outcome)

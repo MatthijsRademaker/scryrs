@@ -904,3 +904,102 @@ async fn proposal_detail_rejected_shows_review_decision() {
     assert_eq!(rd["outcome"], "rejected");
     assert_eq!(rd["reviewer"], "bob");
 }
+
+#[tokio::test]
+async fn proposal_detail_returns_502_when_review_evidence_does_not_match_proposal() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+
+    let id = make_valid_proposal_id("mismatched evidence content");
+    write_proposal(
+        dir.path(),
+        &id,
+        "Mismatched Evidence",
+        "docs_note",
+        "mismatched evidence content",
+        "2026-07-01T00:00:00Z",
+        vec![1],
+    );
+
+    // Write an accepted review with different sourceEvidence than the proposal.
+    let accepted_dir = dir.path().join(".scryrs/accepted");
+    std::fs::create_dir_all(&accepted_dir)
+        .unwrap_or_else(|err| panic!("create accepted dir: {err}"));
+    let review_json = serde_json::json!({
+        "schemaVersion": "1.0.0",
+        "proposalId": id,
+        "reviewer": "bob",
+        "decidedAt": "2026-07-02T00:00:00Z",
+        "rationale": "ok",
+        "sourceEvidence": [{
+            "sourceKind": "hotspot_subject",
+            "subject": "different-subject",
+            "rowIds": [99]
+        }],
+        "outcome": "accepted",
+        "targetType": "docs_note",
+        "acceptedContent": "reviewed content"
+    });
+    std::fs::write(
+        accepted_dir.join(format!("{id}.json")),
+        review_json.to_string(),
+    )
+    .unwrap_or_else(|err| panic!("write review: {err}"));
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(request(&format!("/api/proposals/{id}")))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    // Before the fix: this returned 200 with the mismatched review.
+    // After the fix: validate_review_decision_matches_proposal rejects it.
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert!(
+        response_json(response).await["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("sourceEvidence"))
+    );
+}
+
+#[tokio::test]
+async fn proposal_detail_returns_502_for_conflicting_terminal_state() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+
+    let id = make_valid_proposal_id("conflicting detail content");
+    write_proposal(
+        dir.path(),
+        &id,
+        "Conflicting Detail",
+        "docs_note",
+        "conflicting detail content",
+        "2026-07-01T00:00:00Z",
+        vec![1],
+    );
+    write_review(
+        dir.path(),
+        "accepted",
+        &id,
+        "r1",
+        "2026-07-02T00:00:00Z",
+        "accept",
+    );
+    write_review(
+        dir.path(),
+        "rejected",
+        &id,
+        "r1",
+        "2026-07-02T00:00:00Z",
+        "reject",
+    );
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(request(&format!("/api/proposals/{id}")))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert!(
+        response_json(response).await["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("conflicting"))
+    );
+}

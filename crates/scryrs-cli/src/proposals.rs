@@ -520,11 +520,13 @@ fn write_review_decision(
     override_content: Option<ProposedContent>,
 ) -> Result<(), CommandError> {
     let command_name = format!("scryrs proposals {}", review_command_name(&outcome));
-    validate_rfc3339(metadata.decided_at).map_err(|message| {
-        CommandError::input(format!(
-            "{command_name}: invalid --decided-at value: {message}"
-        ))
-    })?;
+    scryrs_curator::proposals::inventory::validate_rfc3339(metadata.decided_at).map_err(
+        |message| {
+            CommandError::input(format!(
+                "{command_name}: invalid --decided-at value: {message}"
+            ))
+        },
+    )?;
 
     let repo_root = resolve_repo_root(path, &command_name)?;
     let proposal_path = repo_root.join(format!(".scryrs/proposals/{proposal_id}.json"));
@@ -671,131 +673,6 @@ fn review_command_name(outcome: &ReviewOutcome) -> &'static str {
         ReviewOutcome::Accepted => "accept",
         ReviewOutcome::Rejected => "reject",
     }
-}
-
-// ---------------------------------------------------------------------------
-// RFC 3339 validation (kept in CLI for `--decided-at` argument validation)
-// ---------------------------------------------------------------------------
-
-fn validate_rfc3339(value: &str) -> Result<(), String> {
-    let (date, time_and_offset) = value
-        .split_once('T')
-        .ok_or_else(|| "must be RFC3339 (missing 'T')".to_string())?;
-    validate_date(date)?;
-    validate_time_and_offset(time_and_offset)
-}
-
-fn validate_date(date: &str) -> Result<(), String> {
-    let mut parts = date.split('-');
-    let year = parse_fixed_width_u32(parts.next(), 4, "year")?;
-    let month = parse_fixed_width_u32(parts.next(), 2, "month")?;
-    let day = parse_fixed_width_u32(parts.next(), 2, "day")?;
-    if parts.next().is_some() {
-        return Err("must be RFC3339 date (too many date fields)".into());
-    }
-    if !(1..=12).contains(&month) {
-        return Err("must be RFC3339 date (month out of range)".into());
-    }
-    let max_day = days_in_month(year, month);
-    if day == 0 || day > max_day {
-        return Err("must be RFC3339 date (day out of range)".into());
-    }
-    Ok(())
-}
-
-fn validate_time_and_offset(value: &str) -> Result<(), String> {
-    if let Some(prefix) = value.strip_suffix('Z') {
-        validate_time(prefix)?;
-        return Ok(());
-    }
-
-    let offset_index = value
-        .rfind(['+', '-'])
-        .ok_or_else(|| "must be RFC3339 timestamp with Z or ±HH:MM timezone offset".to_string())?;
-    let (time, offset) = value.split_at(offset_index);
-    validate_time(time)?;
-    validate_offset(offset)
-}
-
-fn validate_time(time: &str) -> Result<(), String> {
-    let (clock, fraction) = match time.split_once('.') {
-        Some((clock, fraction)) => (clock, Some(fraction)),
-        None => (time, None),
-    };
-    let mut parts = clock.split(':');
-    let hour = parse_fixed_width_u32(parts.next(), 2, "hour")?;
-    let minute = parse_fixed_width_u32(parts.next(), 2, "minute")?;
-    let second = parse_fixed_width_u32(parts.next(), 2, "second")?;
-    if parts.next().is_some() {
-        return Err("must be RFC3339 time (too many time fields)".into());
-    }
-    if hour > 23 {
-        return Err("must be RFC3339 time (hour out of range)".into());
-    }
-    if minute > 59 {
-        return Err("must be RFC3339 time (minute out of range)".into());
-    }
-    if second > 60 {
-        return Err("must be RFC3339 time (second out of range)".into());
-    }
-    if let Some(fraction) = fraction {
-        if fraction.is_empty() || !fraction.chars().all(|ch| ch.is_ascii_digit()) {
-            return Err("must be RFC3339 time (invalid fractional seconds)".into());
-        }
-    }
-    Ok(())
-}
-
-fn validate_offset(offset: &str) -> Result<(), String> {
-    if offset.len() != 6
-        || !matches!(offset.as_bytes()[0], b'+' | b'-')
-        || offset.as_bytes()[3] != b':'
-    {
-        return Err("must be RFC3339 timezone offset (expected ±HH:MM)".into());
-    }
-    let hour = offset[1..3]
-        .parse::<u32>()
-        .map_err(|_| "must be RFC3339 timezone offset (invalid offset hour)".to_string())?;
-    let minute = offset[4..6]
-        .parse::<u32>()
-        .map_err(|_| "must be RFC3339 timezone offset (invalid offset minute)".to_string())?;
-    if hour > 23 {
-        return Err("must be RFC3339 timezone offset (hour out of range)".into());
-    }
-    if minute > 59 {
-        return Err("must be RFC3339 timezone offset (minute out of range)".into());
-    }
-    Ok(())
-}
-
-fn parse_fixed_width_u32(
-    value: Option<&str>,
-    width: usize,
-    field_name: &str,
-) -> Result<u32, String> {
-    let value = value.ok_or_else(|| format!("must be RFC3339 ({field_name} missing)"))?;
-    if value.len() != width || !value.chars().all(|ch| ch.is_ascii_digit()) {
-        return Err(format!(
-            "must be RFC3339 ({field_name} has invalid width or characters)"
-        ));
-    }
-    value
-        .parse::<u32>()
-        .map_err(|_| format!("must be RFC3339 ({field_name} is not numeric)"))
-}
-
-fn days_in_month(year: u32, month: u32) -> u32 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if is_leap_year(year) => 29,
-        2 => 28,
-        _ => 0,
-    }
-}
-
-fn is_leap_year(year: u32) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
 // ---------------------------------------------------------------------------

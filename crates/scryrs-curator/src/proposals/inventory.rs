@@ -482,7 +482,7 @@ pub fn is_markdown_target_type(target_type: &ProposalTargetType) -> bool {
 // RFC 3339 validation (extracted from CLI)
 // ---------------------------------------------------------------------------
 
-fn validate_rfc3339(value: &str) -> Result<(), String> {
+pub fn validate_rfc3339(value: &str) -> Result<(), String> {
     let (date, time_and_offset) = value
         .split_once('T')
         .ok_or_else(|| "must be RFC3339 (missing 'T')".to_string())?;
