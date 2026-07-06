@@ -23,7 +23,7 @@ metadata:
 
 - **`scryrs-core`** — trace ingestion, hotspot scoring, SQLite event store, query. Consumed by cli, dashboard, server.
 - **`scryrs-graph`** — knowledge-graph container + deterministic `to_document` materialization. Does NOT build the graph; the build pipeline is in `crates/scryrs-cli/src/graph.rs`.
-- **`scryrs-curator`** — deterministic proposal engine over hotspot/graph evidence.
+- **`scryrs-curator`** — deterministic proposal engine over hotspot/graph evidence. Also exposes `proposals::inventory` for loading and validating existing proposal artifacts from disk (shared by CLI and dashboard).
 - **`scryrs-llm`** — provider-neutral LLM boundary. **`scryrs-curator-llm`** — optional LLM-assisted curator layer (depends on scryrs-llm; consumed by no other crate).
 - **`scryrs-policy`**, **`scryrs-sandbox`**, **`scryrs-telemetry`** — guardrails trio (policy decisions, tool sandboxing, privacy-safe telemetry).
 - **`scryrs-runtime`** — agent-side routing/retrieval helpers.

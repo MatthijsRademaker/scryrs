@@ -257,7 +257,7 @@ Model output is proposal input only.
 
 ## Current Limitations
 
-- Proposal generation is deterministic and local-file based. No dashboard review flow exists yet.
+- Proposal generation is deterministic and local-file based. A read-only dashboard review flow is available at `/proposals` and `/proposals/:proposalId` in local dashboard mode.
 - Proposal inbox artifacts are still not consumed automatically by graph build, route generation, or adapters.
 - Accepted review decisions can affect graph build only through `.scryrs/accepted/`, and only accepted `semantic_graph_grouping` targets project into graph structure today.
 - Route generation still consumes `.scryrs/graph.json` only; it never reads proposal or review-artifact directories directly.

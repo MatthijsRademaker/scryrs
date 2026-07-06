@@ -132,6 +132,56 @@ pub struct SessionDetail {
     events: Vec<TraceEventItem>,
 }
 
+// --- Proposal DTOs ---
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProposalListRow {
+    pub proposal_id: String,
+    pub title: String,
+    pub target_type: scryrs_types::ProposalTargetType,
+    pub created_at: String,
+    pub state: ProposalStateStr,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProposalStateStr {
+    Pending,
+    Accepted,
+    Rejected,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProposalDetail {
+    pub schema_version: String,
+    pub id: String,
+    pub target_type: scryrs_types::ProposalTargetType,
+    pub title: String,
+    pub rationale: String,
+    pub proposed_content: serde_json::Value,
+    pub evidence: Vec<scryrs_types::EvidenceLink>,
+    pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review_decision: Option<ReviewDecisionMeta>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewDecisionMeta {
+    pub reviewer: String,
+    pub outcome: String,
+    pub decided_at: String,
+    pub rationale: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accepted_content: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_type: Option<scryrs_types::ProposalTargetType>,
+}
+
+// --- Router ---
+
 pub fn router(config: Config) -> Router {
     let state = Arc::new(AppState {
         config,
@@ -146,6 +196,8 @@ pub fn router(config: Config) -> Router {
         .route("/api/sessions", get(sessions))
         .route("/api/sessions/:session_id", get(session_detail))
         .route("/api/events", get(events))
+        .route("/api/proposals", get(proposals_list))
+        .route("/api/proposals/:proposal_id", get(proposal_detail))
         .route("/api/routes/explain", get(route_explain))
         .route("/api/*path", get(api_not_found))
         .fallback(spa_fallback)
@@ -272,6 +324,181 @@ async fn events(
     let cursor = parse_cursor(query.cursor)?;
     let page = run_blocking(move || query_events(db_path, limit, cursor, query.session_id)).await?;
     Ok(Json(page))
+}
+
+async fn proposals_list(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<ProposalListRow>>, ApiError> {
+    if state.config.source_mode.live_config().is_some() {
+        return Err(ApiError::missing("/api/proposals unavailable in live mode"));
+    }
+
+    let repo_root = state.config.repo_root.clone();
+    let rows = run_blocking(move || {
+        let curator_rows = scryrs_curator::proposals::inventory::collect_list_rows(&repo_root)
+            .map_err(map_inventory_error)?;
+        Ok(curator_rows
+            .into_iter()
+            .map(|r| ProposalListRow {
+                proposal_id: r.proposal_id,
+                title: r.title,
+                target_type: r.target_type,
+                created_at: r.created_at,
+                state: match r.state {
+                    scryrs_curator::proposals::inventory::ProposalState::Pending => {
+                        ProposalStateStr::Pending
+                    }
+                    scryrs_curator::proposals::inventory::ProposalState::Accepted => {
+                        ProposalStateStr::Accepted
+                    }
+                    scryrs_curator::proposals::inventory::ProposalState::Rejected => {
+                        ProposalStateStr::Rejected
+                    }
+                },
+            })
+            .collect::<Vec<_>>())
+    })
+    .await?;
+    Ok(Json(rows))
+}
+
+async fn proposal_detail(
+    State(state): State<Arc<AppState>>,
+    AxumPath(proposal_id): AxumPath<String>,
+) -> Result<Json<ProposalDetail>, ApiError> {
+    if state.config.source_mode.live_config().is_some() {
+        return Err(ApiError::missing(
+            "/api/proposals/:proposal_id unavailable in live mode",
+        ));
+    }
+
+    let repo_root = state.config.repo_root.clone();
+    let detail = run_blocking(move || load_proposal_detail(&repo_root, &proposal_id)).await?;
+    Ok(Json(detail))
+}
+
+fn load_proposal_detail(
+    repo_root: &std::path::Path,
+    proposal_id: &str,
+) -> Result<ProposalDetail, ApiError> {
+    use scryrs_types::ProposedContent;
+
+    // Use the shared inventory loader so validation is identical to the list
+    // endpoint.  load_proposals validates every proposal document in the inbox
+    // (schema version, filename match, deterministic-id match, RFC 3339
+    // timestamps) and detects duplicate proposal IDs.
+    let proposals = scryrs_curator::proposals::inventory::load_proposals(repo_root)
+        .map_err(map_inventory_error)?;
+
+    let proposal = proposals
+        .get(proposal_id)
+        .ok_or_else(|| ApiError::missing(format!("proposal not found: {proposal_id}")))?;
+
+    let proposed_content_json = match &proposal.proposed_content {
+        ProposedContent::Markdown(text) => serde_json::Value::String(text.clone()),
+        ProposedContent::SemanticGraphGrouping(g) => serde_json::to_value(g).map_err(|err| {
+            ApiError::bad_gateway(format!("cannot serialize proposed content: {err}"))
+        })?,
+        ProposedContent::MemoryPatch(v) => v.clone(),
+    };
+
+    let review_decision = load_optional_review_decision(repo_root, proposal)?;
+
+    Ok(ProposalDetail {
+        schema_version: proposal.schema_version.clone(),
+        id: proposal.id.clone(),
+        target_type: proposal.target_type.clone(),
+        title: proposal.title.clone(),
+        rationale: proposal.rationale.clone(),
+        proposed_content: proposed_content_json,
+        evidence: proposal.evidence.clone(),
+        created_at: proposal.created_at.clone(),
+        review_decision,
+    })
+}
+
+fn load_optional_review_decision(
+    repo_root: &std::path::Path,
+    proposal: &scryrs_types::ProposalDocument,
+) -> Result<Option<ReviewDecisionMeta>, ApiError> {
+    use scryrs_types::{ProposalReviewDecision, ReviewOutcome};
+
+    let accepted_path = repo_root
+        .join(".scryrs/accepted")
+        .join(format!("{}.json", proposal.id));
+    let rejected_path = repo_root
+        .join(".scryrs/rejected")
+        .join(format!("{}.json", proposal.id));
+
+    let (decision_path, outcome) = if accepted_path.is_file() && rejected_path.is_file() {
+        return Err(ApiError::bad_gateway(format!(
+            "conflicting terminal state for proposal ID '{}': accepted and rejected artifacts both exist",
+            proposal.id
+        )));
+    } else if accepted_path.is_file() {
+        (accepted_path, ReviewOutcome::Accepted)
+    } else if rejected_path.is_file() {
+        (rejected_path, ReviewOutcome::Rejected)
+    } else {
+        return Ok(None);
+    };
+
+    let json = std::fs::read_to_string(&decision_path).map_err(|err| {
+        ApiError::bad_gateway(format!(
+            "cannot read review decision {}: {err}",
+            decision_path.display()
+        ))
+    })?;
+    let decision: ProposalReviewDecision = serde_json::from_str(&json).map_err(|err| {
+        ApiError::bad_gateway(format!(
+            "invalid reviewed artifact {}: {err}",
+            decision_path.display()
+        ))
+    })?;
+
+    scryrs_curator::proposals::inventory::validate_review_decision_artifact(
+        &decision_path,
+        &decision,
+        &outcome,
+    )
+    .map_err(map_inventory_error)?;
+
+    scryrs_curator::proposals::inventory::validate_review_decision_matches_proposal(
+        &decision, proposal,
+    )
+    .map_err(map_inventory_error)?;
+
+    let outcome_str = serde_json::to_string(&decision.outcome)
+        .unwrap_or_else(|_| String::from("unknown"))
+        .trim_matches('"')
+        .to_string();
+
+    let accepted_content = decision
+        .accepted_content
+        .as_ref()
+        .and_then(|content| serde_json::to_value(content).ok());
+
+    Ok(Some(ReviewDecisionMeta {
+        reviewer: decision.reviewer,
+        outcome: outcome_str,
+        decided_at: decision.decided_at,
+        rationale: decision.rationale,
+        accepted_content,
+        target_type: decision.target_type,
+    }))
+}
+
+fn map_inventory_error(err: scryrs_curator::proposals::inventory::InventoryError) -> ApiError {
+    use scryrs_curator::proposals::inventory::InventoryError;
+    match &err {
+        InventoryError::MissingDirectory { path: _ } => ApiError::missing(format!("{err}")),
+        InventoryError::Io { .. }
+        | InventoryError::Parse { .. }
+        | InventoryError::Validation { .. }
+        | InventoryError::DuplicateId { .. }
+        | InventoryError::ConflictingState { .. }
+        | InventoryError::OrphanReview { .. } => ApiError::bad_gateway(format!("{err}")),
+    }
 }
 
 async fn run_blocking<T>(

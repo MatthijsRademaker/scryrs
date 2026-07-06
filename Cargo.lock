@@ -1286,6 +1286,7 @@ name = "scryrs-curator"
 version = "0.1.0"
 dependencies = [
  "scryrs-types",
+ "serde",
  "serde_json",
 ]
 
@@ -1311,6 +1312,7 @@ dependencies = [
  "rusqlite",
  "rust-embed",
  "scryrs-core",
+ "scryrs-curator",
  "scryrs-runtime",
  "scryrs-types",
  "serde",

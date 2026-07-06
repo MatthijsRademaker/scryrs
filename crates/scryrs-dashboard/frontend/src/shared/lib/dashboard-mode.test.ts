@@ -18,6 +18,7 @@ describe("navigationForMode", () => {
 		expect(navigationForMode("local").map((item) => item.label)).toEqual([
 			"Hotspots",
 			"Sessions",
+			"Proposals",
 			"Events",
 			"Routes",
 			"About",
@@ -63,6 +64,12 @@ describe("routeUnavailableMessage", () => {
 			"not available in live mode",
 		);
 		expect(routeUnavailableMessage("events", "live")).toContain(
+			"not available in live mode",
+		);
+		expect(routeUnavailableMessage("proposals", "live")).toContain(
+			"not available in live mode",
+		);
+		expect(routeUnavailableMessage("proposal-detail", "live")).toContain(
 			"not available in live mode",
 		);
 		expect(routeUnavailableMessage("routes", "live")).toContain(

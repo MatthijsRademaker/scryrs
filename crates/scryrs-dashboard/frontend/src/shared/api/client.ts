@@ -134,22 +134,26 @@ export function getSignalStreamUrl(after: number): string {
 	return `/api/signals?after=${encodeURIComponent(String(after))}`;
 }
 
-// ── Route explain DTOs ────────────────────────────────────────────────
+// --- Route explain DTOs ---
 
 export interface RouteLoadTarget {
 	kind: "file" | "doc_page" | "non_loadable";
 	reference?: string;
 }
 
+// --- Shared evidence type ---
+
 export interface EvidenceLink {
 	sourceKind: string;
 	subject: string;
 	rowIds: number[];
-	docRef?: string;
-	description?: string;
-	score?: number;
-	metadata?: Record<string, unknown>;
+	docRef?: string | null;
+	description?: string | null;
+	score?: number | null;
+	metadata?: Record<string, unknown> | null;
 }
+
+// --- Route hint DTOs ---
 
 export interface RouteHintItem {
 	routeId: string;
@@ -170,5 +174,46 @@ export interface RouteHintDocument {
 export function getRouteHints(query: string): Promise<RouteHintDocument> {
 	return fetchJson<RouteHintDocument>(
 		`/api/routes/explain?query=${encodeURIComponent(query)}`,
+	);
+}
+
+// --- Proposal DTOs ---
+
+export interface ProposalListRow {
+	proposalId: string;
+	title: string;
+	targetType: string;
+	createdAt: string;
+	state: "pending" | "accepted" | "rejected";
+}
+
+export interface ProposalReviewDecisionMeta {
+	reviewer: string;
+	outcome: string;
+	decidedAt: string;
+	rationale: string;
+	acceptedContent?: unknown;
+	targetType?: string;
+}
+
+export interface ProposalDetail {
+	schemaVersion: string;
+	id: string;
+	targetType: string;
+	title: string;
+	rationale: string;
+	proposedContent: unknown;
+	evidence: EvidenceLink[];
+	createdAt: string;
+	reviewDecision?: ProposalReviewDecisionMeta | null;
+}
+
+export function getProposals(): Promise<ProposalListRow[]> {
+	return fetchJson<ProposalListRow[]>("/api/proposals");
+}
+
+export function getProposal(proposalId: string): Promise<ProposalDetail> {
+	return fetchJson<ProposalDetail>(
+		`/api/proposals/${encodeURIComponent(proposalId)}`,
 	);
 }
