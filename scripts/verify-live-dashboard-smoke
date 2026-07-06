@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Live dashboard browser smoke — Docker-backed Playwright verification lane.
+#
+# Builds the scryrs binary (with embedded frontend) in the Rust Docker
+# container, then runs a headless Playwright browser smoke against a
+# deterministic mock SSE server in a Chromium-capable Docker image.
+#
+# Usage:
+#   scripts/verify-live-dashboard-smoke
+#
+# Prerequisites:
+#   - Docker (host or DinD)
+#   - mcr.microsoft.com/playwright Docker image (pulled automatically)
+#   - No host Rust, Node.js, or Playwright required
+#
+# Posture: opt-in manual lane, NOT part of scripts/verify-production-suite.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DOCKER_LIB="$ROOT/scripts/lib/docker-verification.sh"
+
+if [[ ! -f "$DOCKER_LIB" ]]; then
+	echo "ERROR: docker-verification.sh not found at $DOCKER_LIB" >&2
+	exit 2
+fi
+
+# shellcheck source=scripts/lib/docker-verification.sh
+source "$DOCKER_LIB"
+
+PLAYWRIGHT_IMAGE="${PLAYWRIGHT_IMAGE:-mcr.microsoft.com/playwright:v1.55.0-noble}"
+
+# ── Build scryrs binary (with frontend) ─────────────────────────────────────
+step "Building scryrs binary (cargo build --release)"
+run_rust bash -c 'cargo build --release && mkdir -p /workspace/.docker-fixtures && cp /workspace/target/release/scryrs /workspace/.docker-fixtures/scryrs'
+
+SCRYRS_BIN="$ROOT/.docker-fixtures/scryrs"
+if [[ ! -x "$SCRYRS_BIN" ]]; then
+	echo "ERROR: scryrs binary not found at $SCRYRS_BIN after build" >&2
+	exit 1
+fi
+
+echo "  scryrs binary built at .docker-fixtures/scryrs"
+
+# ── Run Playwright smoke in Chromium-capable container ──────────────────────
+FIXTURE_EXIT=0
+
+step "Running live dashboard browser smoke (Playwright)"
+_pull_image_if_missing "$PLAYWRIGHT_IMAGE"
+
+# The mcr.microsoft.com/playwright image ships browsers but not the npm package.
+# Install playwright-core and run the launcher in a single container invocation.
+docker_cmd run --rm \
+	--shm-size=256m \
+	-u "$(id -u):$(id -g)" \
+	-v "$ROOT:/workspace" \
+	-w /workspace \
+	-e HOME=/tmp \
+	-e npm_config_cache=/tmp/.npm \
+	-e PATH="/workspace/.docker-fixtures:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+	-e SCRYRS_BIN=/workspace/.docker-fixtures/scryrs \
+	"$PLAYWRIGHT_IMAGE" \
+	bash -c 'npm install --prefix /tmp/pw playwright-core@1.55.0 && NODE_PATH=/tmp/pw/node_modules node /workspace/scripts/verification/lib/mock-live-server-launcher.mjs' \
+	|| FIXTURE_EXIT=$?
+
+echo ""
+echo "============================================"
+echo "Live dashboard browser smoke summary"
+echo "============================================"
+if [[ $FIXTURE_EXIT -eq 0 ]]; then
+	echo "  Live dashboard browser smoke: PASSED"
+else
+	echo "  Live dashboard browser smoke: FAILED (exit $FIXTURE_EXIT)"
+fi
+echo "============================================"
+
+exit "$FIXTURE_EXIT"

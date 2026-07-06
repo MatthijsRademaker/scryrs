@@ -22,6 +22,8 @@ This directory contains end-to-end fixtures and documentation for four automated
 - **Core artifact-loop verification** — prove the deterministic local artifact loop `record -> hotspots -> graph -> route -> propose -> proposals accept` produces the documented artifacts through the real binary.
 - **Privacy defaults verification** — prove compiled telemetry/privacy defaults stay in their safe release posture.
 
+- **Live dashboard browser smoke** — prove the dashboard live Signals view renders replay/live distinction, reconnect dedup, and reduced-motion path correctly in a headless Chromium browser.
+
 For hook capture:
 
 - **Claude Code** pipes the `PreToolUse` event JSON to `scryrs hook claude-code` on stdin. There is no `.mjs` hook file and no node hook process.
@@ -83,6 +85,24 @@ Authoritative live-workflow verification entrypoint. It:
 2. Copies the binary into `.docker-fixtures/scryrs`.
 3. Runs `live-hotspots-e2e.mjs` in a Debian/glibc Node container.
 4. Fails non-zero on server startup failure, transport failure, malformed JSON, assertion failure, or timeout.
+
+### `scripts/verify-live-dashboard-smoke`
+
+Opt-in live dashboard browser verification lane. It:
+
+1. Builds the real `scryrs` binary via `cargo build --release` in a Rust Docker container.
+2. Copies the binary into `.docker-fixtures/scryrs`.
+3. Launches a deterministic mock SSE server (`scripts/verification/lib/mock-live-server.mjs`) and the dashboard in a Playwright-capable Docker container (`mcr.microsoft.com/playwright:v1.55.0-noble`).
+4. Runs a headless Chromium browser smoke (`scripts/verification/live-dashboard-smoke.spec.mjs`) that asserts:
+   - Replay rows render with `data-signal-phase="replay"`.
+   - Exactly one live row renders with `data-signal-phase="live"`.
+   - Reconnect after forced disconnect produces zero duplicate `data-signal-id` values.
+   - Reduced-motion run produces `data-motion-path="reduced"` on all rows.
+5. Fails non-zero on assertion failure, Chromium crash, or timeout.
+
+**Prerequisites:** Docker or DinD, `mcr.microsoft.com/playwright:v1.55.0-noble` image (pulled automatically), `--shm-size=256m` for Chromium shared memory.
+
+**Posture:** opt-in manual lane. This lane is **NOT** part of `scripts/verify-production-suite`. Run it explicitly when the live Signals view, `SignalRow.vue`, SSE reconnect logic, or reduced-motion rendering path changes. Promote to the production suite only after evidence of routine reliability across CI and local Docker/DinD environments.
 
 ### `scripts/verify-core-artifact-loop`
 
@@ -177,9 +197,25 @@ scryrs doctor
 scryrs doctor --json
 ```
 
-## Live dashboard manual smoke boundary
+## Live dashboard browser smoke
 
-Automated production gating intentionally stops at the live server contract. **Live dashboard browser verification is still manual in this change.** After `scripts/verify-live-hotspots` passes, smoke-test the dashboard separately:
+An automated opt-in lane now exists (`scripts/verify-live-dashboard-smoke`) that exercises replay/live distinction, reconnect dedup, and the reduced-motion rendering path in a headless Chromium browser against a deterministic mock SSE upstream. **This is the preferred path for live Signals view verification** — use it before relying on the manual steps below.
+
+The automated lane is excluded from `scripts/verify-production-suite` until flake data proves routine reliability.
+
+### Stable DOM assertion surface (`data-*` attributes)
+
+The `SignalRow.vue` component exposes three `data-*` attributes as the intentional, stable assertion surface for browser tests:
+
+| Attribute | Values | Meaning |
+| --- | --- | --- |
+| `data-signal-id` | numeric signal id | Row identity for selection and dedup assertions |
+| `data-signal-phase` | `"replay"` or `"live"` | Whether the signal was replayed history or arrived after the stream opened |
+| `data-motion-path` | `"full"` or `"reduced"` | Whether ignition motion is allowed (full) or collapsed by reduced motion (reduced) |
+
+These attributes do **not** depend on animation timing, pixel state, or incidental rendering artifacts. Browser tests SHALL use these attributes for assertions; do not add screenshot-based or pixel-comparison tests that would depend on the output of `data-*` rendering.
+
+### Manual steps (fallback)
 
 1. Start `scryrs server` and ingest the deterministic fixture used by `live-hotspots-e2e.mjs`.
 2. Start the dashboard in live mode:
@@ -221,7 +257,8 @@ curl -N http://127.0.0.1:8080/api/signals?after=<last_seen_signal_id>
 - **Docker or DinD is required** for every automated lane here.
 - **No host Rust or Node.js is required** for the automated wrappers; they run through Docker-backed scripts.
 - **The production suite is intentionally slower than the default PR gate.** Use it explicitly for release hardening, not every edit loop.
-- **Live verification is automated only at the server/API layer.** Browser/dashboard verification remains manual.
+- **Live dashboard browser verification uses `mcr.microsoft.com/playwright`** (Chromium-capable, ~1.5GB image) with `--shm-size=256m` to prevent Chromium shared-memory crashes.
+- **Live verification is automated at both the server/API layer and the browser/dashboard layer** (opt-in for the browser lane).
 
 ## Linux vs macOS verification posture
 
