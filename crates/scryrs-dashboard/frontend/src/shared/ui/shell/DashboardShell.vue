@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
-import { IconActivity, IconFlame, IconInbox, IconInfo, IconListTree } from "@/shared/ui";
+import { IconActivity, IconCheck, IconFlame, IconInbox, IconInfo, IconListTree } from "@/shared/ui";
 import { navigationForMode } from "@/shared/lib/dashboard-mode";
 import { useMetaStore } from "@/stores/meta";
 
@@ -20,7 +20,7 @@ const footerCopy = computed(() => {
   return "Local dashboard viewer for .scryrs artifacts.";
 });
 
-function iconFor(name: "flame" | "activity" | "tree" | "inbox" | "info") {
+function iconFor(name: "flame" | "activity" | "tree" | "inbox" | "info" | "check") {
   switch (name) {
     case "flame":
       return IconFlame;
@@ -32,6 +32,8 @@ function iconFor(name: "flame" | "activity" | "tree" | "inbox" | "info") {
       return IconInbox;
     case "info":
       return IconInfo;
+    case "check":
+      return IconCheck;
   }
 }
 
