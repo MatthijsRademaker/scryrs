@@ -207,6 +207,19 @@ Rejected decisions copy only `sourceEvidence` and set `outcome = rejected`; they
 
 Accepting a proposal is still ledger-only. `scryrs proposals accept` writes `.scryrs/accepted/{proposalId}.json`, but it does not create generic Markdown output, it does not update `.devagent/docs/docs/accepted-knowledge/`, and it does not touch `.devagent/docs/docs/_nav.json`. Operators must run `scryrs publish markdown` or `scryrs publish rspress` separately to materialize accepted knowledge.
 
+## Dashboard review surface
+
+Local dashboard proposal detail views now expose the same review semantics through `POST /api/proposals/{proposalId}/accept` and `POST /api/proposals/{proposalId}/reject`.
+
+- the dashboard requires explicit `reviewer`, `rationale`, and RFC3339 `decidedAt`; it does not fill defaults
+- Markdown-backed targets (`docs_note`, `adr`, `skill`, `debugging_playbook`) may submit optional reviewed Markdown content on accept
+- structured targets (`memory_patch`, `semantic_graph_grouping`) reject edited-content overrides
+- the dashboard writes only `.scryrs/accepted/{proposalId}.json` or `.scryrs/rejected/{proposalId}.json`
+- `.scryrs/proposals/{proposalId}.json`, `.devagent/docs/`, `.scryrs/graph.json`, and `.scryrs/routes.json` remain untouched
+- live dashboard mode still exposes proposals as unavailable for review writes
+
+The backend uses the same shared review writer as the CLI, so validation, byte-identical idempotency, and conflict behavior stay aligned across both entrypoints.
+
 ### Determinism and conflicts
 
 The review CLI is deterministic and overwrite-averse:

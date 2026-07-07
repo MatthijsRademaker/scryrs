@@ -20,7 +20,7 @@ The heavy verification path is also exposed as `scripts/precommit-run --producti
 | Live hotspots | Central ingest server, idempotency, accumulators, query API, SSE signals, and dashboard live mode shipped | Multi-agent end-to-end browser automation and visual verification still missing (see board task `c2ba1718`) |
 | Graph | `scryrs graph <PATH>` builds structural graph from hotspots plus docs navigation | Cross-domain edges and accepted evidence ingestion missing |
 | Route manifests | `scryrs route <PATH>` emits `.scryrs/routes.json` from graph nodes | Runtime explanation and context loading decisions missing |
-| Proposals | `ProposalDocument`, inbox layout, deterministic `scryrs propose <PATH>`, `scryrs proposals list | accept | reject`, accepted/rejected review artifacts, safety checks shipped | Dashboard review UX and broader accepted-evidence consumers still missing |
+| Proposals | `ProposalDocument`, inbox layout, deterministic `scryrs propose <PATH>`, `scryrs proposals list | accept | reject`, shared dashboard accept/reject review writes, accepted/rejected review artifacts, safety checks shipped | Broader accepted-evidence consumers still missing |
 | Adapters | Shipped `scryrs publish markdown` and `scryrs publish rspress` commands delegate to the publishing adapters over reviewed `.scryrs/accepted/*.json` | Broader docs-surface targets beyond Markdown/Rspress are still missing |
 | LLM assist | Bounded `scryrs-curator-llm` library shipped | Product integration must wait for acceptance lifecycle |
 

@@ -70,7 +70,7 @@ export function routeUnavailableMessage(
 ): string | null {
 	if (mode === "live") {
 		if (routeName === "proposals" || routeName === "proposal-detail") {
-			return "Proposals are not available in live mode. Review proposal artifacts through the file-based CLI workflow.";
+			return "Proposals are not available in live mode. Use the local dashboard or CLI proposal review workflow instead.";
 		}
 		if (routeName === "sessions" || routeName === "session-detail") {
 			return "Sessions are not available in live mode. This dashboard only proxies live hotspot rankings and signal streaming.";

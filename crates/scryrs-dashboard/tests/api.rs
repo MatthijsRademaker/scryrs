@@ -26,6 +26,15 @@ fn request(path: &str) -> Request<Body> {
         .unwrap_or_else(|err| panic!("request build failed: {err}"))
 }
 
+fn json_request(method: &str, path: &str, body: serde_json::Value) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(path)
+        .header(axum::http::header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap_or_else(|err| panic!("json request build failed: {err}"))
+}
+
 async fn response_json(response: axum::response::Response) -> serde_json::Value {
     let bytes = to_bytes(response.into_body(), usize::MAX)
         .await
@@ -761,6 +770,26 @@ fn write_proposal(
     created_at: &str,
     row_ids: Vec<u64>,
 ) {
+    write_proposal_value(
+        root,
+        id,
+        title,
+        target_type,
+        serde_json::json!(content_md),
+        created_at,
+        row_ids,
+    );
+}
+
+fn write_proposal_value(
+    root: &std::path::Path,
+    id: &str,
+    title: &str,
+    target_type: &str,
+    proposed_content: serde_json::Value,
+    created_at: &str,
+    row_ids: Vec<u64>,
+) {
     let dir = root.join(".scryrs/proposals");
     std::fs::create_dir_all(&dir).unwrap_or_else(|err| panic!("create proposals dir: {err}"));
     let json = serde_json::json!({
@@ -769,7 +798,7 @@ fn write_proposal(
         "targetType": target_type,
         "title": title,
         "rationale": format!("Rationale for {title}"),
-        "proposedContent": content_md,
+        "proposedContent": proposed_content,
         "evidence": [{
             "sourceKind": "hotspot_subject",
             "subject": "test-subject",
@@ -825,6 +854,15 @@ fn make_valid_proposal_id(content_md: &str) -> String {
     ProposalDocument::compute_id(
         &ProposalTargetType::DocsNote,
         &ProposedContent::Markdown(content_md.to_string()),
+    )
+    .unwrap_or_else(|err| panic!("compute proposal id: {err}"))
+}
+
+fn make_memory_patch_proposal_id(content: serde_json::Value) -> String {
+    use scryrs_types::{ProposalDocument, ProposalTargetType, ProposedContent};
+    ProposalDocument::compute_id(
+        &ProposalTargetType::MemoryPatch,
+        &ProposedContent::MemoryPatch(content),
     )
     .unwrap_or_else(|err| panic!("compute proposal id: {err}"))
 }
@@ -1088,6 +1126,207 @@ async fn proposals_endpoints_reject_live_mode() {
     assert_eq!(detail.status(), StatusCode::NOT_FOUND);
     assert!(
         response_json(detail).await["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("unavailable in live mode"))
+    );
+}
+
+#[tokio::test]
+async fn proposals_accept_writes_review_decision() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+
+    let id = make_valid_proposal_id("accept content");
+    write_proposal(
+        dir.path(),
+        &id,
+        "Accept Me",
+        "docs_note",
+        "accept content",
+        "2026-07-01T00:00:00Z",
+        vec![1],
+    );
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/proposals/{id}/accept"),
+            serde_json::json!({
+                "reviewer": "alice",
+                "rationale": "looks good",
+                "decidedAt": "2026-07-03T00:00:00Z"
+            }),
+        ))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let accepted_path = dir.path().join(format!(".scryrs/accepted/{id}.json"));
+    let accepted_json = std::fs::read_to_string(&accepted_path)
+        .unwrap_or_else(|err| panic!("read accepted artifact {}: {err}", accepted_path.display()));
+    let accepted: serde_json::Value = serde_json::from_str(&accepted_json)
+        .unwrap_or_else(|err| panic!("parse accepted artifact: {err}"));
+    assert_eq!(accepted["proposalId"], id);
+    assert_eq!(accepted["outcome"], "accepted");
+    assert_eq!(accepted["reviewer"], "alice");
+    assert_eq!(accepted["acceptedContent"], "accept content");
+
+    let proposal_json =
+        std::fs::read_to_string(dir.path().join(format!(".scryrs/proposals/{id}.json")))
+            .unwrap_or_else(|err| panic!("read proposal artifact: {err}"));
+    let proposal: serde_json::Value = serde_json::from_str(&proposal_json)
+        .unwrap_or_else(|err| panic!("parse proposal artifact: {err}"));
+    assert_eq!(proposal["proposedContent"], "accept content");
+}
+
+#[tokio::test]
+async fn proposals_accept_rejects_missing_metadata() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+
+    let id = make_valid_proposal_id("missing metadata content");
+    write_proposal(
+        dir.path(),
+        &id,
+        "Needs Metadata",
+        "docs_note",
+        "missing metadata content",
+        "2026-07-01T00:00:00Z",
+        vec![1],
+    );
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/proposals/{id}/accept"),
+            serde_json::json!({
+                "reviewer": "alice",
+                "decidedAt": "2026-07-03T00:00:00Z"
+            }),
+        ))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(
+        response_json(response).await["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("invalid JSON body"))
+    );
+    assert!(
+        !dir.path()
+            .join(format!(".scryrs/accepted/{id}.json"))
+            .exists()
+    );
+}
+
+#[tokio::test]
+async fn proposals_accept_rejects_reviewed_content_for_structured_targets() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+
+    let content = serde_json::json!({"patch": "alpha"});
+    let id = make_memory_patch_proposal_id(content.clone());
+    write_proposal_value(
+        dir.path(),
+        &id,
+        "Structured Proposal",
+        "memory_patch",
+        content,
+        "2026-07-01T00:00:00Z",
+        vec![1],
+    );
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/proposals/{id}/accept"),
+            serde_json::json!({
+                "reviewer": "alice",
+                "rationale": "edited",
+                "decidedAt": "2026-07-03T00:00:00Z",
+                "reviewedContent": "override"
+            }),
+        ))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(
+        response_json(response).await["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("reviewed content is not supported"))
+    );
+    assert!(
+        !dir.path()
+            .join(format!(".scryrs/accepted/{id}.json"))
+            .exists()
+    );
+}
+
+#[tokio::test]
+async fn proposals_accept_returns_conflict_for_different_existing_bytes() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+
+    let id = make_valid_proposal_id("conflict content");
+    write_proposal(
+        dir.path(),
+        &id,
+        "Conflict Proposal",
+        "docs_note",
+        "conflict content",
+        "2026-07-01T00:00:00Z",
+        vec![1],
+    );
+    write_review(
+        dir.path(),
+        "accepted",
+        &id,
+        "bob",
+        "2026-07-02T00:00:00Z",
+        "previous decision",
+    );
+
+    let response = router(config(dir.path().to_path_buf()))
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/proposals/{id}/accept"),
+            serde_json::json!({
+                "reviewer": "alice",
+                "rationale": "looks good",
+                "decidedAt": "2026-07-03T00:00:00Z",
+                "reviewedContent": "reviewed content"
+            }),
+        ))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert!(
+        response_json(response).await["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("existing review decision differs"))
+    );
+}
+
+#[tokio::test]
+async fn proposals_review_write_endpoints_reject_live_mode() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+    let config = live_config(dir.path().to_path_buf(), "http://localhost:8081", "repo-a");
+
+    let response = router(config)
+        .oneshot(json_request(
+            "POST",
+            "/api/proposals/any-id/accept",
+            serde_json::json!({
+                "reviewer": "alice",
+                "rationale": "ok",
+                "decidedAt": "2026-07-03T00:00:00Z"
+            }),
+        ))
+        .await
+        .unwrap_or_else(|err| panic!("route: {err}"));
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(
+        response_json(response).await["error"]
             .as_str()
             .is_some_and(|message| message.contains("unavailable in live mode"))
     );
