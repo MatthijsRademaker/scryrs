@@ -82,6 +82,56 @@ describe("useProposalStore", () => {
 		expect(store.detail).toEqual(updatedDetail);
 	});
 
+	it("acceptProposal keeps the success state when the same accept request succeeds twice", async () => {
+		const rows: client.ProposalListRow[] = [
+			{
+				proposalId: "abc123",
+				title: "Proposal",
+				targetType: "docs_note",
+				createdAt: "2026-07-01T00:00:00Z",
+				state: "accepted",
+			},
+		];
+		const updatedDetail = makeDetail({
+			reviewDecision: {
+				reviewer: "alice",
+				outcome: "accepted",
+				decidedAt: "2026-07-03T00:00:00Z",
+				rationale: "looks good",
+				acceptedContent: "# Final",
+				targetType: "docs_note",
+			},
+		});
+		const acceptSpy = vi
+			.spyOn(client, "acceptProposalReview")
+			.mockResolvedValue({ outcome: "accepted" });
+		const rowsSpy = vi.spyOn(client, "getProposals").mockResolvedValue(rows);
+		const detailSpy = vi
+			.spyOn(client, "getProposal")
+			.mockResolvedValue(updatedDetail);
+		const payload: client.ProposalReviewSubmission & { proposalId: string } = {
+			proposalId: "abc123",
+			reviewer: "alice",
+			rationale: "looks good",
+			decidedAt: "2026-07-03T00:00:00Z",
+			reviewedContent: "# Final",
+		};
+
+		const store = useProposalStore();
+		await store.acceptProposal(payload);
+		await store.acceptProposal(payload);
+
+		expect(acceptSpy).toHaveBeenCalledTimes(2);
+		expect(rowsSpy).toHaveBeenCalledTimes(2);
+		expect(detailSpy).toHaveBeenCalledTimes(2);
+		expect(store.reviewLoading).toBe(false);
+		expect(store.reviewError).toBeNull();
+		expect(store.reviewErrorStatus).toBe(0);
+		expect(store.reviewSuccess).toBe("Proposal accepted.");
+		expect(store.rows).toEqual(rows);
+		expect(store.detail).toEqual(updatedDetail);
+	});
+
 	it("rejectProposal refreshes detail and rows after a successful reject", async () => {
 		const rows: client.ProposalListRow[] = [
 			{

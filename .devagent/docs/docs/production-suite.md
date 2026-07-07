@@ -17,7 +17,7 @@ The heavy verification path is also exposed as `scripts/precommit-run --producti
 | --- | --- | --- |
 | Trace capture | `scryrs record`, `scryrs hook`, `scryrs init`, local SQLite, fail-open hooks, Pi and Claude Code adapters | Broader harness matrix and release-grade install diagnostics |
 | Hotspots | Deterministic batch scoring and `.scryrs/hotspots.json` shipped | Long-running UX around trend/history still missing |
-| Live hotspots | Central ingest server, idempotency, accumulators, query API, SSE signals, and dashboard live mode shipped | Multi-agent end-to-end browser automation and visual verification still missing (see board task `c2ba1718`) |
+| Live hotspots | Central ingest server, idempotency, accumulators, query API, SSE signals, and dashboard live mode shipped | Multi-agent end-to-end browser automation and visual verification still missing (see board task `c2ba1718`; tracked in OpenSpec change `live-signal-feed-motion`) |
 | Graph | `scryrs graph <PATH>` builds structural graph from hotspots plus docs navigation | Cross-domain edges and accepted evidence ingestion missing |
 | Route manifests | `scryrs route <PATH>` emits `.scryrs/routes.json` from graph nodes | `scryrs route explain` shipped; automatic context-loading loop still missing (deterministic manifest matching only, no semantic retrieval or autonomous source/docs loading) |
 | Proposals | `ProposalDocument`, inbox layout, deterministic `scryrs propose <PATH>`, `scryrs proposals list | accept | reject`, shared dashboard accept/reject review writes, accepted/rejected review artifacts, safety checks shipped | Broader accepted-evidence consumers still missing |
@@ -150,10 +150,10 @@ The exact manual commands and the explicit Linux-vs-macOS limitation are documen
 | P1. Acceptance ledger | Proposals can become reviewed evidence without silent mutation | Accepted/rejected artifact contract, CLI review commands, validation, no-write guarantees |
 | P2. Accepted evidence graph | Reviewed groupings and docs notes influence graph deterministically | Graph consumes accepted evidence; route manifests update from graph; provenance preserved |
 | P3. Live dashboard | Multi-agent hotspots become visible product, not just API | Dashboard live mode, server API client, signal timeline, reconnect behavior ✅ Shipped |
-| P4. Runtime explain | Agents can ask what to read and why | Route hint schema, `scryrs route explain`, deterministic evidence-backed reasons |
+| P4. Runtime explain | Agents can ask what to read and why | Route hint schema, `scryrs route explain`, deterministic evidence-backed reasons ✅ Shipped. Remaining gap: semantic usefulness and automated context loading still missing. |
 | P5. Publishing adapters | Reviewed knowledge leaves `.scryrs/` through explicit shipped CLI commands | `scryrs publish markdown` delegates to `scryrs-adapter-markdown` for generic Markdown output. `scryrs publish rspress` delegates to `scryrs-adapter-rspress` to write pages with Rspress frontmatter into `.devagent/docs/docs/accepted-knowledge/` and update `_nav.json`. `scripts/verify-docs-publish` proves both real CLI publish modes before checking `doc_build/llms.txt`. |
 | P6. LLM assist UX | Models improve proposal quality without owning truth | Opt-in draft/group commands or UI action, bounded EvidencePack, citation validation, no auto-accept |
-| P7. Production hardening | Suite can ship reliably | Release packaging, `scryrs doctor`, authoritative production suite, CI matrix, E2E live workflow, security and privacy checks |
+| P7. Production hardening | Suite can ship reliably | Release packaging, `scryrs doctor`, authoritative production suite, CI matrix, E2E live workflow, security and privacy checks (see OpenSpec change `public-binary-and-image-distribution`) |
 
 ## Related pages
 
