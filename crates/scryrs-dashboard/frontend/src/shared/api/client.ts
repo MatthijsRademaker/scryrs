@@ -85,15 +85,36 @@ export interface SessionDetail {
 	events: TraceEventItem[];
 }
 
+async function readError(response: Response): Promise<never> {
+	const body = (await response
+		.json()
+		.catch(() => ({ error: response.statusText }))) as { error?: string };
+	throw new ApiError(response.status, body.error ?? response.statusText);
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
 	const response = await fetch(url);
 	if (!response.ok) {
-		const body = (await response
-			.json()
-			.catch(() => ({ error: response.statusText }))) as { error?: string };
-		throw new ApiError(response.status, body.error ?? response.statusText);
+		return readError(response);
 	}
 	return (await response.json()) as T;
+}
+
+async function postJson<TRequest, TResponse>(
+	url: string,
+	body: TRequest,
+): Promise<TResponse> {
+	const response = await fetch(url, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify(body),
+	});
+	if (!response.ok) {
+		return readError(response);
+	}
+	return (await response.json()) as TResponse;
 }
 
 export function fetchMeta(): Promise<DashboardMeta> {
@@ -196,6 +217,17 @@ export interface ProposalReviewDecisionMeta {
 	targetType?: string;
 }
 
+export interface ProposalReviewSubmission {
+	reviewer: string;
+	rationale: string;
+	decidedAt: string;
+	reviewedContent?: string;
+}
+
+export interface ProposalReviewResponse {
+	outcome: "accepted" | "rejected";
+}
+
 export interface ProposalDetail {
 	schemaVersion: string;
 	id: string;
@@ -216,4 +248,24 @@ export function getProposal(proposalId: string): Promise<ProposalDetail> {
 	return fetchJson<ProposalDetail>(
 		`/api/proposals/${encodeURIComponent(proposalId)}`,
 	);
+}
+
+export function acceptProposalReview(
+	proposalId: string,
+	body: ProposalReviewSubmission,
+): Promise<ProposalReviewResponse> {
+	return postJson<ProposalReviewSubmission, ProposalReviewResponse>(
+		`/api/proposals/${encodeURIComponent(proposalId)}/accept`,
+		body,
+	);
+}
+
+export function rejectProposalReview(
+	proposalId: string,
+	body: Omit<ProposalReviewSubmission, "reviewedContent">,
+): Promise<ProposalReviewResponse> {
+	return postJson<
+		Omit<ProposalReviewSubmission, "reviewedContent">,
+		ProposalReviewResponse
+	>(`/api/proposals/${encodeURIComponent(proposalId)}/reject`, body);
 }

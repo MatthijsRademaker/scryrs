@@ -4,11 +4,12 @@ use std::process::Command;
 use std::sync::Arc;
 
 use axum::body::Body;
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::header::{CONTENT_TYPE, HeaderValue};
 use axum::http::{Response, StatusCode};
 use axum::response::IntoResponse;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use rusqlite::{Connection, OpenFlags, params};
 use rust_embed::RustEmbed;
@@ -40,6 +41,20 @@ pub(crate) struct ApiError {
 }
 
 impl ApiError {
+    pub(crate) fn input(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn conflict(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            message: message.into(),
+        }
+    }
+
     pub(crate) fn missing(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::NOT_FOUND,
@@ -167,6 +182,21 @@ pub struct ProposalDetail {
     pub review_decision: Option<ReviewDecisionMeta>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProposalReviewWriteRequest {
+    reviewer: String,
+    rationale: String,
+    decided_at: String,
+    reviewed_content: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProposalReviewWriteResponse {
+    outcome: &'static str,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewDecisionMeta {
@@ -198,6 +228,8 @@ pub fn router(config: Config) -> Router {
         .route("/api/events", get(events))
         .route("/api/proposals", get(proposals_list))
         .route("/api/proposals/:proposal_id", get(proposal_detail))
+        .route("/api/proposals/:proposal_id/accept", post(proposal_accept))
+        .route("/api/proposals/:proposal_id/reject", post(proposal_reject))
         .route("/api/routes/explain", get(route_explain))
         .route("/api/*path", get(api_not_found))
         .fallback(spa_fallback)
@@ -377,6 +409,85 @@ async fn proposal_detail(
     Ok(Json(detail))
 }
 
+async fn proposal_accept(
+    State(state): State<Arc<AppState>>,
+    AxumPath(proposal_id): AxumPath<String>,
+    body: Result<Json<ProposalReviewWriteRequest>, JsonRejection>,
+) -> Result<Json<ProposalReviewWriteResponse>, ApiError> {
+    write_proposal_review(
+        state,
+        proposal_id,
+        scryrs_types::ReviewOutcome::Accepted,
+        body,
+    )
+    .await
+}
+
+async fn proposal_reject(
+    State(state): State<Arc<AppState>>,
+    AxumPath(proposal_id): AxumPath<String>,
+    body: Result<Json<ProposalReviewWriteRequest>, JsonRejection>,
+) -> Result<Json<ProposalReviewWriteResponse>, ApiError> {
+    write_proposal_review(
+        state,
+        proposal_id,
+        scryrs_types::ReviewOutcome::Rejected,
+        body,
+    )
+    .await
+}
+
+async fn write_proposal_review(
+    state: Arc<AppState>,
+    proposal_id: String,
+    outcome: scryrs_types::ReviewOutcome,
+    body: Result<Json<ProposalReviewWriteRequest>, JsonRejection>,
+) -> Result<Json<ProposalReviewWriteResponse>, ApiError> {
+    if state.config.source_mode.live_config().is_some() {
+        let suffix = match outcome {
+            scryrs_types::ReviewOutcome::Accepted => "accept",
+            scryrs_types::ReviewOutcome::Rejected => "reject",
+        };
+        return Err(ApiError::missing(format!(
+            "/api/proposals/:proposal_id/{suffix} unavailable in live mode"
+        )));
+    }
+
+    let Json(body) = body.map_err(map_json_rejection)?;
+    if outcome == scryrs_types::ReviewOutcome::Rejected && body.reviewed_content.is_some() {
+        return Err(ApiError::input(
+            "reviewedContent is not supported on reject",
+        ));
+    }
+
+    let repo_root = state.config.repo_root.clone();
+    let response_outcome = match outcome {
+        scryrs_types::ReviewOutcome::Accepted => "accepted",
+        scryrs_types::ReviewOutcome::Rejected => "rejected",
+    };
+    run_blocking(move || {
+        scryrs_curator::proposals::review_write::write_review_decision(
+            &repo_root,
+            &scryrs_curator::proposals::review_write::ReviewWriteRequest {
+                proposal_id,
+                outcome,
+                reviewer: body.reviewer,
+                rationale: body.rationale,
+                decided_at: body.decided_at,
+                override_content: body
+                    .reviewed_content
+                    .map(scryrs_types::ProposedContent::Markdown),
+            },
+        )
+        .map_err(map_review_write_error)?;
+        Ok(ProposalReviewWriteResponse {
+            outcome: response_outcome,
+        })
+    })
+    .await
+    .map(Json)
+}
+
 fn load_proposal_detail(
     repo_root: &std::path::Path,
     proposal_id: &str,
@@ -498,6 +609,23 @@ fn map_inventory_error(err: scryrs_curator::proposals::inventory::InventoryError
         | InventoryError::DuplicateId { .. }
         | InventoryError::ConflictingState { .. }
         | InventoryError::OrphanReview { .. } => ApiError::bad_gateway(format!("{err}")),
+    }
+}
+
+fn map_json_rejection(rejection: JsonRejection) -> ApiError {
+    ApiError::input(format!("invalid JSON body: {}", rejection.body_text()))
+}
+
+fn map_review_write_error(
+    error: scryrs_curator::proposals::review_write::ReviewWriteError,
+) -> ApiError {
+    use scryrs_curator::proposals::review_write::ReviewWriteError;
+    match error {
+        ReviewWriteError::Input(message) => ApiError::input(message),
+        ReviewWriteError::Conflict(message) => ApiError::conflict(message),
+        ReviewWriteError::Artifact(message) | ReviewWriteError::Failure(message) => {
+            ApiError::bad_gateway(message)
+        }
     }
 }
 

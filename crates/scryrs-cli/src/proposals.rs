@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use scryrs_curator::proposals::inventory::{
     self, InventoryError, ProposalListRow, ProposalStateFilter,
 };
-use scryrs_types::{ProposalDocument, ProposalReviewDecision, ProposedContent, ReviewOutcome};
+use scryrs_curator::proposals::review_write::{self, ReviewWriteError, ReviewWriteRequest};
+use scryrs_types::{ProposedContent, ReviewOutcome};
 
 pub(crate) fn execute_proposals_cli(
     out: &mut impl Write,
@@ -520,137 +521,19 @@ fn write_review_decision(
     override_content: Option<ProposedContent>,
 ) -> Result<(), CommandError> {
     let command_name = format!("scryrs proposals {}", review_command_name(&outcome));
-    scryrs_curator::proposals::inventory::validate_rfc3339(metadata.decided_at).map_err(
-        |message| {
-            CommandError::input(format!(
-                "{command_name}: invalid --decided-at value: {message}"
-            ))
-        },
-    )?;
-
     let repo_root = resolve_repo_root(path, &command_name)?;
-    let proposal_path = repo_root.join(format!(".scryrs/proposals/{proposal_id}.json"));
-    if !proposal_path.is_file() {
-        return Err(CommandError::input(format!(
-            "{command_name}: unknown proposal ID '{proposal_id}'"
-        )));
-    }
-
-    let proposal_json = std::fs::read_to_string(&proposal_path).map_err(|error| {
-        CommandError::input(format!(
-            "{command_name}: cannot read proposal document {}: {error}",
-            proposal_path.display()
-        ))
-    })?;
-    let proposal: ProposalDocument = serde_json::from_str(&proposal_json).map_err(|error| {
-        CommandError::input(format!(
-            "{command_name}: invalid proposal document {}: {error}",
-            proposal_path.display()
-        ))
-    })?;
-    inventory::validate_proposal_document(&proposal_path, &proposal).map_err(|error| {
-        CommandError::input(format!(
-            "{command_name}: invalid proposal document {}: {error}",
-            proposal_path.display()
-        ))
-    })?;
-
-    if override_content.is_some() && !inventory::is_markdown_target_type(&proposal.target_type) {
-        return Err(CommandError::input(format!(
-            "{command_name}: --content-file and --content-stdin are not supported for target type '{}'",
-            serde_json::to_string(&proposal.target_type)
-                .unwrap_or_else(|_| format!("{:?}", proposal.target_type))
-        )));
-    }
-
-    let decision = build_review_decision(&proposal, &outcome, metadata, override_content);
-    decision.validate().map_err(|error| {
-        CommandError::input(format!("{command_name}: invalid review metadata: {error}"))
-    })?;
-    inventory::validate_review_decision_matches_proposal(&decision, &proposal).map_err(
-        |error| CommandError::input(format!("{command_name}: review validation failed: {error}")),
-    )?;
-
-    let json = serde_json::to_string(&decision).map_err(|error| {
-        CommandError::failure(format!("{command_name}: serialization error: {error}"))
-    })?;
-
-    let target_dir = repo_root.join(format!(".scryrs/{}", inventory::review_dir_name(&outcome)));
-    let target_path = target_dir.join(format!("{proposal_id}.json"));
-    let conflict_dir = repo_root.join(format!(
-        ".scryrs/{}",
-        inventory::review_dir_name(&opposite_outcome(&outcome))
-    ));
-    let conflict_path = conflict_dir.join(format!("{proposal_id}.json"));
-    if conflict_path.exists() {
-        return Err(CommandError::input(format!(
-            "{command_name}: conflicting terminal decision already exists at {}",
-            conflict_path.display()
-        )));
-    }
-
-    if target_path.exists() {
-        let existing = std::fs::read_to_string(&target_path).map_err(|error| {
-            CommandError::input(format!(
-                "{command_name}: cannot read existing review decision {}: {error}",
-                target_path.display()
-            ))
-        })?;
-        if existing == json {
-            return Ok(());
-        }
-        return Err(CommandError::input(format!(
-            "{command_name}: existing review decision differs from requested bytes; refusing to overwrite {}",
-            target_path.display()
-        )));
-    }
-
-    std::fs::create_dir_all(&target_dir).map_err(|error| {
-        CommandError::failure(format!(
-            "{command_name}: cannot create review directory {}: {error}",
-            target_dir.display()
-        ))
-    })?;
-    std::fs::write(&target_path, json).map_err(|error| {
-        CommandError::failure(format!(
-            "{command_name}: cannot write review decision {}: {error}",
-            target_path.display()
-        ))
-    })?;
-
-    Ok(())
-}
-
-fn build_review_decision(
-    proposal: &ProposalDocument,
-    outcome: &ReviewOutcome,
-    metadata: ReviewMetadata<'_>,
-    override_content: Option<ProposedContent>,
-) -> ProposalReviewDecision {
-    let (target_type, accepted_content) = match outcome {
-        ReviewOutcome::Accepted => {
-            let content = match override_content {
-                Some(overridden) if inventory::is_markdown_target_type(&proposal.target_type) => {
-                    Some(overridden)
-                }
-                _ => Some(proposal.proposed_content.clone()),
-            };
-            (Some(proposal.target_type.clone()), content)
-        }
-        ReviewOutcome::Rejected => (None, None),
-    };
-
-    ProposalReviewDecision {
-        schema_version: scryrs_types::REVIEW_DECISION_SCHEMA_VERSION.into(),
-        proposal_id: proposal.id.clone(),
-        reviewer: metadata.reviewer.to_string(),
-        decided_at: metadata.decided_at.to_string(),
-        rationale: metadata.rationale.to_string(),
-        source_evidence: proposal.evidence.clone(),
-        outcome: outcome.clone(),
-        target_type,
-        accepted_content,
-    }
+    review_write::write_review_decision(
+        &repo_root,
+        &ReviewWriteRequest {
+            proposal_id: proposal_id.to_string(),
+            outcome,
+            reviewer: metadata.reviewer.to_string(),
+            rationale: metadata.rationale.to_string(),
+            decided_at: metadata.decided_at.to_string(),
+            override_content,
+        },
+    )
+    .map_err(|error| map_review_write_error(&command_name, error))
 }
 
 fn resolve_repo_root(path: &str, command_name: &str) -> Result<PathBuf, CommandError> {
@@ -661,10 +544,30 @@ fn resolve_repo_root(path: &str, command_name: &str) -> Result<PathBuf, CommandE
     })
 }
 
-fn opposite_outcome(outcome: &ReviewOutcome) -> ReviewOutcome {
-    match outcome {
-        ReviewOutcome::Accepted => ReviewOutcome::Rejected,
-        ReviewOutcome::Rejected => ReviewOutcome::Accepted,
+fn map_review_write_error(command_name: &str, error: ReviewWriteError) -> CommandError {
+    match error {
+        ReviewWriteError::Input(message) => {
+            if let Some(detail) = message.strip_prefix("invalid decidedAt: ") {
+                CommandError::input(format!(
+                    "{command_name}: invalid --decided-at value: {detail}"
+                ))
+            } else if let Some(target_type) = message
+                .strip_prefix("reviewed content is not supported for target type '")
+                .and_then(|value| value.strip_suffix('\''))
+            {
+                CommandError::input(format!(
+                    "{command_name}: --content-file and --content-stdin are not supported for target type '{target_type}'"
+                ))
+            } else {
+                CommandError::input(format!("{command_name}: {message}"))
+            }
+        }
+        ReviewWriteError::Conflict(message) | ReviewWriteError::Artifact(message) => {
+            CommandError::input(format!("{command_name}: {message}"))
+        }
+        ReviewWriteError::Failure(message) => {
+            CommandError::failure(format!("{command_name}: {message}"))
+        }
     }
 }
 
