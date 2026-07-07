@@ -15,6 +15,13 @@ import {
 import { routeUnavailableMessage } from "@/shared/lib/dashboard-mode";
 import { useProposalStore } from "@/stores/proposals";
 import { useMetaStore } from "@/stores/meta";
+import {
+  canEditReviewedContent as canEditReviewedProposalContent,
+  contentDisplay,
+  reviewedContentPayload as buildReviewedContentPayload,
+  reviewInputsValid as hasValidReviewInputs,
+  showReviewForm as shouldShowReviewForm,
+} from "@/views/proposal-detail";
 
 const route = useRoute();
 const store = useProposalStore();
@@ -37,29 +44,22 @@ const unavailableMessage = computed(() =>
 const detailContent = computed(() =>
   store.detail ? contentDisplay(store.detail.proposedContent) : null,
 );
-const showReviewForm = computed(
-  () => !meta.isLiveMode && !!store.detail && !store.detail.reviewDecision,
+const showReviewForm = computed(() =>
+  shouldShowReviewForm(meta.isLiveMode, store.detail),
 );
-const canEditReviewedContent = computed(
-  () => showReviewForm.value && detailContent.value?.type === "markdown",
+const canEditReviewedContent = computed(() =>
+  canEditReviewedProposalContent(meta.isLiveMode, store.detail),
 );
-const reviewInputsValid = computed(
-  () =>
-    reviewer.value.trim().length > 0 &&
-    rationale.value.trim().length > 0 &&
-    decidedAt.value.trim().length > 0,
+const reviewInputsValid = computed(() =>
+  hasValidReviewInputs(reviewer.value, rationale.value, decidedAt.value),
 );
-const reviewedContentPayload = computed(() => {
-  if (
-    !canEditReviewedContent.value ||
-    typeof store.detail?.proposedContent !== "string"
-  ) {
-    return undefined;
-  }
-  return reviewedContent.value === store.detail.proposedContent
-    ? undefined
-    : reviewedContent.value;
-});
+const reviewedContentPayload = computed(() =>
+  buildReviewedContentPayload(
+    meta.isLiveMode,
+    store.detail,
+    reviewedContent.value,
+  ),
+);
 
 onMounted(async () => {
   await meta.ensureLoaded();
@@ -99,30 +99,6 @@ async function submitReject() {
   });
 }
 
-function contentDisplay(content: unknown): { type: string; text: string } {
-  if (typeof content === "string") {
-    return { type: "markdown", text: content };
-  }
-  if (content && typeof content === "object") {
-    const obj = content as Record<string, unknown>;
-    if (Array.isArray(obj.sourceNodeIds)) {
-      return {
-        type: "semantic_graph_grouping",
-        text: JSON.stringify(
-          {
-            sourceNodeIds: obj.sourceNodeIds,
-            targetGroupNodeId: obj.targetGroupNodeId,
-            targetGroupLabel: obj.targetGroupLabel,
-          },
-          null,
-          2,
-        ),
-      };
-    }
-    return { type: "memory_patch", text: JSON.stringify(obj, null, 2) };
-  }
-  return { type: "unknown", text: JSON.stringify(content, null, 2) };
-}
 </script>
 
 <template>

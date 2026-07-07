@@ -1179,6 +1179,57 @@ async fn proposals_accept_writes_review_decision() {
 }
 
 #[tokio::test]
+async fn proposals_accept_is_idempotent_for_identical_bytes() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+
+    let id = make_valid_proposal_id("accept content");
+    write_proposal(
+        dir.path(),
+        &id,
+        "Accept Me",
+        "docs_note",
+        "accept content",
+        "2026-07-01T00:00:00Z",
+        vec![1],
+    );
+
+    let request_body = serde_json::json!({
+        "reviewer": "alice",
+        "rationale": "looks good",
+        "decidedAt": "2026-07-03T00:00:00Z",
+        "reviewedContent": "reviewed content"
+    });
+
+    let first = router(config(dir.path().to_path_buf()))
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/proposals/{id}/accept"),
+            request_body.clone(),
+        ))
+        .await
+        .unwrap_or_else(|err| panic!("first route: {err}"));
+    assert_eq!(first.status(), StatusCode::OK);
+
+    let accepted_path = dir.path().join(format!(".scryrs/accepted/{id}.json"));
+    let first_bytes = std::fs::read_to_string(&accepted_path)
+        .unwrap_or_else(|err| panic!("read accepted artifact {}: {err}", accepted_path.display()));
+
+    let second = router(config(dir.path().to_path_buf()))
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/proposals/{id}/accept"),
+            request_body,
+        ))
+        .await
+        .unwrap_or_else(|err| panic!("second route: {err}"));
+    assert_eq!(second.status(), StatusCode::OK);
+
+    let second_bytes = std::fs::read_to_string(&accepted_path)
+        .unwrap_or_else(|err| panic!("read accepted artifact {}: {err}", accepted_path.display()));
+    assert_eq!(first_bytes, second_bytes);
+}
+
+#[tokio::test]
 async fn proposals_accept_rejects_missing_metadata() {
     let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
 
@@ -1303,6 +1354,139 @@ async fn proposals_accept_returns_conflict_for_different_existing_bytes() {
         response_json(response).await["error"]
             .as_str()
             .is_some_and(|message| message.contains("existing review decision differs"))
+    );
+}
+
+#[tokio::test]
+async fn proposals_reject_returns_conflict_for_different_existing_bytes() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+
+    let id = make_valid_proposal_id("reject conflict content");
+    write_proposal(
+        dir.path(),
+        &id,
+        "Reject Conflict Proposal",
+        "docs_note",
+        "reject conflict content",
+        "2026-07-01T00:00:00Z",
+        vec![1],
+    );
+
+    let first = router(config(dir.path().to_path_buf()))
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/proposals/{id}/reject"),
+            serde_json::json!({
+                "reviewer": "alice",
+                "rationale": "off-scope",
+                "decidedAt": "2026-07-03T00:00:00Z"
+            }),
+        ))
+        .await
+        .unwrap_or_else(|err| panic!("first route: {err}"));
+    assert_eq!(first.status(), StatusCode::OK);
+
+    let rejected_path = dir.path().join(format!(".scryrs/rejected/{id}.json"));
+    let first_bytes = std::fs::read_to_string(&rejected_path)
+        .unwrap_or_else(|err| panic!("read rejected artifact {}: {err}", rejected_path.display()));
+
+    let second = router(config(dir.path().to_path_buf()))
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/proposals/{id}/reject"),
+            serde_json::json!({
+                "reviewer": "bob",
+                "rationale": "duplicate but different",
+                "decidedAt": "2026-07-04T00:00:00Z"
+            }),
+        ))
+        .await
+        .unwrap_or_else(|err| panic!("second route: {err}"));
+
+    assert_eq!(second.status(), StatusCode::CONFLICT);
+    assert!(
+        response_json(second).await["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("existing review decision differs"))
+    );
+
+    let second_bytes = std::fs::read_to_string(&rejected_path)
+        .unwrap_or_else(|err| panic!("read rejected artifact {}: {err}", rejected_path.display()));
+    assert_eq!(first_bytes, second_bytes);
+}
+
+#[tokio::test]
+async fn proposals_review_write_rejects_invalid_decided_at() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+
+    let accept_id = make_valid_proposal_id("accept invalid decidedAt");
+    write_proposal(
+        dir.path(),
+        &accept_id,
+        "Invalid Accept Timestamp",
+        "docs_note",
+        "accept invalid decidedAt",
+        "2026-07-01T00:00:00Z",
+        vec![1],
+    );
+
+    let reject_id = make_valid_proposal_id("reject invalid decidedAt");
+    write_proposal(
+        dir.path(),
+        &reject_id,
+        "Invalid Reject Timestamp",
+        "docs_note",
+        "reject invalid decidedAt",
+        "2026-07-01T00:00:00Z",
+        vec![1],
+    );
+
+    let accept = router(config(dir.path().to_path_buf()))
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/proposals/{accept_id}/accept"),
+            serde_json::json!({
+                "reviewer": "alice",
+                "rationale": "looks good",
+                "decidedAt": "not-a-timestamp"
+            }),
+        ))
+        .await
+        .unwrap_or_else(|err| panic!("accept route: {err}"));
+    assert_eq!(accept.status(), StatusCode::BAD_REQUEST);
+    assert!(
+        response_json(accept).await["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("invalid decidedAt"))
+    );
+    assert!(
+        !dir.path()
+            .join(format!(".scryrs/accepted/{accept_id}.json"))
+            .exists()
+    );
+
+    let reject = router(config(dir.path().to_path_buf()))
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/proposals/{reject_id}/reject"),
+            serde_json::json!({
+                "reviewer": "alice",
+                "rationale": "off-scope",
+                "decidedAt": "not-a-timestamp"
+            }),
+        ))
+        .await
+        .unwrap_or_else(|err| panic!("reject route: {err}"));
+    assert_eq!(reject.status(), StatusCode::BAD_REQUEST);
+    assert!(
+        response_json(reject).await["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("invalid decidedAt"))
+    );
+    assert!(
+        !dir.path()
+            .join(format!(".scryrs/rejected/{reject_id}.json"))
+            .exists()
     );
 }
 
