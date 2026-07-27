@@ -320,7 +320,7 @@ mod tests {
         let e1 = make_event(
             TraceEventType::FailedLookup,
             TraceEventPayload::FailedLookup(FailedLookupPayload {
-                subject: "missing_fn".into(),
+                subject: "src/missing.rs".into(),
             }),
             Outcome::Failure {
                 reason: Some("not found".into()),
@@ -343,17 +343,17 @@ mod tests {
         );
 
         let events = vec![
-            (1u64, &e1), // missing_fn, symbol, score 6
+            (1u64, &e1), // src/missing.rs, file, score 6
             (2u64, &e2), // src/x.rs, file, score 5
         ];
         let entries = score_hotspots(&events);
 
-        // Two separate subjects with different kinds.
+        // Two separate subjects, both "file" kind.
         assert_eq!(entries.len(), 2);
 
         // Higher score first (6 > 5).
-        assert_eq!(entries[0].subject, "missing_fn");
-        assert_eq!(entries[0].subjectKind, "symbol");
+        assert_eq!(entries[0].subject, "src/missing.rs");
+        assert_eq!(entries[0].subjectKind, "file");
         assert_eq!(entries[0].score, 6);
         assert_eq!(entries[0].counts.outcome.get("failure"), Some(&1));
 

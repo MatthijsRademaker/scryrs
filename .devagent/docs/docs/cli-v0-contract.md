@@ -420,14 +420,15 @@ Generates validated review-only `ProposalDocument` inbox artifacts from hotspot 
 - Proposal generation does not mutate docs source, `.scryrs/graph.json`, or `.scryrs/routes.json`.
 - Singular `propose` is generation-only; plural `proposals` is the review surface.
 
-### `scryrs proposals list|accept|reject`
+### `scryrs proposals list|publish|accept|reject`
 
-Reviews inbox proposal artifacts without mutating the inbox file itself.
+Lists, explicitly publishes, or locally reviews inbox proposal artifacts without mutating the inbox file itself.
 
 | Subcommand | Input | Output | Exit 0 | Exit 1 | Exit 2 |
 | ------- | ------- | ------- | ------- | ------- | ------- |
-| `proposals list <PATH> [--state pending | accepted | rejected | all]` | Repository path containing `.scryrs/proposals/` and optional `.scryrs/accepted/` / `.scryrs/rejected/` | Deterministic JSON array of proposal rows sorted by `proposalId` ascending | Rows emitted successfully | Serialization failure writing stdout | Invalid filter, invalid proposal/review artifact, conflicting accepted+rejected state, or unreadable/malformed input artifact |
-| `proposals accept <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339> [--content-file <PATH> | --content-stdin]` | Valid proposal inbox file plus explicit review metadata; optional --content-file or --content-stdin provides reviewed Markdown content | No stdout; writes `.scryrs/accepted/{proposalId}.json` | Accepted artifact written, or idempotent byte-identical rerun | Filesystem write or serialization failure | Unknown proposal ID, invalid proposal document, invalid metadata, conflicting opposite-outcome artifact, same-outcome overwrite with different bytes, --content-file/--content-stdin on non-Markdown target, or mutually exclusive override flags |
+| `proposals list <PATH> [--state pending \| accepted \| rejected \| all]` | Repository path containing `.scryrs/proposals/` and optional `.scryrs/accepted/` / `.scryrs/rejected/` | Deterministic JSON array of proposal rows sorted by `proposalId` ascending | Rows emitted successfully | Serialization failure writing stdout | Invalid filter, invalid proposal/review artifact, conflicting accepted+rejected state, or unreadable/malformed input artifact |
+| `proposals publish <PATH> <ID> [--server-url <URL>] [--repository-id <ID>]` | Valid local proposal plus remote target and `SCRYRS_PROPOSAL_WRITE_TOKEN` from environment or `.scryrs/.env` | Publication audit JSON (`repositoryId`, `proposalId`, `revisionSha256`, `publisherId`, `publishedAt`, `unchanged`) | New publication or idempotent replay | Transport, server, or response-contract failure | Usage/config error or invalid/missing proposal |
+| `proposals accept <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339> [--content-file <PATH> \| --content-stdin]` | Valid proposal inbox file plus explicit review metadata; optional --content-file or --content-stdin provides reviewed Markdown content | No stdout; writes `.scryrs/accepted/{proposalId}.json` | Accepted artifact written, or idempotent byte-identical rerun | Filesystem write or serialization failure | Unknown proposal ID, invalid proposal document, invalid metadata, conflicting opposite-outcome artifact, same-outcome overwrite with different bytes, --content-file/--content-stdin on non-Markdown target, or mutually exclusive override flags |
 | `proposals reject <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>` | Valid proposal inbox file plus explicit review metadata | No stdout; writes `.scryrs/rejected/{proposalId}.json` | Rejected artifact written, or idempotent byte-identical rerun | Filesystem write or serialization failure | Unknown proposal ID, invalid proposal document, invalid metadata, conflicting opposite-outcome artifact, or same-outcome overwrite with different bytes |
 
 **Behavior notes:**
@@ -435,8 +436,9 @@ Reviews inbox proposal artifacts without mutating the inbox file itself.
 - `list` validates every encountered `ProposalDocument` and `ProposalReviewDecision` before emitting output.
 - `accept` copies proposal `targetType`, `proposedContent`, and `evidence` into the accepted `ProposalReviewDecision`. When `--content-file` or `--content-stdin` is supplied for a Markdown-backed target (`docs_note`, `adr`, `skill`, `debugging_playbook`), `acceptedContent` reflects the reviewed content rather than the proposal's `proposedContent`. These flags are accept-only, mutually exclusive, and rejected for structured targets (`memory_patch`, `semantic_graph_grouping`).
 - `reject` copies only proposal `evidence`; rejected decisions omit `targetType` and `acceptedContent`.
+- `publish` sends complete proposal schema/content/evidence, retries transport/5xx failures once, and never deletes or rewrites the local proposal artifact.
 - Review commands never mutate `.scryrs/proposals/{proposalId}.json`, `.devagent/docs/`, `.scryrs/graph.json`, or `.scryrs/routes.json`.
-- `--help-json` represents `proposals` as a grouped command with nested `list`, `accept`, and `reject` subcommands. `surfaceVersion` is now `0.17.0`.
+- `--help-json` represents `proposals` as a grouped command with nested `list`, `publish`, `accept`, and `reject` subcommands. `surfaceVersion` is `0.20.0`.
 
 ### `scryrs publish markdown|rspress`
 
@@ -577,12 +579,12 @@ Diagnose the current installation and readiness state for the working directory.
 
 ### `scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]`
 
-Starts a long-lived HTTP server for central trace event ingest and live hotspot query/streaming. Accepts versioned trace-event batches at `POST /v1/trace-events/batch` with deterministic validation and first-writer-wins idempotency. Also serves read-only live hotspot rankings and a Server-Sent Events signal stream.
+Starts a long-lived HTTP server for central trace event ingest and repository-scoped live reads. Accepts versioned trace-event batches at `POST /v1/trace-events/batch` with deterministic validation and first-writer-wins idempotency. Read APIs expose hotspot rankings, signal streaming, session summaries, session detail, and cursor-paginated raw events from the server-owned store.
 
 | Field | Value |
 | ------- | ------- |
 | Input | No required arguments. Optional flags: `--bind` (default `127.0.0.1`), `--port` (default `8081`), `--store` (default `.scryrs/server.db`) |
-| Output | HTTP server with three REST endpoints (see table below). Startup message written to stderr. |
+| Output | HTTP server with trace, hotspot, signal, session/event, route, and proposal endpoints (see table below). Startup message written to stderr. |
 | Exit 0 | Server shut down cleanly (SIGINT/SIGTERM) |
 | Exit 1 | Server I/O failure (port already in use, bind failure) |
 | Exit 2 | Usage error (invalid `--port`, `--bind`, or `--store`) or feature not compiled |
@@ -594,6 +596,13 @@ Starts a long-lived HTTP server for central trace event ingest and live hotspot 
 | `/v1/trace-events/batch` | POST | `ServerIngestEnvelope` (JSON) | `200 OK` with `BatchIngestResponse` (JSON) containing `accepted_count`, `duplicate_count`, `rejected_count`, `received_count`, per-item `events` array with status and diagnostics, and `received_at` timestamp. `400 Bad Request` for malformed envelope, unsupported version, or missing identity fields. |
 | `/v1/repositories/{repository_id}/hotspots` | GET | `?window=cumulative` (default, only supported value), optional `?session_id=<id>` | `200 OK` with `LiveHotspotsResponse` (JSON) containing `schemaVersion`, `repositoryId`, `cursor`, `generatedAt`, and ranked `entries`. `400 Bad Request` for unsupported `window` values. |
 | `/v1/repositories/{repository_id}/signals` | GET | Optional `?after=<signal_id>` (cursor for replay/resume) | `200 OK` with `text/event-stream` (SSE). Each event carries `id: <signal_id>` and `data: <HotspotSignal JSON>`. The stream replays persisted signals with `id > after`, then continues with live signals. Includes a 15-second `keep-alive` heartbeat. |
+| `/v1/repositories/{repository_id}/sessions` | GET | Optional `?limit=N&cursor=<event_id>` | `200 OK` with `{ sessions: [...], nextCursor: string | null }`. Sessions are ordered by latest server event ID descending. Limits default to 50 and are clamped between 1 and 500; the cursor continues with sessions whose latest event ID is lower. Malformed cursors return`400 Bad Request`. |
+| `/v1/repositories/{repository_id}/sessions/{session_id}` | GET | None | `200 OK` with `{ session: { ... }, events: [...] }`. Events are ordered by server event ID ascending. Missing sessions and sessions owned by another repository both return `404 Not Found`. |
+| `/v1/repositories/{repository_id}/events` | GET | Optional `?limit=N&cursor=<event_id>&session_id=<id>` | `200 OK` with `{ events: [...], nextCursor: string | null }`. Events are ordered by ID descending; a cursor returns rows with lower IDs. Limits default to 50 and are clamped between 1 and 500; malformed cursors return HTTP 400. |
+| `/v1/repositories/{repository_id}/proposals` | GET | None | `200 OK` deterministic proposal rows sorted by `proposalId`; repository-scoped only. |
+| `/v1/repositories/{repository_id}/proposals` | POST | `ProposalDocument`, max 1 MiB, repository bearer auth | `201 Created` new, `200 OK` identical revision, `409 Conflict` changed revision, explicit 400/401/403/413/422 failures. |
+| `/v1/repositories/{repository_id}/proposals/{proposal_id}` | GET | None | Full proposal, optional review decision, publication audit, and review audit; `404` when absent in repository. |
+| `/v1/repositories/{repository_id}/proposals/{proposal_id}/accept` or `/reject` | POST | Explicit reviewer/rationale/RFC3339 timestamp, max 64 KiB, repository bearer auth | `201 Created` first terminal decision, `200 OK` identical retry, `409 Conflict` opposite/changed retry. |
 
 **ServerIngestEnvelope structure:**
 
@@ -644,6 +653,8 @@ Starts a long-lived HTTP server for central trace event ingest and live hotspot 
 - `error_reason` is present only for rejected events.
 
 **Idempotency:** Events are deduplicated by composite key `(repository_id, workspace_id, agent_id, producer_event_id)`. Re-submitting an identical event returns status `"idempotent"` with the original `received_at` timestamp.
+
+**Proposal write auth:** `SCRYRS_PROPOSAL_WRITE_CREDENTIALS` is a JSON array of `{repositoryId, actorId, token}` records. Server hashes tokens in memory and authorizes only the configured repository. Review `reviewer` must equal authenticated `actorId`. Proposal/review rows are retained without delete APIs; idempotent retries preserve first audit timestamps.
 
 **LiveHotspotsResponse structure:**
 
@@ -706,7 +717,7 @@ Starts a long-lived HTTP server for central trace event ingest and live hotspot 
 Starts the embedded Vue.js dashboard HTTP server in one of two explicit modes:
 
 - **Local mode (default):** reads `.scryrs/hotspots.json` and `.scryrs/scryrs.db` from the current working directory.
-- **Live mode:** proxies live hotspot rankings and hotspot-signal SSE from `scryrs server` when both `--server-url` and `--repository-id` are provided.
+- **Live mode:** proxies repository-scoped hotspots, hotspot-signal SSE, sessions, session detail, events, routes, and proposals from `scryrs server` when both `--server-url` and `--repository-id` are provided.
 
 | Field | Value |
 | ------- | ------- |
@@ -724,20 +735,26 @@ Starts the embedded Vue.js dashboard HTTP server in one of two explicit modes:
 
 | Endpoint | Mode | Response |
 | ---------- | ------ | ---------- |
-| `GET /api/meta` | local + live | `200 OK` with `{ "mode": "local" | "live", "repositoryPath": "<absolute path>", "repositoryId": string | null }`. |
+| `GET /api/meta` | local + live | `200 OK` with mode/repository identity plus `proposalReadsAvailable` and `proposalReviewWritesAvailable` capability booleans. |
 | `GET /api/hotspots` | local | `200 OK` with `.scryrs/hotspots.json` content as JSON. `404 Not Found` if no hotspot report exists. |
 | `GET /api/hotspots` | live | `200 OK` with the normalized live rankings payload from `GET /v1/repositories/{repository_id}/hotspots?window=cumulative`, preserving upstream `cursor`. `502 Bad Gateway` when the configured server is unreachable or returns a non-success response. |
 | `GET /api/signals?after=<id>` | live | `200 OK` with `text/event-stream`, proxied from `GET /v1/repositories/{repository_id}/signals?after=<id>`. The dashboard streams replayed and live events through without buffering the full upstream response. |
 | `GET /api/sessions` | local | `200 OK` with JSON array of session objects (`sessionId`, `startedAt`, `endedAt`, `eventCount`, `source`), ordered by `startedAt DESC`, default limit 50. `404 Not Found` if no `.scryrs/scryrs.db`. `502 Bad Gateway` if store is corrupt. |
+| `GET /api/sessions` | live | `200 OK` with the server session page normalized to the existing JSON array contract. The dashboard forwards the bounded `limit` to the configured repository endpoint. |
 | `GET /api/sessions/:sessionId` | local | `200 OK` with `{ "session": { ... }, "events": [ ... ] }` — full session detail including all events. `404 Not Found` if session does not exist. `502 Bad Gateway` if store is corrupt. |
-| `GET /api/events` | local | `200 OK` with `{ events: [...], nextCursor: string | null }`, cursor-based pagination via`?limit=N&cursor=<token>&session_id=<id>`. |
+| `GET /api/sessions/:sessionId` | live | `200 OK` with server-backed session detail from the configured repository endpoint. |
+| `GET /api/events` | local | `200 OK` with `{ events: [...], nextCursor: string | null }`, cursor-based pagination via`?limit=N&cursor=<token>&sessionId=<id>`. |
+| `GET /api/events` | live | Same browser contract as local mode, proxied to the configured repository with `limit`, event-ID `cursor`, and optional `session_id`. |
 | `GET /api/proposals` | local | `200 OK` with JSON array of proposal list rows (`proposalId`, `title`, `targetType`, `createdAt`, `state`), sorted by `proposalId` ascending. `404 Not Found` when `.scryrs/proposals/` is missing. `502 Bad Gateway` when any proposal JSON is malformed or conflicting accepted+rejected artifacts exist. |
 | `GET /api/proposals/:proposalId` | local | `200 OK` with the full `ProposalDocument` fields plus an optional `reviewDecision` object (`reviewer`, `outcome`, `decidedAt`, `rationale`) when accepted or rejected artifacts exist. `404 Not Found` when the proposal is missing. `502 Bad Gateway` when the proposal JSON is malformed or conflicting accepted+rejected artifacts exist. |
 | `POST /api/proposals/:proposalId/accept` | local | `200 OK` after writing `.scryrs/accepted/{proposalId}.json` via the shared proposal-review writer. Requires JSON body `reviewer`, `rationale`, `decidedAt`; optional `reviewedContent` is accepted only for Markdown-backed targets. `400 Bad Request` for missing/invalid metadata or unsupported edited-content input. `409 Conflict` for opposite-outcome conflicts or same-outcome reruns that would change serialized bytes. `502 Bad Gateway` for filesystem, serialization, or malformed-artifact failures. |
 | `POST /api/proposals/:proposalId/reject` | local | `200 OK` after writing `.scryrs/rejected/{proposalId}.json` via the shared proposal-review writer. Requires JSON body `reviewer`, `rationale`, `decidedAt`. `400 Bad Request` for missing/invalid metadata. `409 Conflict` for opposite-outcome conflicts or same-outcome reruns that would change serialized bytes. `502 Bad Gateway` for filesystem, serialization, or malformed-artifact failures. |
-| `GET /api/sessions`, `GET /api/sessions/:sessionId`, `GET /api/events`, `GET /api/proposals`, `GET /api/proposals/:proposalId`, `POST /api/proposals/:proposalId/accept`, `POST /api/proposals/:proposalId/reject` | live | `404 Not Found` with an explanation that the route is unavailable in live mode. |
+| `GET /api/proposals`, `GET /api/proposals/:proposalId` | live | Repository-scoped server inventory/detail proxy; no local filesystem fallback. |
+| `POST /api/proposals/:proposalId/accept`, `POST /api/proposals/:proposalId/reject` | live | Authenticated server review proxy when `SCRYRS_PROPOSAL_WRITE_TOKEN` is configured; preserves upstream 400/401/403/409/413/422 and maps upstream 5xx/unreachable failures to `502`. |
 
-**SPA contract:** The SPA is a Vue 3 application built with Vite, Bun, Tailwind CSS v4, and shadcn-vue, then embedded in the binary via `rust-embed`. Local mode shows Hotspots, Sessions, Proposals, Events, and About; pending proposal detail views expose explicit accept/reject controls that require reviewer metadata and optionally reviewed Markdown for Markdown-backed targets. Live mode shows Hotspots, Signals, and About, hides Sessions/Events from navigation, and renders readable unavailable views on direct navigation to local-only routes. The Signals view owns reconnect behavior in the browser: it starts at `/api/signals?after=0`, tracks the last seen SSE id in memory, reconnects with `?after=<last_seen_id>`, and ignores replay duplicates on resume.
+Live sessions/events/proposals requests never read local `.scryrs` data and never fall back to local artifacts. Unreachable upstreams, non-success upstream responses, and invalid upstream JSON contracts return `502 Bad Gateway` with an explicit upstream error.
+
+**SPA contract:** The SPA is a Vue 3 application built with Vite, Bun, Tailwind CSS v4, and shadcn-vue, then embedded in the binary via `rust-embed`. Local mode shows Hotspots, Sessions, Proposals, Events, Routes, and About. Live mode adds Signals and shows Proposals only when read capability is reported. Pending proposal detail views expose accept/reject controls only when write capability exists; unavailable write authorization is stated explicitly. The Signals view owns reconnect behavior in the browser: it starts at `/api/signals?after=0`, tracks the last seen SSE id in memory, reconnects with `?after=<last_seen_id>`, and ignores replay duplicates on resume.
 
 ## Global flags
 
@@ -869,16 +886,18 @@ All error messages and human-facing diagnostics are written to stderr.
 
 ### Proposals command
 
-**When to call:** An agent should call `scryrs proposals list <PATH>` to inspect pending versus terminal review state, `scryrs proposals accept <PATH> <ID> ...` to write an accepted `ProposalReviewDecision`, or `scryrs proposals reject <PATH> <ID> ...` to write a rejected `ProposalReviewDecision`. Publishing docs output remains a separate `scryrs publish ...` step.
+**When to call:** Use `scryrs proposals list <PATH>` to inspect state, `scryrs proposals publish <PATH> <ID>` to copy one validated proposal into live repository storage, and `accept`/`reject` for local filesystem decisions. Publishing accepted knowledge to docs remains separate `scryrs publish ...` behavior.
 
 **Input:**
 
 - `list`: explicit local directory path containing `.scryrs/proposals/` and optional `.scryrs/accepted/` / `.scryrs/rejected/`
+- `publish`: explicit local directory path and proposal ID; remote server/repository from flags/config; token only from `SCRYRS_PROPOSAL_WRITE_TOKEN` or `.scryrs/.env`
 - `accept` / `reject`: explicit local directory path, proposal ID, and mandatory `--reviewer`, `--rationale`, `--decided-at <RFC3339>` metadata
 
 **Output:**
 
 - `list`: JSON array of rows with `proposalId`, `title`, `targetType`, `createdAt`, and `state`
+- `publish`: publication audit JSON; local proposal remains byte-identical
 - `accept`: no stdout; writes `.scryrs/accepted/{proposalId}.json`
 - `reject`: no stdout; writes `.scryrs/rejected/{proposalId}.json`
 

@@ -525,6 +525,57 @@ fn record_default_path_uses_canonical_db() {
     assert_eq!(fallback, scryrs_core::CANONICAL_STORE_PATH);
 }
 
+// --- normalization is a translation concern, not a store concern ---
+
+/// Path subject normalization lives in the harness adapters. A pre-built event
+/// arriving through `record --stdin` from an external producer is recorded as
+/// supplied — the store does not rewrite subjects behind the producer's back.
+#[test]
+fn record_stdin_records_prebuilt_subjects_as_given() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    let store_path = dir.path().join("as-given.db");
+    crate::store_override::set(
+        store_path
+            .to_str()
+            .unwrap_or_else(|| panic!("store path not valid UTF-8"))
+            .to_string(),
+    );
+
+    // An absolute, un-normalized path an adapter would have made relative.
+    let absolute = "/somewhere/else/src/a.rs";
+    let event = format!(
+        r#"{{"schema_version":"{}","timestamp":"2026-06-20T00:00:00Z","session_id":"s1","event_type":"FileOpened","tool_name":"read","payload":{{"type":"FileOpened","path":"{}"}},"outcome":{{"result":"Success"}}}}"#,
+        SCHEMA_VERSION, absolute
+    );
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_eq!(
+        run_record_with_io(
+            ["record", "--stdin", "--mode", "local"],
+            &mut out,
+            &mut err,
+            format!("{event}\n").as_bytes()
+        ),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&err)
+    );
+
+    let conn = rusqlite::Connection::open(&store_path).unwrap_or_else(|e| panic!("reopen db: {e}"));
+    let (subject, subject_kind): (String, String) = conn
+        .query_row(
+            "SELECT subject, subject_kind FROM trace_events LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap_or_else(|e| panic!("row: {e}"));
+
+    assert_eq!(subject, absolute, "the store must not rewrite the subject");
+    // An absolute subject is classified external, but it is still not rewritten.
+    assert_eq!(subject_kind, "external_file");
+}
+
 // --- 2.1: --stdin SQLite row-level verification ---
 
 #[test]

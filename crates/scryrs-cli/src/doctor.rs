@@ -10,7 +10,9 @@ use crate::remote_config::{self, RemoteConfigError};
 
 const DOCTOR_SCHEMA_VERSION: &str = "1.0.0";
 const DEFAULT_LIVE_TIMEOUT_MS: u64 = 3000;
-const CLAUDE_HOOK_COMMAND: &str = "scryrs hook claude-code";
+// The Claude Code hook contract lives in one place: a doctor that disagreed
+// with init about the command or the events would report the wrong thing.
+use crate::init::{CLAUDE_HOOK_COMMAND, CLAUDE_HOOK_EVENTS, CLAUDE_STALE_HOOK_EVENT};
 
 const DOCS_LINKS: &[DocLink] = &[
     DocLink {
@@ -534,34 +536,83 @@ fn claude_hook_finding(repo_root: &Path) -> DoctorFinding {
         }
     };
 
-    let installed = parsed
-        .get("hooks")
-        .and_then(Value::as_object)
-        .and_then(|hooks| hooks.get("PreToolUse"))
-        .and_then(Value::as_array)
-        .map(|entries| {
-            entries.iter().any(|entry| {
-                entry
-                    .get("hooks")
-                    .and_then(Value::as_array)
-                    .map(|hooks| {
-                        hooks.iter().any(|hook| {
-                            hook.get("type").and_then(Value::as_str) == Some("command")
-                                && hook.get("command").and_then(Value::as_str)
-                                    == Some(CLAUDE_HOOK_COMMAND)
+    // Registered on the given hook event?
+    let registered_on = |event: &str| -> bool {
+        parsed
+            .get("hooks")
+            .and_then(Value::as_object)
+            .and_then(|hooks| hooks.get(event))
+            .and_then(Value::as_array)
+            .map(|entries| {
+                entries.iter().any(|entry| {
+                    entry
+                        .get("hooks")
+                        .and_then(Value::as_array)
+                        .map(|hooks| {
+                            hooks.iter().any(|hook| {
+                                hook.get("type").and_then(Value::as_str) == Some("command")
+                                    && hook.get("command").and_then(Value::as_str)
+                                        == Some(CLAUDE_HOOK_COMMAND)
+                            })
                         })
-                    })
-                    .unwrap_or(false)
+                        .unwrap_or(false)
+                })
             })
-        })
-        .unwrap_or(false);
+            .unwrap_or(false)
+    };
 
-    if installed {
+    // A stale PreToolUse registration double-counts every event alongside the
+    // post-tool hooks, so report it before reporting success.
+    if registered_on(CLAUDE_STALE_HOOK_EVENT) {
+        return DoctorFinding::new(
+            "claude_code_hook",
+            Severity::Warn,
+            format!(
+                "Stale scryrs PreToolUse hook registered at {}. PreToolUse cannot carry a tool \
+                 outcome and double-counts events alongside the post-tool hooks. Re-run \
+                 `scryrs init --agent claude-code` to replace it.",
+                settings_path.display()
+            ),
+            Some(json!({
+                "path": settings_path.display().to_string(),
+                "stalePreToolUse": true,
+            })),
+        );
+    }
+
+    let missing_events: Vec<&str> = CLAUDE_HOOK_EVENTS
+        .iter()
+        .copied()
+        .filter(|event| !registered_on(event))
+        .collect();
+
+    if missing_events.is_empty() {
         DoctorFinding::new(
             "claude_code_hook",
             Severity::Ok,
             format!("Claude Code hook detected at {}", settings_path.display()),
-            Some(json!({ "path": settings_path.display().to_string(), "installed": true })),
+            Some(json!({
+                "path": settings_path.display().to_string(),
+                "installed": true,
+                "events": CLAUDE_HOOK_EVENTS,
+            })),
+        )
+    } else if missing_events.len() < CLAUDE_HOOK_EVENTS.len() {
+        // Partially registered: failures or successes are silently unrecorded.
+        DoctorFinding::new(
+            "claude_code_hook",
+            Severity::Warn,
+            format!(
+                "Claude Code hook is only partially registered at {} (missing: {}). Re-run \
+                 `scryrs init --agent claude-code`.",
+                settings_path.display(),
+                missing_events.join(", ")
+            ),
+            Some(json!({
+                "path": settings_path.display().to_string(),
+                "installed": false,
+                "missingEvents": missing_events,
+            })),
         )
     } else {
         DoctorFinding::new(
@@ -1140,26 +1191,30 @@ mod tests {
             .unwrap_or_else(|error| panic!("append event: {error}"));
     }
 
-    fn install_claude_hook(repo_root: &Path) {
+    /// Install the hook on the given events (as `scryrs init` would).
+    fn install_claude_hook_on(repo_root: &Path, events: &[&str]) {
         let claude_dir = repo_root.join(".claude");
         fs::create_dir_all(&claude_dir).unwrap_or_else(|error| panic!("create .claude: {error}"));
+        let mut hooks = serde_json::Map::new();
+        for event in events {
+            hooks.insert(
+                (*event).to_string(),
+                json!([{
+                    "matcher": "",
+                    "hooks": [ { "type": "command", "command": CLAUDE_HOOK_COMMAND } ]
+                }]),
+            );
+        }
         fs::write(
             claude_dir.join("settings.json"),
-            serde_json::to_string_pretty(&json!({
-                "hooks": {
-                    "PreToolUse": [
-                        {
-                            "matcher": "",
-                            "hooks": [
-                                { "type": "command", "command": CLAUDE_HOOK_COMMAND }
-                            ]
-                        }
-                    ]
-                }
-            }))
-            .unwrap_or_else(|error| panic!("serialize settings: {error}")),
+            serde_json::to_string_pretty(&json!({ "hooks": hooks }))
+                .unwrap_or_else(|error| panic!("serialize settings: {error}")),
         )
         .unwrap_or_else(|error| panic!("write settings: {error}"));
+    }
+
+    fn install_claude_hook(repo_root: &Path) {
+        install_claude_hook_on(repo_root, CLAUDE_HOOK_EVENTS);
     }
 
     fn install_pi_hook(repo_root: &Path) {
@@ -1392,6 +1447,55 @@ mod tests {
             })
             .unwrap_or_else(|| panic!("missing claude finding: {report}"));
         assert_eq!(claude["status"], "ok");
+    }
+
+    /// A stale PreToolUse registration double-counts every event, so doctor must
+    /// call it out rather than report a healthy hook.
+    #[test]
+    fn stale_pretooluse_registration_is_reported() {
+        let temp = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        install_claude_hook_on(temp.path(), &[CLAUDE_STALE_HOOK_EVENT]);
+
+        let (exit, stdout, _) = run_doctor(&["doctor", "--json"], temp.path());
+
+        assert_eq!(exit, 0, "a warn finding must not fail the exit code");
+        let report = read_json_report(&stdout);
+        let claude = report["findings"]
+            .as_array()
+            .and_then(|findings| {
+                findings
+                    .iter()
+                    .find(|finding| finding["category"] == "claude_code_hook")
+            })
+            .unwrap_or_else(|| panic!("missing claude finding: {report}"));
+        assert_eq!(claude["status"], "warn");
+        assert_eq!(claude["details"]["stalePreToolUse"], true);
+    }
+
+    /// Registered on only one of the two events silently loses either every
+    /// failure or every success.
+    #[test]
+    fn partial_registration_is_reported() {
+        let temp = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        install_claude_hook_on(temp.path(), &[CLAUDE_HOOK_EVENTS[0]]);
+
+        let (exit, stdout, _) = run_doctor(&["doctor", "--json"], temp.path());
+
+        assert_eq!(exit, 0);
+        let report = read_json_report(&stdout);
+        let claude = report["findings"]
+            .as_array()
+            .and_then(|findings| {
+                findings
+                    .iter()
+                    .find(|finding| finding["category"] == "claude_code_hook")
+            })
+            .unwrap_or_else(|| panic!("missing claude finding: {report}"));
+        assert_eq!(claude["status"], "warn");
+        assert_eq!(
+            claude["details"]["missingEvents"],
+            json!([CLAUDE_HOOK_EVENTS[1]])
+        );
     }
 
     #[test]

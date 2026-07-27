@@ -1,0 +1,1 @@
+{"session_id":"fixture","cwd":"/repo","toolName":"grep","input":{"pattern":"fn translate","path":"crates/","glob":"*.rs","ignoreCase":false,"context":2,"limit":100},"isError":false}

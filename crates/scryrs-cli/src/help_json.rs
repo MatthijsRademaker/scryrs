@@ -4,7 +4,7 @@ use serde_json::json;
 
 /// Version of the `--help-json` surface document format, independent of
 /// `SCHEMA_VERSION` which governs command output envelopes.
-const SURFACE_VERSION: &str = "0.18.0";
+const SURFACE_VERSION: &str = "0.20.0";
 
 pub(crate) fn cli_surface_doc() -> String {
     let doc = json!({
@@ -278,6 +278,24 @@ pub(crate) fn cli_surface_doc() -> String {
                         }
                     },
                     {
+                        "name": "publish",
+                        "description": "Publish one validated local proposal to repository-scoped live storage without changing the local artifact",
+                        "arguments": [
+                            {"name": "PATH", "type": "string", "required": true, "description": "Path to the repository root directory"},
+                            {"name": "ID", "type": "string", "required": true, "description": "Proposal identifier to publish"}
+                        ],
+                        "flags": [
+                            {"name": "server-url", "long": "--server-url", "type": "string", "description": "Live server base URL"},
+                            {"name": "repository-id", "long": "--repository-id", "type": "string", "description": "Repository identity"}
+                        ],
+                        "authentication": "SCRYRS_PROPOSAL_WRITE_TOKEN from environment or .scryrs/.env only",
+                        "retry": "One retry for transport and HTTP 5xx failures",
+                        "output": {
+                            "mimeType": "application/json",
+                            "description": "Immutable publication audit metadata including revisionSha256, publisherId, publishedAt, and unchanged"
+                        }
+                    },
+                    {
                         "name": "accept",
                         "description": "Write a deterministic accepted ProposalReviewDecision under .scryrs/accepted/",
                         "arguments": [
@@ -477,6 +495,47 @@ pub(crate) fn cli_surface_doc() -> String {
                             "0": "Success (including zero-match results)",
                             "1": "Serialization or stdout write failure",
                             "2": "Usage error, missing .scryrs/routes.json, malformed JSON, or schema version mismatch"
+                        }
+                    },
+                    {
+                        "name": "publish",
+                        "description": "Publish the generated .scryrs/routes.json to authenticated repository-scoped latest-manifest storage",
+                        "arguments": [
+                            {
+                                "name": "PATH",
+                                "type": "string",
+                                "required": true,
+                                "description": "Path to the repository root directory"
+                            },
+                            {
+                                "name": "server-url",
+                                "flag": "--server-url",
+                                "type": "string",
+                                "required": false,
+                                "description": "Live server base URL; normal remote configuration precedence applies"
+                            },
+                            {
+                                "name": "repository-id",
+                                "flag": "--repository-id",
+                                "type": "string",
+                                "required": false,
+                                "description": "Repository identity; normal remote configuration precedence applies"
+                            }
+                        ],
+                        "authentication": {
+                            "clientToken": "SCRYRS_ROUTE_PUBLISH_TOKEN or .scryrs/.env",
+                            "serverCredentials": "SCRYRS_ROUTE_PUBLISH_CREDENTIALS JSON",
+                            "repositoryBound": true
+                        },
+                        "retry": "One retry for transport and HTTP 5xx failures; server publication is idempotent",
+                        "output": {
+                            "mimeType": "application/json",
+                            "description": "Publication metadata with repositoryId, schemaVersion, contentSha256, publisherId, publishedAt, and unchanged"
+                        },
+                        "exitCodes": {
+                            "0": "Published or idempotent replay",
+                            "1": "Network, server, response-contract, serialization, or output failure",
+                            "2": "Usage/config error, missing .scryrs/routes.json, malformed JSON, or schema version mismatch"
                         }
                     },
                     {

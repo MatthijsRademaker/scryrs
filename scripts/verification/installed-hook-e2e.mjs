@@ -8,7 +8,7 @@
  *
  *  - Claude Code: init create-or-merges `.claude/settings.json` with the native
  *    `scryrs hook claude-code` command hook (no `.mjs`, no node hook). The
- *    fixture drives `scryrs hook claude-code` with a PreToolUse payload on
+ *    fixture drives `scryrs hook claude-code` with a PostToolUse payload on
  *    stdin and confirms persistence via `scryrs hotspots .`.
  *  - Pi: init installs the slimmed `index.ts` shim. The fixture transpiles it
  *    via tsx, exercises it with a simulated `tool_result`, proves it invokes
@@ -96,11 +96,15 @@ function analyzedEventCount(cwd) {
 	}
 }
 
-function countNativeClaudeHook(settings) {
-	const pre = settings?.hooks?.PreToolUse;
-	if (!Array.isArray(pre)) return 0;
+// scryrs registers on both post-tool events: PostToolUse fires only on success,
+// and failures arrive on PostToolUseFailure.
+const CLAUDE_HOOK_EVENTS = ["PostToolUse", "PostToolUseFailure"];
+
+function countNativeClaudeHookOn(settings, event) {
+	const entries = settings?.hooks?.[event];
+	if (!Array.isArray(entries)) return 0;
 	let n = 0;
-	for (const entry of pre) {
+	for (const entry of entries) {
 		const hooks = entry?.hooks;
 		if (!Array.isArray(hooks)) continue;
 		for (const h of hooks) {
@@ -109,6 +113,13 @@ function countNativeClaudeHook(settings) {
 		}
 	}
 	return n;
+}
+
+function countNativeClaudeHook(settings) {
+	return CLAUDE_HOOK_EVENTS.reduce(
+		(total, event) => total + countNativeClaudeHookOn(settings, event),
+		0,
+	);
 }
 
 // -----------------------------------------------------------------------
@@ -139,9 +150,15 @@ function testClaudeCodeInstalled() {
 		const settingsPath = join(consumerDir, ".claude", "settings.json");
 		assert(existsSync(settingsPath), "init creates .claude/settings.json");
 		const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+		for (const event of CLAUDE_HOOK_EVENTS) {
+			assert(
+				countNativeClaudeHookOn(settings, event) === 1,
+				`settings.json ${event} hook command is \`scryrs hook claude-code\``,
+			);
+		}
 		assert(
-			countNativeClaudeHook(settings) === 1,
-			"settings.json PreToolUse hook command is `scryrs hook claude-code`",
+			countNativeClaudeHookOn(settings, "PreToolUse") === 0,
+			"settings.json has no PreToolUse registration (it cannot carry an outcome)",
 		);
 		assert(
 			!existsSync(join(consumerDir, ".claude", "hooks")),
@@ -166,7 +183,7 @@ function testClaudeCodeInstalled() {
 			"next steps do not mention any .mjs file",
 		);
 
-		// 4. Drive the native command with a PreToolUse payload on stdin.
+		// 4. Drive the native command with a PostToolUse payload on stdin.
 		const payload = JSON.stringify({
 			session_id: "installed-cc",
 			cwd: consumerDir,

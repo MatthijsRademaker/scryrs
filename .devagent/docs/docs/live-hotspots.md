@@ -147,7 +147,7 @@ Start the server with no flags — it binds `127.0.0.1:8081` and stores at `.scr
 scryrs server
 ```
 
-This starts the long-lived HTTP server with all three REST endpoints. The startup message prints the listen address and store path to stderr. Override `--bind`, `--port`, or `--store` only when the defaults don't fit (for example, `--bind 0.0.0.0` to accept connections from other hosts).
+This starts the long-lived HTTP server with all six HTTP endpoints. The startup message prints the listen address and store path to stderr. Override `--bind`, `--port`, or `--store` only when the defaults don't fit (for example, `--bind 0.0.0.0` to accept connections from other hosts).
 
 To configure hooks for remote mode, all nine event families and the `TraceEvent` schema remain identical to local mode. Hooks continue to emit the same `TraceEvent` records, and `scryrs record` handles the transport wrapper automatically when remote ingest is configured. See the [CLI v0 Contract](./cli-v0-contract.md) for the complete endpoint surface and the [Trace Hook Contract](./trace-hook-contract.md) appendix for remote ingestion identity field semantics and the `ServerIngestEnvelope` transport contract.
 
@@ -171,6 +171,9 @@ on same-origin `/api/*` calls and lets the dashboard backend proxy the live serv
 - `GET /api/meta` reports `mode: "live"` and the configured `repositoryId`.
 - `GET /api/hotspots` proxies `GET /v1/repositories/{repository_id}/hotspots?window=cumulative` and preserves the upstream `cursor`.
 - `GET /api/signals?after=<id>` proxies the server SSE endpoint and streams replayed plus live `HotspotSignal` events without buffering the full upstream response.
+- `GET /api/sessions?limit=<n>` proxies repository-scoped server summaries and normalizes the server page to the existing browser array contract.
+- `GET /api/sessions/:sessionId` proxies repository-scoped session detail with events ordered by ascending server event ID.
+- `GET /api/events?limit=<n>&cursor=<event_id>&sessionId=<id>` proxies repository-scoped event pages. Events are newest first; `nextCursor` loads lower event IDs.
 
 The browser owns reconnect behavior for the current page lifecycle. On first open, the Signals view connects to `/api/signals?after=0`. After a disconnect it reconnects with the last seen SSE id, for example `/api/signals?after=57`, and ignores replay duplicates that the server legitimately re-sends on resume. A full page refresh starts over from `after=0`.
 
@@ -179,10 +182,10 @@ Local and live dashboard modes stay deliberately separate:
 | Concern | Local dashboard | Live dashboard |
 | --- | --- | --- |
 | Hotspot source | `.scryrs/hotspots.json` | `scryrs server` cumulative query |
-| Session/Event views | Available | Hidden from navigation; direct URLs show an unavailable explanation |
+| Session/Event views | Available from `.scryrs/scryrs.db` | Available from repository-scoped `scryrs server` APIs |
 | Signals view | Unavailable | Available with explicit connection-state UI |
 | Subject rendering | Repo-relative file shortening when possible | Raw server subject strings, no implied local artifact path |
-| Fallback behavior | Reads local artifacts only | No local fallback or local/live merge |
+| Fallback behavior | Reads local artifacts only | No local fallback or local/live merge; upstream failures return `502 Bad Gateway` |
 
 ## Related Pages
 

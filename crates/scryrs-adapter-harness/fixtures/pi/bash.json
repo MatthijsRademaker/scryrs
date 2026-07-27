@@ -1,0 +1,1 @@
+{"session_id":"fixture","cwd":"/repo","toolName":"bash","input":{"command":"cargo test --workspace","timeout":600000},"isError":false}

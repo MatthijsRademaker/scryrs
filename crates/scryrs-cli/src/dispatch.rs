@@ -87,6 +87,19 @@ where
         return crate::route_explain::execute_route_explain(&mut out, &mut err, &args[2..]);
     }
 
+    if args.len() >= 2 && args[0] == "route" && args[1] == "publish" {
+        #[cfg(feature = "core")]
+        return crate::route_publish::execute_route_publish(&mut out, &mut err, &args[2..]);
+        #[cfg(not(feature = "core"))]
+        {
+            let _ = writeln!(
+                err,
+                "scryrs route publish: unavailable (core feature not enabled)"
+            );
+            return 2;
+        }
+    }
+
     if args.len() >= 3 && args[0] == "route" && args[1] == "bundle" {
         return crate::route_bundle::execute_route_bundle(&mut out, &mut err, &args[2..]);
     }
@@ -447,6 +460,27 @@ where
                         ),
                 )
                 .subcommand(
+                    Command::new("publish")
+                        .about("Publish the generated route manifest to the live server")
+                        .disable_help_flag(true)
+                        .disable_version_flag(true)
+                        .arg(Arg::new("PATH").value_name("PATH"))
+                        .arg(
+                            Arg::new("server-url")
+                                .long("server-url")
+                                .value_name("URL")
+                                .num_args(1)
+                                .action(clap::ArgAction::Set),
+                        )
+                        .arg(
+                            Arg::new("repository-id")
+                                .long("repository-id")
+                                .value_name("ID")
+                                .num_args(1)
+                                .action(clap::ArgAction::Set),
+                        ),
+                )
+                .subcommand(
                     Command::new("bundle")
                         .about("Emit a bounded context-loading plan from route hints")
                         .disable_help_flag(true)
@@ -631,6 +665,15 @@ where
                     match m.subcommand() {
                         Some(("explain", _)) => {
                             if writeln!(err, "scryrs route explain: internal dispatch error").is_err()
+                                || writeln!(err, "See `scryrs --help`").is_err()
+                            {
+                                1
+                            } else {
+                                2
+                            }
+                        }
+                        Some(("publish", _)) => {
+                            if writeln!(err, "scryrs route publish: internal dispatch error").is_err()
                                 || writeln!(err, "See `scryrs --help`").is_err()
                             {
                                 1

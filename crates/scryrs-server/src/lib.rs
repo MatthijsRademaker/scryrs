@@ -7,6 +7,10 @@
 use std::net::IpAddr;
 use std::path::PathBuf;
 
+mod proposal_api;
+mod proposal_records;
+pub mod read_models;
+mod route_manifests;
 pub mod server;
 pub mod store;
 pub(crate) mod time;
@@ -27,6 +31,10 @@ pub struct Config {
     /// Cumulative hotspot score threshold that triggers a `HotspotSignal`.
     /// Defaults to `DEFAULT_SIGNAL_THRESHOLD` (10).
     pub signal_threshold: u32,
+    /// Repository-bound bearer credentials authorized to publish route manifests.
+    pub route_publish_credentials: Vec<server::RoutePublishCredential>,
+    /// Repository-bound bearer credentials authorized for proposal writes.
+    pub proposal_write_credentials: Vec<server::ProposalWriteCredential>,
 }
 
 impl Config {
@@ -39,6 +47,8 @@ impl Config {
             bind_address: IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
             store_path: PathBuf::from(".scryrs/server.db"),
             signal_threshold: DEFAULT_SIGNAL_THRESHOLD,
+            route_publish_credentials: Vec::new(),
+            proposal_write_credentials: Vec::new(),
         }
     }
 
@@ -69,7 +79,29 @@ impl Config {
             bind_address,
             store_path,
             signal_threshold,
+            route_publish_credentials: Vec::new(),
+            proposal_write_credentials: Vec::new(),
         })
+    }
+
+    /// Configure authenticated, repository-bound route-manifest publishers.
+    #[must_use]
+    pub fn with_route_publish_credentials(
+        mut self,
+        credentials: Vec<server::RoutePublishCredential>,
+    ) -> Self {
+        self.route_publish_credentials = credentials;
+        self
+    }
+
+    /// Configure authenticated, repository-bound proposal publishers/reviewers.
+    #[must_use]
+    pub fn with_proposal_write_credentials(
+        mut self,
+        credentials: Vec<server::ProposalWriteCredential>,
+    ) -> Self {
+        self.proposal_write_credentials = credentials;
+        self
     }
 }
 

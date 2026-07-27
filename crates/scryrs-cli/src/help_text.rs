@@ -55,6 +55,11 @@ COMMANDS\n\
       Emits a single-line RouteManifestDocument JSON to stdout and .scryrs/routes.json.\n\
       target stays the stable graph-node id; loadTarget adds file/doc_page/\n\
       non_loadable retrieval context without changing schema versions.\n\
+  scryrs route publish <PATH> [--server-url <URL>] [--repository-id <ID>]\n\
+      Publish .scryrs/routes.json to repository-scoped live storage. Server URL\n\
+      and repository ID use normal remote precedence. Authentication uses only\n\
+      SCRYRS_ROUTE_PUBLISH_TOKEN or .scryrs/.env. Transient failures retry once;\n\
+      output is publication metadata JSON including contentSha256 and unchanged.\n\
   scryrs route explain <PATH> --query <TEXT>\n\
       Query the route manifest for matching entries.\n\
       Case-insensitive substring match against label, subject, id, target, kind,\n\
@@ -93,6 +98,10 @@ COMMANDS\n\
   scryrs proposals list <PATH> [--state pending|accepted|rejected|all]\n\
       List pending and reviewed proposal states from .scryrs/proposals/,\n\
       .scryrs/accepted/, and .scryrs/rejected/ as deterministic JSON.\n\
+  scryrs proposals publish <PATH> <ID> [--server-url <URL>] [--repository-id <ID>]\n\
+      Publish one validated proposal to repository-scoped live storage. Uses\n\
+      SCRYRS_PROPOSAL_WRITE_TOKEN, retries transient failures once, and never\n\
+      deletes or rewrites the local proposal artifact.\n\
   scryrs proposals accept <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339> [--content-file <PATH> | --content-stdin]\n\
       Accept a validated proposal without mutating the proposal inbox artifact.\n\
       Optional --content-file <PATH> or --content-stdin overrides accepted\n\
@@ -109,8 +118,9 @@ COMMANDS\n\
   scryrs dashboard [--mode live|local] [--port <PORT>] [--bind <ADDR>] [--server-url <URL>] [--repository-id <ID>] [--no-open] [--dev]\n\
       Start dashboard server and open the browser dashboard (live by default).\n\
   scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]\n\
-      Start the central trace ingest server with live hotspot query\n\
-      and signal streaming endpoints.\n\n\
+      Start central server with live hotspot, signal, and route APIs. Authenticated\n\
+      route publication uses SCRYRS_ROUTE_PUBLISH_CREDENTIALS JSON entries with\n\
+      repositoryId, publisherId, and token.\n\n\
 RECORD MODES\n\
   Remote mode (default): submits to the configured ingest server.\n\
       Identity resolves by precedence — flags, then environment, then\n\
@@ -195,6 +205,7 @@ EXAMPLES\n\
   scryrs publish rspress . --docs-root ./.devagent/docs/docs\n\
   scryrs graph .\n\
   scryrs route .\n\
+  SCRYRS_ROUTE_PUBLISH_TOKEN=secret scryrs route publish .\n\
   scryrs route explain . --query \"authentication\"\n\
   scryrs route bundle . --query \"authentication\" --limit 5\n\n\
 OPTIONS\n\
@@ -204,7 +215,7 @@ OPTIONS\n\
 EXIT CODES\n\
   0    Success (hotspots: JSON written; record local: all events accepted; record remote: no rejections or failures; init: hook installed; up: workspace-managed compose stack started; doctor: only ok/warn findings; propose/proposals: artifacts written or listed successfully; publish: accepted knowledge published successfully; dashboard: server shut down cleanly; server: server shut down cleanly; hook: always — fail-open, never blocks the harness)\n\
   1    Hotspots: storage error or artifact write failure. Record: rejected events or I/O error (local or server rejections). Init: I/O error. Up: docker invocation failure. Doctor: output write failure. Proposals: serialization or filesystem write failure. Publish: runtime or filesystem failure. Dashboard: port in use or artifact read error. Server: port in use or store error.\n\
-  2    Usage error; hotspots: missing/unsupported local store, unknown mode, missing live identity, live timeout/connection failure, non-2xx response, malformed live response, or live schema/repository mismatch; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, or self-install refusal; setup: unknown/missing mode, source-checkout refusal (live), or missing/invalid/conflicting live configuration; up: missing scaffold files, missing external network, or unexpected arguments; doctor: one or more structural error findings; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; publish: usage error or publish-input validation failure (invalid accepted artifacts, malformed _nav.json); route explain: missing PATH, missing required --query, or missing/malformed/schema-mismatched routes.json; route bundle: missing PATH, missing required flags, missing/malformed/schema-mismatched routes.json, or invalid --limit; dashboard: invalid flags, bind failure, or partial live-mode configuration; server: invalid flags or bind failure",
+  2    Usage error; hotspots: missing/unsupported local store, unknown mode, missing live identity, live timeout/connection failure, non-2xx response, malformed live response, or live schema/repository mismatch; record: also fatal I/O error (unreadable file, store failure, missing remote identity, transport timeout, connection failure, non-2xx response, malformed response); init: unsupported harness, collision, or self-install refusal; setup: unknown/missing mode, source-checkout refusal (live), or missing/invalid/conflicting live configuration; up: missing scaffold files, missing external network, or unexpected arguments; doctor: one or more structural error findings; proposals: invalid filter, invalid proposal/review document, unknown proposal ID, or conflicting terminal review state; publish: usage error or publish-input validation failure (invalid accepted artifacts, malformed _nav.json); route publish: usage/config error or missing/malformed/schema-mismatched routes.json; route explain: missing PATH, missing required --query, or missing/malformed/schema-mismatched routes.json; route bundle: missing PATH, missing required flags, missing/malformed/schema-mismatched routes.json, or invalid --limit; dashboard: invalid flags, bind failure, or partial live-mode configuration; server: invalid flags or bind failure",
         SCHEMA_VERSION, SCHEMA_VERSION, HOTSPOT_SCHEMA_VERSION
     )
 }

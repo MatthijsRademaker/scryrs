@@ -67,13 +67,18 @@ The category of the subject, always one of:
 
 | Kind | What it captures |
 |------|-----------------|
-| `file` | A file path agents open or edit (`src/auth/handlers.rs`) |
+| `file` | A repository file agents open, edit, or fail to find (`src/auth/handlers.rs`) |
+| `external_file` | A file outside the repository (`/home/user/.claude/CLAUDE.md`) |
 | `search` | A search query agents repeat (`error handling pattern`) |
-| `symbol` | A symbol agents inspect or fail to find (`Authenticator::verify`) |
+| `symbol` | A symbol agents inspect (`Authenticator::verify`) |
 | `command` | A shell command agents execute (`cargo test -p auth`) |
 | `document` | A document reference agents retrieve (`api/auth-flow.md`) |
 
 A subject and kind pair is the grouping key: `("file", "src/main.rs")` and `("search", "src/main.rs")` are separate hotspots because they represent different types of agent attention.
+
+**Path subjects are normalized.** Harness adapters rewrite repository paths to canonical repository-relative POSIX form before they are stored, so a file addressed as `/repo/src/main.rs` and as `src/main.rs` produces one hotspot rather than two. Paths that resolve outside the repository are recorded verbatim and grouped under `external_file`, because a path outside the repository is not loadable context for a reader of it.
+
+**Failed lookups group with the file they targeted.** When an agent reads a path that does not exist, the event is recorded as `FailedLookup` with `subjectKind` `file` — not as a `FileOpened` with a failure outcome. A file's successful and failed accesses therefore land in one entry, so `counts.eventType` carries both and the failure ratio for that subject is meaningful.
 
 ### score
 

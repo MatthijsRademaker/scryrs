@@ -19,6 +19,7 @@ import {
   canEditReviewedContent as canEditReviewedProposalContent,
   contentDisplay,
   reviewedContentPayload as buildReviewedContentPayload,
+  proposalReviewErrorLabel,
   reviewInputsValid as hasValidReviewInputs,
   showReviewForm as shouldShowReviewForm,
 } from "@/views/proposal-detail";
@@ -39,23 +40,39 @@ const shortId = computed(() =>
     : proposalId.value,
 );
 const unavailableMessage = computed(() =>
-  routeUnavailableMessage("proposal-detail", meta.mode),
+  routeUnavailableMessage(
+    "proposal-detail",
+    meta.mode,
+    meta.proposalReadsAvailable,
+  ),
 );
 const detailContent = computed(() =>
   store.detail ? contentDisplay(store.detail.proposedContent) : null,
 );
 const showReviewForm = computed(() =>
-  shouldShowReviewForm(meta.isLiveMode, store.detail),
+  shouldShowReviewForm(meta.proposalReviewWritesAvailable, store.detail),
+);
+const reviewUnavailable = computed(
+  () =>
+    !!store.detail &&
+    !store.detail.reviewDecision &&
+    !meta.proposalReviewWritesAvailable,
+);
+const reviewErrorLabel = computed(() =>
+  proposalReviewErrorLabel(store.reviewErrorStatus),
 );
 const canEditReviewedContent = computed(() =>
-  canEditReviewedProposalContent(meta.isLiveMode, store.detail),
+  canEditReviewedProposalContent(
+    meta.proposalReviewWritesAvailable,
+    store.detail,
+  ),
 );
 const reviewInputsValid = computed(() =>
   hasValidReviewInputs(reviewer.value, rationale.value, decidedAt.value),
 );
 const reviewedContentPayload = computed(() =>
   buildReviewedContentPayload(
-    meta.isLiveMode,
+    meta.proposalReviewWritesAvailable,
     store.detail,
     reviewedContent.value,
   ),
@@ -63,7 +80,7 @@ const reviewedContentPayload = computed(() =>
 
 onMounted(async () => {
   await meta.ensureLoaded();
-  if (!meta.isLiveMode) {
+  if (meta.proposalReadsAvailable) {
     void store.loadProposal(proposalId.value);
   }
 });
@@ -158,6 +175,10 @@ async function submitReject() {
             >{{ detailContent?.text }}</pre>
           </div>
 
+          <Alert v-if="reviewUnavailable">
+            Review controls unavailable: live proposal write authorization is not configured.
+          </Alert>
+
           <div v-if="showReviewForm" class="flex flex-col gap-4 rounded-md border border-border bg-muted/10 p-4">
             <div>
               <h3 class="mb-1 text-sm font-medium">Review Action</h3>
@@ -167,7 +188,7 @@ async function submitReject() {
             </div>
 
             <Alert v-if="store.reviewError" variant="destructive">
-              {{ store.reviewError }}
+              <strong>{{ reviewErrorLabel }}:</strong> {{ store.reviewError }}
             </Alert>
             <Alert v-else-if="store.reviewSuccess">
               {{ store.reviewSuccess }}

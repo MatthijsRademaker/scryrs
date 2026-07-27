@@ -10,12 +10,16 @@ const store = useProposalStore();
 const meta = useMetaStore();
 
 const unavailableMessage = computed(() =>
-  routeUnavailableMessage("proposals", meta.mode),
+  routeUnavailableMessage(
+    "proposals",
+    meta.mode,
+    meta.proposalReadsAvailable,
+  ),
 );
 
 onMounted(async () => {
   await meta.ensureLoaded();
-  if (!meta.isLiveMode) {
+  if (meta.proposalReadsAvailable) {
     void store.loadProposals();
   }
 });

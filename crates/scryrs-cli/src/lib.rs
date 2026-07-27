@@ -20,6 +20,7 @@ mod help_json;
 mod help_text;
 mod hook;
 mod hotspots;
+mod proposal_publish;
 mod proposals;
 mod propose;
 mod publish;
@@ -32,6 +33,8 @@ mod route;
 mod route_bundle;
 mod route_common;
 mod route_explain;
+#[cfg(feature = "core")]
+mod route_publish;
 #[cfg(feature = "core")]
 pub(crate) mod store_override;
 

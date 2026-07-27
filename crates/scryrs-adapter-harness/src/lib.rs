@@ -12,6 +12,11 @@ use std::path::PathBuf;
 
 use scryrs_types::{Outcome, SCHEMA_VERSION, TraceEvent, TraceEventPayload, TraceEventType};
 
+// Path-subject normalization lives in `scryrs-types` so the ingest path here and
+// the one-time historical migration in `scryrs-core` share one implementation.
+pub use scryrs_types::{PathSubject, normalize_path_subject};
+use serde_json::Value;
+
 mod claude_code;
 mod pi;
 
@@ -37,6 +42,13 @@ pub struct HookContext {
     /// here so adapters stay pure and unit-testable without touching the
     /// process environment.
     pub bash_debug: bool,
+    /// Repository root that path subjects are normalized against.
+    ///
+    /// Resolved from the harness payload's `cwd` by the hook command. This is
+    /// the same anchor the trace store lives under (`<repo_root>/.scryrs/`), so
+    /// "repository-relative" and "relative to the store's repository" are the
+    /// same thing by construction.
+    pub repo_root: PathBuf,
 }
 
 /// Error returned when an adapter cannot translate a harness event.
@@ -47,12 +59,31 @@ pub struct HookContext {
 pub enum AdapterError {
     /// The raw input was not valid JSON or did not match the expected shape.
     Parse(String),
+    /// A supported tool's key input field was absent.
+    ///
+    /// This is a harness contract violation, not a data point. The event is
+    /// dropped rather than recorded with a placeholder subject, and the hook
+    /// command records the diagnostic in `.scryrs/hooks/<harness>-warnings.log`
+    /// while still exiting 0 (fail-open toward the agent).
+    MissingField {
+        /// Harness that produced the payload (e.g. `pi`, `claude-code`).
+        harness: &'static str,
+        /// Tool name as the harness reported it.
+        tool: String,
+        /// Input key the adapter expected and did not find.
+        key: &'static str,
+    },
 }
 
 impl std::fmt::Display for AdapterError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AdapterError::Parse(reason) => write!(f, "parse error: {reason}"),
+            AdapterError::MissingField { harness, tool, key } => write!(
+                f,
+                "missing key input field: harness={harness} tool={tool} expected_key={key} \
+                 (event dropped; no placeholder subject recorded)"
+            ),
         }
     }
 }
@@ -90,6 +121,33 @@ pub fn adapter_for(harness: &str) -> Option<Box<dyn HarnessAdapter>> {
 #[must_use]
 pub fn collapse_newlines(value: &str) -> String {
     value.replace("\r\n", " ⏎ ").replace(['\n', '\r'], " ⏎ ")
+}
+
+/// Extract a required string input field, or `Err(AdapterError::MissingField)`.
+///
+/// The single extraction site for every adapter. There is deliberately no
+/// placeholder and no empty-string default: a supported tool whose key field is
+/// absent is a contract violation, and recording `"unknown"` for it made a
+/// 100%-failure-rate field-mapping bug look like data for a month.
+///
+/// An empty or whitespace-only value is treated as absent — an empty subject is
+/// no more groupable than a placeholder one.
+pub(crate) fn key_field(
+    input: &Value,
+    key: &'static str,
+    harness: &'static str,
+    tool: &str,
+) -> Result<String, AdapterError> {
+    input
+        .get(key)
+        .and_then(Value::as_str)
+        .map(collapse_newlines)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| AdapterError::MissingField {
+            harness,
+            tool: tool.to_string(),
+            key,
+        })
 }
 
 /// Whether `SCRYRS_DEBUG` is set to a non-empty value (gates `Bash` capture).
@@ -158,6 +216,7 @@ pub(crate) fn test_ctx(session_id: &str) -> HookContext {
         store_path: PathBuf::from(".scryrs/scryrs.db"),
         timestamp: "2026-06-24T00:00:00Z".to_string(),
         bash_debug: false,
+        repo_root: PathBuf::from("/repo"),
     }
 }
 

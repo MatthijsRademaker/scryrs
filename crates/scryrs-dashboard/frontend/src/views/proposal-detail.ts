@@ -6,10 +6,10 @@ export type ProposalDetailContent = {
 };
 
 export function showReviewForm(
-	isLiveMode: boolean,
+	canReview: boolean,
 	detail: ProposalDetail | null,
 ): boolean {
-	return !isLiveMode && !!detail && !detail.reviewDecision;
+	return canReview && !!detail && !detail.reviewDecision;
 }
 
 export function reviewInputsValid(
@@ -50,21 +50,21 @@ export function contentDisplay(content: unknown): ProposalDetailContent {
 }
 
 export function canEditReviewedContent(
-	isLiveMode: boolean,
+	canReview: boolean,
 	detail: ProposalDetail | null,
 ): boolean {
 	return (
-		showReviewForm(isLiveMode, detail) &&
+		showReviewForm(canReview, detail) &&
 		contentDisplay(detail?.proposedContent).type === "markdown"
 	);
 }
 
 export function reviewedContentPayload(
-	isLiveMode: boolean,
+	canReview: boolean,
 	detail: ProposalDetail | null,
 	reviewedContent: string,
 ): string | undefined {
-	if (!canEditReviewedContent(isLiveMode, detail)) {
+	if (!canEditReviewedContent(canReview, detail)) {
 		return undefined;
 	}
 	if (typeof detail?.proposedContent !== "string") {
@@ -73,4 +73,14 @@ export function reviewedContentPayload(
 	return reviewedContent === detail.proposedContent
 		? undefined
 		: reviewedContent;
+}
+
+export function proposalReviewErrorLabel(status: number): string {
+	if (status === 401 || status === 403) return "Authorization failed";
+	if (status === 400 || status === 413 || status === 422) {
+		return "Validation failed";
+	}
+	if (status === 409) return "Review conflict";
+	if (status === 502) return "Live server failed";
+	return "Review failed";
 }

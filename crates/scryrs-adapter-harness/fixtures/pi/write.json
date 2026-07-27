@@ -1,0 +1,1 @@
+{"session_id":"fixture","cwd":"/repo","toolName":"write","input":{"path":"crates/scryrs-cli/src/new.rs","content":"// new"},"isError":false}

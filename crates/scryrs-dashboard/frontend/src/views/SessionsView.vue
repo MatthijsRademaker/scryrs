@@ -12,9 +12,7 @@ const maxEvents = computed(() => Math.max(1, ...store.sessions.map((session) => 
 const unavailableMessage = computed(() => routeUnavailableMessage("sessions", meta.mode));
 onMounted(async () => {
   await meta.ensureLoaded();
-  if (!meta.isLiveMode) {
-    void store.loadSessions();
-  }
+  void store.loadSessions();
 });
 function shortId(id: string) { return id.length > 16 ? `${id.slice(0, 16)}…` : id; }
 </script>
@@ -30,8 +28,9 @@ function shortId(id: string) { return id.length > 16 ? `${id.slice(0, 16)}…` :
     </Card>
 
     <template v-else>
-      <Alert v-if="store.error" variant="destructive">{{ store.error }}</Alert>
-      <EmptyState v-else-if="!store.loading && store.sessions.length === 0" title="No sessions" description="Record trace events before opening the dashboard." />
+      <EmptyState v-if="store.loading && store.sessions.length === 0" title="Loading sessions" description="Reading repository-scoped session summaries…" />
+      <Alert v-else-if="store.error" variant="destructive">{{ store.error }}</Alert>
+      <EmptyState v-else-if="store.sessions.length === 0" title="No sessions" description="Record trace events before opening the dashboard." />
 
       <div v-else class="flex flex-col gap-2.5">
         <Card

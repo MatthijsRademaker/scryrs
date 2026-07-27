@@ -99,6 +99,8 @@ const ENV_REPOSITORY_ID: &str = "SCRYRS_REPOSITORY_ID";
 const ENV_WORKSPACE_ID: &str = "SCRYRS_WORKSPACE_ID";
 const ENV_AGENT_ID: &str = "SCRYRS_AGENT_ID";
 const ENV_TIMEOUT_MS: &str = "SCRYRS_REMOTE_TIMEOUT_MS";
+pub(crate) const ENV_ROUTE_PUBLISH_TOKEN: &str = "SCRYRS_ROUTE_PUBLISH_TOKEN";
+pub(crate) const ENV_PROPOSAL_WRITE_TOKEN: &str = "SCRYRS_PROPOSAL_WRITE_TOKEN";
 
 fn env_key(field: &str) -> &'static str {
     match field {
@@ -242,10 +244,20 @@ pub(crate) fn resolve_remote_inputs(
     }
 }
 
-/// Resolve the dashboard live target (server URL + repository id) from the
-/// precedence chain, without requiring the workspace/agent identity that
-/// ingest needs. Returns `Ok(None)` when no server URL resolves.
-#[allow(dead_code)]
+/// Resolve route publication token from process environment, then `.scryrs/.env`.
+/// Tokens are intentionally excluded from committed `scryrs.json` configuration.
+pub(crate) fn resolve_route_publish_token(base_path: Option<&Path>) -> Option<String> {
+    let dotenv = load_dotenv(base_path);
+    nonempty_value(resolve_field(None, ENV_ROUTE_PUBLISH_TOKEN, &dotenv, ""))
+}
+
+/// Resolve proposal publication/review token from environment, then `.scryrs/.env`.
+pub(crate) fn resolve_proposal_write_token(base_path: Option<&Path>) -> Option<String> {
+    let dotenv = load_dotenv(base_path);
+    nonempty_value(resolve_field(None, ENV_PROPOSAL_WRITE_TOKEN, &dotenv, ""))
+}
+
+/// Resolve dashboard/live publication server URL and repository identity.
 pub(crate) fn resolve_dashboard_target(
     base_path: Option<&Path>,
     server_url_override: Option<&str>,
@@ -793,6 +805,18 @@ mod tests {
             }
         });
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn route_publish_token_resolves_from_scryrs_dotenv() {
+        let dir = unique_temp_dir("route-publish-token");
+        write_scryrs_env(&dir, "SCRYRS_ROUTE_PUBLISH_TOKEN=repo-secret\n");
+
+        assert_eq!(
+            resolve_route_publish_token(Some(&dir)).as_deref(),
+            Some("repo-secret")
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

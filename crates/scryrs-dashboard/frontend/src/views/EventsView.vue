@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { Alert, Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, EmptyState, EventTypeBar, SelectInput } from "@/shared/ui";
-import { routeUnavailableMessage } from "@/shared/lib/dashboard-mode";
+import { routeUnavailableMessage, traceEventSubjectDisplay } from "@/shared/lib/dashboard-mode";
 import { useEventStore } from "@/stores/events";
 import { useSessionStore } from "@/stores/sessions";
 import { useMetaStore } from "@/stores/meta";
 import { colorForKey } from "@/shared/lib/viz";
-import { formatSubject } from "@/shared/lib/subject";
 import type { TraceEventItem } from "@/shared/api/client";
 
 const events = useEventStore();
@@ -14,7 +13,7 @@ const sessions = useSessionStore();
 const meta = useMetaStore();
 
 function subjectDisplay(event: TraceEventItem) {
-  return formatSubject(event.subject, meta.repositoryPath, event.subjectKind);
+  return traceEventSubjectDisplay(event, meta);
 }
 const selectedSession = ref("");
 const options = computed(() => [{ label: "All sessions", value: "" }, ...sessions.sessions.map((session) => ({ label: session.sessionId, value: session.sessionId }))]);
@@ -31,13 +30,10 @@ function loadMore() {
 
 onMounted(async () => {
   await meta.ensureLoaded();
-  if (!meta.isLiveMode) {
-    void sessions.loadSessions();
-    void events.load();
-  }
+  void sessions.loadSessions();
+  void events.load();
 });
 watch(selectedSession, (sessionId) => {
-  if (meta.isLiveMode) return;
   glowStart.value = Number.POSITIVE_INFINITY;
   void events.load({ sessionId: sessionId || null });
 });
@@ -68,8 +64,9 @@ watch(selectedSession, (sessionId) => {
         </div>
       </CardHeader>
       <CardContent class="flex flex-col gap-4">
-        <Alert v-if="events.error" variant="destructive">{{ events.error }}</Alert>
-        <EmptyState v-else-if="!events.loading && events.events.length === 0" title="No events" description="No trace events are available for this filter." />
+        <EmptyState v-if="events.loading && events.events.length === 0" title="Loading events" description="Reading repository-scoped event page…" />
+        <Alert v-else-if="events.error" variant="destructive">{{ events.error }}</Alert>
+        <EmptyState v-else-if="events.events.length === 0" title="No events" description="No trace events are available for this filter." />
         <template v-else>
           <ul class="flex max-h-[40rem] flex-col gap-1.5 overflow-auto rounded-xl border border-border bg-card/20 p-2 font-mono text-xs">
             <li

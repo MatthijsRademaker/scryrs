@@ -8,11 +8,10 @@ pub(crate) fn write_server_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(
         out,
         "scryrs server — start the central trace ingest server\n\n\
-Starts a long-lived HTTP server for trace event ingest with\n\
-read-only live hotspot query and signal streaming endpoints.\n\
-Accepts versioned trace-event batches, validates them deterministically,\n\
-and persists accepted events into a server-owned SQLite store with\n\
-first-writer-wins idempotency.\n\n\
+Starts a long-lived HTTP server for trace event ingest with live hotspot,\n\
+route explain, signal streaming, and proposal endpoints. Accepts versioned\n\
+trace-event batches, authenticated route manifests, and authenticated\n\
+proposal/review writes in a server-owned SQLite store.\n\n\
 USAGE\n\
   scryrs server [--bind <ADDR>] [--port <PORT>] [--store <PATH>]\n\n\
 FLAGS\n\
@@ -30,7 +29,18 @@ ENDPOINTS\n\
       Returns JSON LiveHotspotsResponse with ranked HotspotEntry items.\n\
   GET /v1/repositories/{{repository_id}}/signals\n\
       Server-Sent Events stream of HotspotSignal records.\n\
-      Supports ?after=<signal_id> for cursor-based replay/resume.\n"
+      Supports ?after=<signal_id> for cursor-based replay/resume.\n\
+  POST /v1/repositories/{{repository_id}}/routes/manifest\n\
+      Publishes latest validated RouteManifestDocument. Requires repository-bound\n\
+      bearer credentials configured by SCRYRS_ROUTE_PUBLISH_CREDENTIALS JSON.\n\
+  GET /v1/repositories/{{repository_id}}/routes/explain?query=<text>\n\
+      Returns deterministic RouteHintDocument from latest published manifest.\n\
+  GET|POST /v1/repositories/{{repository_id}}/proposals\n\
+      Lists proposals or publishes one with SCRYRS_PROPOSAL_WRITE_CREDENTIALS.\n\
+  GET /v1/repositories/{{repository_id}}/proposals/{{proposal_id}}\n\
+      Returns validated proposal, review decision, and immutable audit metadata.\n\
+  POST /v1/repositories/{{repository_id}}/proposals/{{proposal_id}}/accept|reject\n\
+      Records an authenticated first-terminal review decision.\n"
     )
 }
 
@@ -70,13 +80,52 @@ pub(crate) fn execute_server(err: &mut impl Write, m: &ArgMatches) -> i32 {
         }
     };
 
+    let credentials = match std::env::var(scryrs_server::server::ROUTE_PUBLISH_CREDENTIALS_ENV) {
+        Ok(raw) => match scryrs_server::server::parse_route_publish_credentials(&raw) {
+            Ok(credentials) => credentials,
+            Err(error) => {
+                let _ = writeln!(err, "scryrs server: {error}");
+                return 2;
+            }
+        },
+        Err(std::env::VarError::NotPresent) => Vec::new(),
+        Err(error) => {
+            let _ = writeln!(
+                err,
+                "scryrs server: cannot read {}: {error}",
+                scryrs_server::server::ROUTE_PUBLISH_CREDENTIALS_ENV
+            );
+            return 2;
+        }
+    };
+    let proposal_credentials =
+        match std::env::var(scryrs_server::server::PROPOSAL_WRITE_CREDENTIALS_ENV) {
+            Ok(raw) => match scryrs_server::server::parse_proposal_write_credentials(&raw) {
+                Ok(credentials) => credentials,
+                Err(error) => {
+                    let _ = writeln!(err, "scryrs server: {error}");
+                    return 2;
+                }
+            },
+            Err(std::env::VarError::NotPresent) => Vec::new(),
+            Err(error) => {
+                let _ = writeln!(
+                    err,
+                    "scryrs server: cannot read {}: {error}",
+                    scryrs_server::server::PROPOSAL_WRITE_CREDENTIALS_ENV
+                );
+                return 2;
+            }
+        };
     let config = match scryrs_server::Config::try_new(
         port,
         bind_address,
         store_path,
         scryrs_server::DEFAULT_SIGNAL_THRESHOLD,
     ) {
-        Ok(config) => config,
+        Ok(config) => config
+            .with_route_publish_credentials(credentials)
+            .with_proposal_write_credentials(proposal_credentials),
         Err(error) => {
             let _ = writeln!(err, "scryrs server: {error}");
             return 2;

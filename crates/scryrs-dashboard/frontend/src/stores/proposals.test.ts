@@ -26,6 +26,31 @@ describe("useProposalStore", () => {
 		vi.restoreAllMocks();
 	});
 
+	it("loads live-compatible proposal inventory and detail through stable API clients", async () => {
+		const rows: client.ProposalListRow[] = [
+			{
+				proposalId: "abc123",
+				title: "Proposal",
+				targetType: "docs_note",
+				createdAt: "2026-07-01T00:00:00Z",
+				state: "pending",
+			},
+		];
+		const detail = makeDetail();
+		const rowsSpy = vi.spyOn(client, "getProposals").mockResolvedValue(rows);
+		const detailSpy = vi.spyOn(client, "getProposal").mockResolvedValue(detail);
+		const store = useProposalStore();
+
+		await store.loadProposals();
+		await store.loadProposal("abc123");
+
+		expect(rowsSpy).toHaveBeenCalledTimes(1);
+		expect(detailSpy).toHaveBeenCalledWith("abc123");
+		expect(store.rows).toEqual(rows);
+		expect(store.detail).toEqual(detail);
+		expect(store.error).toBeNull();
+	});
+
 	it("acceptProposal posts review data and refreshes detail and rows", async () => {
 		const rows: client.ProposalListRow[] = [
 			{
@@ -209,6 +234,39 @@ describe("useProposalStore", () => {
 		expect(store.reviewError).toBe("artifact write failed");
 		expect(store.reviewErrorStatus).toBe(502);
 		expect(store.reviewSuccess).toBeNull();
+	});
+
+	it("acceptProposal can retry after an upstream failure", async () => {
+		const updatedDetail = makeDetail({
+			reviewDecision: {
+				reviewer: "alice",
+				outcome: "accepted",
+				decidedAt: "2026-07-03T00:00:00Z",
+				rationale: "looks good",
+			},
+		});
+		const acceptSpy = vi
+			.spyOn(client, "acceptProposalReview")
+			.mockRejectedValueOnce(new client.ApiError(502, "upstream unavailable"))
+			.mockResolvedValueOnce({ outcome: "accepted" });
+		vi.spyOn(client, "getProposals").mockResolvedValue([]);
+		vi.spyOn(client, "getProposal").mockResolvedValue(updatedDetail);
+		const payload = {
+			proposalId: "abc123",
+			reviewer: "alice",
+			rationale: "looks good",
+			decidedAt: "2026-07-03T00:00:00Z",
+		};
+
+		const store = useProposalStore();
+		await store.acceptProposal(payload);
+		expect(store.reviewErrorStatus).toBe(502);
+		await store.acceptProposal(payload);
+
+		expect(acceptSpy).toHaveBeenCalledTimes(2);
+		expect(store.reviewError).toBeNull();
+		expect(store.reviewSuccess).toBe("Proposal accepted.");
+		expect(store.detail).toEqual(updatedDetail);
 	});
 
 	it("rejectProposal surfaces ApiError status without refreshing state", async () => {

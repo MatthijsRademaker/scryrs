@@ -1,9 +1,9 @@
 use std::fmt;
 use std::path::Path;
 
-use scryrs_types::{ProposalDocument, ProposalReviewDecision, ProposedContent, ReviewOutcome};
+use scryrs_types::{ProposalDocument, ProposedContent, ReviewOutcome};
 
-use super::inventory;
+use super::{inventory, wire};
 
 #[derive(Debug, Clone)]
 pub struct ReviewWriteRequest {
@@ -40,9 +40,6 @@ pub fn write_review_decision(
     repo_root: &Path,
     request: &ReviewWriteRequest,
 ) -> Result<(), ReviewWriteError> {
-    inventory::validate_rfc3339(&request.decided_at)
-        .map_err(|message| ReviewWriteError::Input(format!("invalid decidedAt: {message}")))?;
-
     let proposal_path = repo_root.join(format!(".scryrs/proposals/{}.json", request.proposal_id));
     if !proposal_path.is_file() {
         return Err(ReviewWriteError::Input(format!(
@@ -70,25 +67,8 @@ pub fn write_review_decision(
         ))
     })?;
 
-    if request.override_content.is_some()
-        && !inventory::is_markdown_target_type(&proposal.target_type)
-    {
-        return Err(ReviewWriteError::Input(format!(
-            "reviewed content is not supported for target type '{}'",
-            serde_json::to_string(&proposal.target_type)
-                .unwrap_or_else(|_| format!("{:?}", proposal.target_type))
-        )));
-    }
-
-    let decision = build_review_decision(&proposal, request);
-    decision
-        .validate()
-        .map_err(|error| ReviewWriteError::Input(format!("invalid review metadata: {error}")))?;
-    inventory::validate_review_decision_matches_proposal(&decision, &proposal)
-        .map_err(|error| ReviewWriteError::Input(format!("review validation failed: {error}")))?;
-
-    let json = serde_json::to_string(&decision)
-        .map_err(|error| ReviewWriteError::Failure(format!("serialization error: {error}")))?;
+    let decision = wire::build_review_decision(&proposal, request)?;
+    let json = wire::serialize_review_decision(&decision).map_err(ReviewWriteError::Failure)?;
 
     let target_dir = repo_root.join(format!(
         ".scryrs/{}",
@@ -137,36 +117,6 @@ pub fn write_review_decision(
     })?;
 
     Ok(())
-}
-
-fn build_review_decision(
-    proposal: &ProposalDocument,
-    request: &ReviewWriteRequest,
-) -> ProposalReviewDecision {
-    let (target_type, accepted_content) = match request.outcome {
-        ReviewOutcome::Accepted => {
-            let content = match request.override_content.clone() {
-                Some(overridden) if inventory::is_markdown_target_type(&proposal.target_type) => {
-                    Some(overridden)
-                }
-                _ => Some(proposal.proposed_content.clone()),
-            };
-            (Some(proposal.target_type.clone()), content)
-        }
-        ReviewOutcome::Rejected => (None, None),
-    };
-
-    ProposalReviewDecision {
-        schema_version: scryrs_types::REVIEW_DECISION_SCHEMA_VERSION.into(),
-        proposal_id: proposal.id.clone(),
-        reviewer: request.reviewer.clone(),
-        decided_at: request.decided_at.clone(),
-        rationale: request.rationale.clone(),
-        source_evidence: proposal.evidence.clone(),
-        outcome: request.outcome.clone(),
-        target_type,
-        accepted_content,
-    }
 }
 
 fn opposite_outcome(outcome: &ReviewOutcome) -> ReviewOutcome {

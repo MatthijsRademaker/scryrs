@@ -16,10 +16,10 @@ fn read_settings(base: &std::path::Path) -> serde_json::Value {
     serde_json::from_str(&contents).unwrap_or_else(|e| panic!("parse settings.json: {e}"))
 }
 
-/// Count occurrences of the native `scryrs hook claude-code` command across all
-/// PreToolUse hook entries.
-fn count_native_hook(settings: &serde_json::Value) -> usize {
-    settings["hooks"]["PreToolUse"]
+/// Count occurrences of the native `scryrs hook claude-code` command across the
+/// hook entries of one event.
+fn count_native_hook_on(settings: &serde_json::Value, event: &str) -> usize {
+    settings["hooks"][event]
         .as_array()
         .map(|entries| {
             entries
@@ -30,6 +30,15 @@ fn count_native_hook(settings: &serde_json::Value) -> usize {
                 .count()
         })
         .unwrap_or(0)
+}
+
+/// Total occurrences of the native hook command across every event scryrs
+/// registers on. One per event is correct; more means double-counting.
+fn count_native_hook(settings: &serde_json::Value) -> usize {
+    crate::init::CLAUDE_HOOK_EVENTS
+        .iter()
+        .map(|event| count_native_hook_on(settings, event))
+        .sum()
 }
 
 // --- init --agent claude-code creates settings.json with native hook ---
@@ -51,9 +60,17 @@ fn init_agent_claude_code_creates_native_settings() {
             String::from_utf8_lossy(&err)
         );
 
-        // The native command hook block is present exactly once.
+        // The native command hook block is present exactly once per event.
         let settings = read_settings(dir.path());
-        assert_eq!(count_native_hook(&settings), 1);
+        for event in crate::init::CLAUDE_HOOK_EVENTS {
+            assert_eq!(
+                count_native_hook_on(&settings, event),
+                1,
+                "hook must be registered on {event}"
+            );
+        }
+        // PreToolUse cannot carry an outcome and is never registered.
+        assert_eq!(count_native_hook_on(&settings, "PreToolUse"), 0);
 
         // No .mjs file is ever written.
         assert!(
@@ -87,7 +104,7 @@ fn init_agent_claude_code_is_idempotent() {
         let settings = read_settings(dir.path());
         assert_eq!(
             count_native_hook(&settings),
-            1,
+            crate::init::CLAUDE_HOOK_EVENTS.len(),
             "re-run must not duplicate the hook"
         );
         // Next-step text is byte-identical across runs.
@@ -268,8 +285,13 @@ fn init_claude_code_merges_existing_settings() {
         pre.iter().any(|e| e["hooks"][0]["command"] == "other-tool"),
         "existing unrelated hook must be preserved"
     );
-    // Native hook added exactly once.
-    assert_eq!(count_native_hook(&settings), 1);
+    // Native hook added exactly once per registered event.
+    assert_eq!(
+        count_native_hook(&settings),
+        crate::init::CLAUDE_HOOK_EVENTS.len()
+    );
+    // The unrelated PreToolUse entry is somebody else's; scryrs leaves it.
+    assert_eq!(count_native_hook_on(&settings, "PreToolUse"), 0);
 }
 
 // --- pi/index.ts collision ---
@@ -705,7 +727,7 @@ fn init_appears_in_help_json() {
     let doc: serde_json::Value =
         serde_json::from_str(&json_str).unwrap_or_else(|e| panic!("parse help-json: {e}"));
 
-    assert_eq!(doc["surfaceVersion"], "0.18.0");
+    assert_eq!(doc["surfaceVersion"], "0.20.0");
 
     let commands = doc["commands"]
         .as_array()
@@ -787,4 +809,96 @@ fn init_does_not_regress_unknown_command() {
 
     assert_eq!(run_with_writers(["nonexistent"], &mut out, &mut err), 2);
     assert!(String::from_utf8_lossy(&err).contains("unknown command"));
+}
+
+// --- PreToolUse → PostToolUse migration (Rule 7: replace, don't coexist) ---
+
+#[test]
+fn init_claude_code_removes_stale_pretooluse_registration() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    std::fs::create_dir_all(dir.path().join(".claude"))
+        .unwrap_or_else(|e| panic!("create_dir: {e}"));
+    // A settings file as written by a previous scryrs release.
+    std::fs::write(
+        dir.path().join(".claude/settings.json"),
+        r#"{
+          "hooks": {
+            "PreToolUse": [
+              { "matcher": "", "hooks": [ { "type": "command", "command": "scryrs hook claude-code" } ] }
+            ]
+          }
+        }"#,
+    )
+    .unwrap_or_else(|e| panic!("write: {e}"));
+
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        assert_eq!(
+            run_with_writers(["init", "--agent", "claude-code"], &mut out, &mut err),
+            0,
+            "stderr: {}",
+            String::from_utf8_lossy(&err)
+        );
+    });
+
+    let settings = read_settings(dir.path());
+
+    // The stale registration is gone, and the now-empty key is removed.
+    assert_eq!(
+        count_native_hook_on(&settings, "PreToolUse"),
+        0,
+        "stale PreToolUse registration must be removed"
+    );
+    assert!(
+        settings["hooks"].get("PreToolUse").is_none(),
+        "an emptied PreToolUse key must be removed entirely"
+    );
+
+    // Exactly one registration per post-tool event: no double-counting.
+    assert_eq!(
+        count_native_hook(&settings),
+        crate::init::CLAUDE_HOOK_EVENTS.len()
+    );
+}
+
+#[test]
+fn init_claude_code_preserves_foreign_pretooluse_entries_while_removing_ours() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    std::fs::create_dir_all(dir.path().join(".claude"))
+        .unwrap_or_else(|e| panic!("create_dir: {e}"));
+    std::fs::write(
+        dir.path().join(".claude/settings.json"),
+        r#"{
+          "hooks": {
+            "PreToolUse": [
+              { "matcher": "Bash", "hooks": [ { "type": "command", "command": "other-tool" } ] },
+              { "matcher": "", "hooks": [ { "type": "command", "command": "scryrs hook claude-code" } ] }
+            ]
+          }
+        }"#,
+    )
+    .unwrap_or_else(|e| panic!("write: {e}"));
+
+    with_cwd(dir.path(), || {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        assert_eq!(
+            run_with_writers(["init", "--agent", "claude-code"], &mut out, &mut err),
+            0
+        );
+    });
+
+    let settings = read_settings(dir.path());
+    let pre = settings["hooks"]["PreToolUse"]
+        .as_array()
+        .unwrap_or_else(|| panic!("PreToolUse must survive with the foreign entry"));
+
+    assert_eq!(pre.len(), 1, "only the foreign entry may remain");
+    assert_eq!(pre[0]["hooks"][0]["command"], "other-tool");
+    assert_eq!(count_native_hook_on(&settings, "PreToolUse"), 0);
+    assert_eq!(
+        count_native_hook(&settings),
+        crate::init::CLAUDE_HOOK_EVENTS.len()
+    );
 }

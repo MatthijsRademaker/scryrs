@@ -24,6 +24,8 @@ export interface DashboardMeta {
 	mode: DashboardMode;
 	repositoryPath: string;
 	repositoryId?: string | null;
+	proposalReadsAvailable: boolean;
+	proposalReviewWritesAvailable: boolean;
 }
 
 export interface HotspotEntry {

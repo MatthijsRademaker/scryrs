@@ -1,4 +1,8 @@
-import type { DashboardMode, HotspotEntry } from "@/shared/api/client";
+import type {
+	DashboardMode,
+	HotspotEntry,
+	TraceEventItem,
+} from "@/shared/api/client";
 import { formatSubject, type SubjectDisplay } from "@/shared/lib/subject";
 
 export interface DashboardNavItem {
@@ -40,13 +44,31 @@ const LIVE_NAV: DashboardNavItem[] = [
 		match: ["hotspots", "subject-detail"],
 	},
 	{ to: "/signals", label: "Signals", icon: "activity", match: ["signals"] },
+	{
+		to: "/sessions",
+		label: "Sessions",
+		icon: "tree",
+		match: ["sessions", "session-detail"],
+	},
+	{
+		to: "/proposals",
+		label: "Proposals",
+		icon: "inbox",
+		match: ["proposals", "proposal-detail"],
+	},
+	{ to: "/events", label: "Events", icon: "activity", match: ["events"] },
+	{ to: "/routes", label: "Routes", icon: "activity", match: ["routes"] },
 	{ to: "/about", label: "About", icon: "info", match: ["about"] },
 ];
 
 export function navigationForMode(
 	mode: DashboardMode | null | undefined,
+	proposalReadsAvailable = false,
 ): DashboardNavItem[] {
-	return mode === "live" ? LIVE_NAV : LOCAL_NAV;
+	if (mode !== "live") return LOCAL_NAV;
+	return proposalReadsAvailable
+		? LIVE_NAV
+		: LIVE_NAV.filter((item) => item.to !== "/proposals");
 }
 
 export function hotspotSubjectDisplay(
@@ -64,23 +86,32 @@ export function hotspotSubjectDisplay(
 	return formatSubject(entry.subject, meta.repositoryPath, entry.subjectKind);
 }
 
+export function traceEventSubjectDisplay(
+	event: Pick<TraceEventItem, "subject" | "subjectKind">,
+	meta: { mode?: DashboardMode | null; repositoryPath?: string | null },
+): SubjectDisplay {
+	if (meta.mode === "live") {
+		return {
+			kind: "raw",
+			label: event.subject ?? "lifecycle",
+			isExternal: false,
+			full: event.subject ?? "lifecycle",
+		};
+	}
+	return formatSubject(event.subject, meta.repositoryPath, event.subjectKind);
+}
+
 export function routeUnavailableMessage(
 	routeName: string,
 	mode: DashboardMode | null | undefined,
+	proposalReadsAvailable = false,
 ): string | null {
-	if (mode === "live") {
-		if (routeName === "proposals" || routeName === "proposal-detail") {
-			return "Proposals are not available in live mode. Use the local dashboard or CLI proposal review workflow instead.";
-		}
-		if (routeName === "sessions" || routeName === "session-detail") {
-			return "Sessions are not available in live mode. This dashboard only proxies live hotspot rankings and signal streaming.";
-		}
-		if (routeName === "events") {
-			return "Events are not available in live mode. Use Signals for replayed and live hotspot activity.";
-		}
-		if (routeName === "routes") {
-			return "Route explain is not available in live mode. Use the local-mode dashboard with .scryrs artifacts to inspect routes.";
-		}
+	if (
+		mode === "live" &&
+		!proposalReadsAvailable &&
+		(routeName === "proposals" || routeName === "proposal-detail")
+	) {
+		return "Live proposal APIs are not configured for this dashboard.";
 	}
 
 	if (mode === "local" && routeName === "signals") {
@@ -88,4 +119,22 @@ export function routeUnavailableMessage(
 	}
 
 	return null;
+}
+
+export function routeErrorMessage(
+	mode: DashboardMode | null | undefined,
+	status: number,
+	message: string,
+): string {
+	if (status === 404) {
+		return mode === "live"
+			? "No route manifest is published for this repository. Run `scryrs route publish <PATH>` with repository credentials, then retry."
+			: "Route artifact not found. Run `scryrs route <PATH>` to generate the route manifest.";
+	}
+	if (status === 502) {
+		return mode === "live"
+			? "Live route service failed. Verify server availability and published manifest compatibility, then retry."
+			: "Route artifact is malformed or incompatible. Run `scryrs route <PATH>` to regenerate it.";
+	}
+	return message;
 }

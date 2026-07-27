@@ -7,7 +7,9 @@ import { useMetaStore } from "@/stores/meta";
 
 const route = useRoute();
 const meta = useMetaStore();
-const navItems = computed(() => navigationForMode(meta.mode));
+const navItems = computed(() =>
+  navigationForMode(meta.mode, meta.proposalReadsAvailable),
+);
 const isActive = (match: string[]) => match.includes(String(route.name));
 
 const logoFailed = ref(false);

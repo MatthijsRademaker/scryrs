@@ -8,8 +8,10 @@
 //! Two integration shapes:
 //!
 //! - **claude-code**: no hook file. The installer create-or-merges
-//!   `.claude/settings.json` with a native `PreToolUse` command hook invoking
-//!   `scryrs hook claude-code`. No JavaScript / node runtime is involved.
+//!   `.claude/settings.json` with native `PostToolUse` and `PostToolUseFailure`
+//!   command hooks invoking `scryrs hook claude-code`, and removes any stale
+//!   `PreToolUse` registration it previously wrote. No JavaScript / node runtime
+//!   is involved.
 //! - **pi**: an in-process extension. The slimmed `hooks/pi/index.ts` is
 //!   embedded at compile time via `include_str!()` and written to
 //!   `.pi/extensions/scryrs/index.ts`.
@@ -18,19 +20,49 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// The native Claude Code `PreToolUse` hook command.
-const CLAUDE_HOOK_COMMAND: &str = "scryrs hook claude-code";
+/// The native Claude Code hook command, registered on both post-tool events.
+pub(crate) const CLAUDE_HOOK_COMMAND: &str = "scryrs hook claude-code";
+
+/// Hook events scryrs registers on.
+///
+/// Both are required: `PostToolUse` fires only when a tool call *succeeds*, and
+/// failures arrive on the separate `PostToolUseFailure` event. Registering on
+/// `PostToolUse` alone would make every recorded outcome `Success` — the exact
+/// defect that made `PreToolUse` unusable. They are mutually exclusive per tool
+/// call, so registering both does not double-count.
+pub(crate) const CLAUDE_HOOK_EVENTS: &[&str] = &["PostToolUse", "PostToolUseFailure"];
+
+/// Hook event scryrs previously registered on and now removes.
+///
+/// `PreToolUse` fires before execution and therefore cannot carry an outcome.
+/// Leaving it alongside the post-tool events would double-count every event.
+pub(crate) const CLAUDE_STALE_HOOK_EVENT: &str = "PreToolUse";
 
 /// Deterministic post-install instructions for Claude Code (no `.mjs`).
 const CLAUDE_NEXT_STEPS: &str = concat!(
     "scryrs Claude Code hook configured in .claude/settings.json\n",
-    "The PreToolUse hook command is: scryrs hook claude-code\n",
+    "Hook events: PostToolUse and PostToolUseFailure\n",
+    "The hook command is: scryrs hook claude-code\n",
     "\n",
     "Next steps:\n",
     "  1. Ensure scryrs is on your PATH.\n",
     "  2. Configure trace transport: run `scryrs setup local` or `scryrs setup live`.\n",
     "  3. Restart your Claude Code session for the hook to take effect.\n",
 );
+
+/// Whether a `hooks.<Event>` array entry registers the scryrs hook command.
+fn is_scryrs_hook_entry(entry: &serde_json::Value) -> bool {
+    entry
+        .get("hooks")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|hs| {
+            hs.iter().any(|h| {
+                h.get("type").and_then(serde_json::Value::as_str) == Some("command")
+                    && h.get("command").and_then(serde_json::Value::as_str)
+                        == Some(CLAUDE_HOOK_COMMAND)
+            })
+        })
+}
 
 // ---------------------------------------------------------------------------
 // File-based harness registry (Pi). Claude Code is handled separately.
@@ -242,40 +274,44 @@ fn install_claude_code(out: &mut impl Write, err: &mut impl Write, target_base: 
         }
     };
 
-    // Ensure `PreToolUse` is an array.
-    let pre = hooks
-        .entry("PreToolUse")
-        .or_insert_with(|| Value::Array(Vec::new()));
-    let pre = match pre.as_array_mut() {
-        Some(a) => a,
-        None => {
-            let _ = writeln!(
-                err,
-                "scryrs init: existing \"PreToolUse\" is not an array; refusing to overwrite"
-            );
-            return 2;
+    // Replace, don't coexist: drop any scryrs PreToolUse registration written by
+    // a prior install. Non-scryrs PreToolUse entries are left untouched, and the
+    // key itself is removed only once it holds nothing else.
+    if let Some(stale) = hooks.get_mut(CLAUDE_STALE_HOOK_EVENT) {
+        match stale.as_array_mut() {
+            Some(entries) => {
+                entries.retain(|entry| !is_scryrs_hook_entry(entry));
+                if entries.is_empty() {
+                    hooks.remove(CLAUDE_STALE_HOOK_EVENT);
+                }
+            }
+            // A non-array PreToolUse is somebody else's shape; leave it alone.
+            None => {}
         }
-    };
+    }
 
-    // Idempotency: bail out unchanged if our command is already registered.
-    let already = pre.iter().any(|entry| {
-        entry
-            .get("hooks")
-            .and_then(Value::as_array)
-            .map(|hs| {
-                hs.iter().any(|h| {
-                    h.get("type").and_then(Value::as_str) == Some("command")
-                        && h.get("command").and_then(Value::as_str) == Some(CLAUDE_HOOK_COMMAND)
-                })
-            })
-            .unwrap_or(false)
-    });
+    for event in CLAUDE_HOOK_EVENTS {
+        let bucket = hooks
+            .entry(*event)
+            .or_insert_with(|| Value::Array(Vec::new()));
+        let bucket = match bucket.as_array_mut() {
+            Some(a) => a,
+            None => {
+                let _ = writeln!(
+                    err,
+                    "scryrs init: existing \"{event}\" is not an array; refusing to overwrite"
+                );
+                return 2;
+            }
+        };
 
-    if !already {
-        pre.push(json!({
-            "matcher": "",
-            "hooks": [ { "type": "command", "command": CLAUDE_HOOK_COMMAND } ]
-        }));
+        // Idempotency: leave the bucket unchanged if already registered.
+        if !bucket.iter().any(is_scryrs_hook_entry) {
+            bucket.push(json!({
+                "matcher": "",
+                "hooks": [ { "type": "command", "command": CLAUDE_HOOK_COMMAND } ]
+            }));
+        }
     }
 
     // Serialize with a trailing newline for stable on-disk form.

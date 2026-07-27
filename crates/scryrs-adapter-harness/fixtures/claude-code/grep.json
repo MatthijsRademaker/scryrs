@@ -1,0 +1,1 @@
+{"session_id":"fixture","cwd":"/repo","hook_event_name":"PostToolUse","tool_name":"Grep","tool_input":{"pattern":"fn translate","path":"crates/","output_mode":"content"}}

@@ -13,6 +13,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use rusqlite::{Connection, OpenFlags, params};
 use rust_embed::RustEmbed;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -109,9 +110,11 @@ pub struct MetaResponse {
     repository_path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     repository_id: Option<String>,
+    proposal_reads_available: bool,
+    proposal_review_writes_available: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSummary {
     session_id: String,
@@ -121,7 +124,7 @@ pub struct SessionSummary {
     source: String,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TraceEventItem {
     event_id: u64,
@@ -133,18 +136,26 @@ pub struct TraceEventItem {
     payload: Value,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EventsPage {
     events: Vec<TraceEventItem>,
     next_cursor: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionDetail {
     session: SessionSummary,
     events: Vec<TraceEventItem>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpstreamSessionsPage {
+    sessions: Vec<SessionSummary>,
+    #[serde(rename = "nextCursor")]
+    _next_cursor: Option<String>,
 }
 
 // --- Proposal DTOs ---
@@ -182,7 +193,7 @@ pub struct ProposalDetail {
     pub review_decision: Option<ReviewDecisionMeta>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProposalReviewWriteRequest {
     reviewer: String,
@@ -285,6 +296,12 @@ async fn meta(State(state): State<Arc<AppState>>) -> Json<MetaResponse> {
             .source_mode
             .live_config()
             .map(|config| config.repository_id.clone()),
+        proposal_reads_available: true,
+        proposal_review_writes_available: state
+            .config
+            .source_mode
+            .live_config()
+            .is_none_or(|config| config.proposal_write_token().is_some()),
     })
 }
 
@@ -317,52 +334,64 @@ async fn hotspots(State(state): State<Arc<AppState>>) -> Result<Response<Body>, 
 async fn sessions(
     State(state): State<Arc<AppState>>,
     Query(query): Query<LimitQuery>,
-) -> Result<Json<Vec<SessionSummary>>, ApiError> {
-    if state.config.source_mode.live_config().is_some() {
-        return Err(ApiError::missing("/api/sessions unavailable in live mode"));
+) -> Result<Response<Body>, ApiError> {
+    let limit = normalize_limit(query.limit, 50);
+    if let Some(live) = state.config.source_mode.live_config() {
+        let rows = proxy_live_sessions(&state.http_client, live, limit).await?;
+        return Ok(Json(rows).into_response());
     }
 
     let db_path = db_path(&state.config.repo_root);
-    let limit = normalize_limit(query.limit, 50);
     let rows = run_blocking(move || query_sessions(db_path, limit)).await?;
-    Ok(Json(rows))
+    Ok(Json(rows).into_response())
 }
 
 async fn session_detail(
     State(state): State<Arc<AppState>>,
     AxumPath(session_id): AxumPath<String>,
-) -> Result<Json<SessionDetail>, ApiError> {
-    if state.config.source_mode.live_config().is_some() {
-        return Err(ApiError::missing(
-            "/api/sessions/:session_id unavailable in live mode",
-        ));
+) -> Result<Response<Body>, ApiError> {
+    if let Some(live) = state.config.source_mode.live_config() {
+        let detail = proxy_live_session_detail(&state.http_client, live, &session_id).await?;
+        return Ok(Json(detail).into_response());
     }
 
     let db_path = db_path(&state.config.repo_root);
     let detail = run_blocking(move || query_session_detail(db_path, session_id)).await?;
-    Ok(Json(detail))
+    Ok(Json(detail).into_response())
 }
 
 async fn events(
     State(state): State<Arc<AppState>>,
     Query(query): Query<EventQuery>,
-) -> Result<Json<EventsPage>, ApiError> {
-    if state.config.source_mode.live_config().is_some() {
-        return Err(ApiError::missing("/api/events unavailable in live mode"));
+) -> Result<Response<Body>, ApiError> {
+    let limit = normalize_limit(query.limit, 50);
+    if let Some(live) = state.config.source_mode.live_config() {
+        let page = proxy_live_events(
+            &state.http_client,
+            live,
+            limit,
+            query.cursor.as_deref(),
+            query.session_id.as_deref(),
+        )
+        .await?;
+        return Ok(Json(page).into_response());
     }
 
     let db_path = db_path(&state.config.repo_root);
-    let limit = normalize_limit(query.limit, 50);
     let cursor = parse_cursor(query.cursor)?;
     let page = run_blocking(move || query_events(db_path, limit, cursor, query.session_id)).await?;
-    Ok(Json(page))
+    Ok(Json(page).into_response())
 }
 
-async fn proposals_list(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<Vec<ProposalListRow>>, ApiError> {
-    if state.config.source_mode.live_config().is_some() {
-        return Err(ApiError::missing("/api/proposals unavailable in live mode"));
+async fn proposals_list(State(state): State<Arc<AppState>>) -> Result<Response<Body>, ApiError> {
+    if let Some(live) = state.config.source_mode.live_config() {
+        return proxy_live_proposal_get(
+            &state.http_client,
+            live,
+            &["v1", "repositories", &live.repository_id, "proposals"],
+            "proposal inventory",
+        )
+        .await;
     }
 
     let repo_root = state.config.repo_root.clone();
@@ -391,29 +420,39 @@ async fn proposals_list(
             .collect::<Vec<_>>())
     })
     .await?;
-    Ok(Json(rows))
+    Ok(Json(rows).into_response())
 }
 
 async fn proposal_detail(
     State(state): State<Arc<AppState>>,
     AxumPath(proposal_id): AxumPath<String>,
-) -> Result<Json<ProposalDetail>, ApiError> {
-    if state.config.source_mode.live_config().is_some() {
-        return Err(ApiError::missing(
-            "/api/proposals/:proposal_id unavailable in live mode",
-        ));
+) -> Result<Response<Body>, ApiError> {
+    if let Some(live) = state.config.source_mode.live_config() {
+        return proxy_live_proposal_get(
+            &state.http_client,
+            live,
+            &[
+                "v1",
+                "repositories",
+                &live.repository_id,
+                "proposals",
+                &proposal_id,
+            ],
+            "proposal detail",
+        )
+        .await;
     }
 
     let repo_root = state.config.repo_root.clone();
     let detail = run_blocking(move || load_proposal_detail(&repo_root, &proposal_id)).await?;
-    Ok(Json(detail))
+    Ok(Json(detail).into_response())
 }
 
 async fn proposal_accept(
     State(state): State<Arc<AppState>>,
     AxumPath(proposal_id): AxumPath<String>,
     body: Result<Json<ProposalReviewWriteRequest>, JsonRejection>,
-) -> Result<Json<ProposalReviewWriteResponse>, ApiError> {
+) -> Result<Response<Body>, ApiError> {
     write_proposal_review(
         state,
         proposal_id,
@@ -427,7 +466,7 @@ async fn proposal_reject(
     State(state): State<Arc<AppState>>,
     AxumPath(proposal_id): AxumPath<String>,
     body: Result<Json<ProposalReviewWriteRequest>, JsonRejection>,
-) -> Result<Json<ProposalReviewWriteResponse>, ApiError> {
+) -> Result<Response<Body>, ApiError> {
     write_proposal_review(
         state,
         proposal_id,
@@ -442,22 +481,21 @@ async fn write_proposal_review(
     proposal_id: String,
     outcome: scryrs_types::ReviewOutcome,
     body: Result<Json<ProposalReviewWriteRequest>, JsonRejection>,
-) -> Result<Json<ProposalReviewWriteResponse>, ApiError> {
-    if state.config.source_mode.live_config().is_some() {
-        let suffix = match outcome {
-            scryrs_types::ReviewOutcome::Accepted => "accept",
-            scryrs_types::ReviewOutcome::Rejected => "reject",
-        };
-        return Err(ApiError::missing(format!(
-            "/api/proposals/:proposal_id/{suffix} unavailable in live mode"
-        )));
-    }
-
+) -> Result<Response<Body>, ApiError> {
     let Json(body) = body.map_err(map_json_rejection)?;
     if outcome == scryrs_types::ReviewOutcome::Rejected && body.reviewed_content.is_some() {
         return Err(ApiError::input(
             "reviewedContent is not supported on reject",
         ));
+    }
+
+    if let Some(live) = state.config.source_mode.live_config() {
+        let suffix = match outcome {
+            scryrs_types::ReviewOutcome::Accepted => "accept",
+            scryrs_types::ReviewOutcome::Rejected => "reject",
+        };
+        return proxy_live_proposal_review(&state.http_client, live, &proposal_id, suffix, &body)
+            .await;
     }
 
     let repo_root = state.config.repo_root.clone();
@@ -485,7 +523,7 @@ async fn write_proposal_review(
         })
     })
     .await
-    .map(Json)
+    .map(|response| Json(response).into_response())
 }
 
 fn load_proposal_detail(
@@ -640,6 +678,177 @@ where
         .map_err(|err| ApiError::bad_gateway(format!("dashboard query task failed: {err}")))?
 }
 
+async fn proxy_live_proposal_get(
+    client: &reqwest::Client,
+    live: &crate::LiveSourceConfig,
+    path_segments: &[&str],
+    resource: &str,
+) -> Result<Response<Body>, ApiError> {
+    let response = client
+        .get(live_api_url(live, path_segments)?)
+        .send()
+        .await
+        .map_err(|error| {
+            ApiError::bad_gateway(format!("live {resource} upstream request failed: {error}"))
+        })?;
+    forward_live_proposal_response(response, resource).await
+}
+
+async fn proxy_live_proposal_review(
+    client: &reqwest::Client,
+    live: &crate::LiveSourceConfig,
+    proposal_id: &str,
+    outcome: &str,
+    body: &ProposalReviewWriteRequest,
+) -> Result<Response<Body>, ApiError> {
+    let token = live.proposal_write_token().ok_or_else(|| ApiError {
+        status: StatusCode::FORBIDDEN,
+        message: "live proposal review authorization is not configured".into(),
+    })?;
+    let response = client
+        .post(live_api_url(
+            live,
+            &[
+                "v1",
+                "repositories",
+                &live.repository_id,
+                "proposals",
+                proposal_id,
+                outcome,
+            ],
+        )?)
+        .bearer_auth(token)
+        .json(body)
+        .send()
+        .await
+        .map_err(|error| {
+            ApiError::bad_gateway(format!(
+                "live proposal review upstream request failed: {error}"
+            ))
+        })?;
+    forward_live_proposal_response(response, "proposal review").await
+}
+
+async fn forward_live_proposal_response(
+    response: reqwest::Response,
+    resource: &str,
+) -> Result<Response<Body>, ApiError> {
+    let status = response.status();
+    let body = response.bytes().await.map_err(|error| {
+        ApiError::bad_gateway(format!("live {resource} response read failed: {error}"))
+    })?;
+    if status.is_server_error() {
+        return Err(ApiError::bad_gateway(format!(
+            "live {resource} upstream returned {status}: {}",
+            String::from_utf8_lossy(&body)
+        )));
+    }
+    let status = StatusCode::from_u16(status.as_u16()).map_err(|error| {
+        ApiError::bad_gateway(format!("live {resource} returned invalid status: {error}"))
+    })?;
+    Response::builder()
+        .status(status)
+        .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
+        .body(Body::from(body))
+        .map_err(|error| {
+            ApiError::bad_gateway(format!("live {resource} response build failed: {error}"))
+        })
+}
+
+async fn proxy_live_sessions(
+    client: &reqwest::Client,
+    live: &crate::LiveSourceConfig,
+    limit: u32,
+) -> Result<Vec<SessionSummary>, ApiError> {
+    let query = [("limit", limit.to_string())];
+    let page: UpstreamSessionsPage = request_live_json(
+        client,
+        live,
+        &["v1", "repositories", &live.repository_id, "sessions"],
+        &query,
+        "sessions",
+    )
+    .await?;
+    Ok(page.sessions)
+}
+
+async fn proxy_live_session_detail(
+    client: &reqwest::Client,
+    live: &crate::LiveSourceConfig,
+    session_id: &str,
+) -> Result<SessionDetail, ApiError> {
+    request_live_json(
+        client,
+        live,
+        &[
+            "v1",
+            "repositories",
+            &live.repository_id,
+            "sessions",
+            session_id,
+        ],
+        &[],
+        "session detail",
+    )
+    .await
+}
+
+async fn proxy_live_events(
+    client: &reqwest::Client,
+    live: &crate::LiveSourceConfig,
+    limit: u32,
+    cursor: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<EventsPage, ApiError> {
+    let mut query = vec![("limit", limit.to_string())];
+    if let Some(cursor) = cursor {
+        query.push(("cursor", cursor.to_owned()));
+    }
+    if let Some(session_id) = session_id {
+        query.push(("session_id", session_id.to_owned()));
+    }
+    request_live_json(
+        client,
+        live,
+        &["v1", "repositories", &live.repository_id, "events"],
+        &query,
+        "events",
+    )
+    .await
+}
+
+async fn request_live_json<T: DeserializeOwned>(
+    client: &reqwest::Client,
+    live: &crate::LiveSourceConfig,
+    path_segments: &[&str],
+    query: &[(&str, String)],
+    resource: &str,
+) -> Result<T, ApiError> {
+    let response = client
+        .get(live_api_url(live, path_segments)?)
+        .query(query)
+        .send()
+        .await
+        .map_err(|error| {
+            ApiError::bad_gateway(format!("live {resource} upstream request failed: {error}"))
+        })?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| String::from("upstream response body unavailable"));
+        return Err(ApiError::bad_gateway(format!(
+            "live {resource} upstream returned {status}: {body}"
+        )));
+    }
+    response.json::<T>().await.map_err(|error| {
+        ApiError::bad_gateway(format!(
+            "live {resource} upstream response contract invalid: {error}"
+        ))
+    })
+}
+
 async fn proxy_live_hotspots(
     client: &reqwest::Client,
     live: &crate::LiveSourceConfig,
@@ -708,7 +917,7 @@ async fn proxy_live_signals(
     Ok(proxied)
 }
 
-fn live_api_url(
+pub(crate) fn live_api_url(
     live: &crate::LiveSourceConfig,
     path_segments: &[&str],
 ) -> Result<reqwest::Url, ApiError> {

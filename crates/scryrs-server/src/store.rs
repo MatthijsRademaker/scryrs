@@ -7,17 +7,20 @@
 use std::fs;
 use std::path::Path;
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use scryrs_core::scoring::{per_event_contribution, score_hotspots};
 use scryrs_types::{
     EnvelopeEvent, EventAck, EventAckStatus, HotspotCounts, HotspotEntry, HotspotEvidence,
     LIVE_HOTSPOT_SCHEMA_VERSION, LiveHotspotsResponse, ServerIngestEnvelope, TraceEvent,
 };
 
+use crate::read_models::{
+    EventCursor, EventsPage, SessionDetail, SessionSummary, SessionsPage, TraceEventItem,
+};
 use crate::time::chrono_now;
 
 /// Current server store schema version (independent of local datastore version).
-const SERVER_STORE_SCHEMA_VERSION: i64 = 2;
+const SERVER_STORE_SCHEMA_VERSION: i64 = 5;
 
 /// Open a connection at `path`, creating parent directories.
 fn open_connection(path: &Path) -> rusqlite::Result<Connection> {
@@ -72,6 +75,9 @@ fn ensure_schema(conn: &Connection) -> rusqlite::Result<()> {
 
             create_v1_tables(conn)?;
             create_v2_tables(conn)?;
+            create_v3_indexes(conn)?;
+            create_v4_route_manifests_table(conn)?;
+            create_v5_proposals_tables(conn)?;
         }
     }
 
@@ -82,6 +88,15 @@ fn ensure_schema(conn: &Connection) -> rusqlite::Result<()> {
 fn migrate_from(conn: &Connection, from_version: i64) -> rusqlite::Result<()> {
     if from_version < 2 {
         create_v2_tables(conn)?;
+    }
+    if from_version < 3 {
+        create_v3_indexes(conn)?;
+    }
+    if from_version < 4 {
+        create_v4_route_manifests_table(conn)?;
+    }
+    if from_version < 5 {
+        create_v5_proposals_tables(conn)?;
     }
     // Update version stamp after successful migration.
     conn.execute(
@@ -152,9 +167,66 @@ fn create_v2_tables(conn: &Connection) -> rusqlite::Result<()> {
     )
 }
 
+/// V3 indexes for repository-scoped event and session reads.
+fn create_v3_indexes(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_server_events_repository_id
+            ON server_trace_events(repository_id, id);
+         CREATE INDEX IF NOT EXISTS idx_server_events_repository_session_id
+            ON server_trace_events(repository_id, session_id, id);",
+    )
+}
+
+/// V4 table: latest validated route manifest per repository.
+fn create_v4_route_manifests_table(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS repository_route_manifests (
+            repository_id  TEXT PRIMARY KEY NOT NULL,
+            schema_version TEXT NOT NULL,
+            manifest_json  TEXT NOT NULL,
+            content_sha256 TEXT NOT NULL,
+            publisher_id   TEXT NOT NULL,
+            published_at   TEXT NOT NULL
+        );",
+    )
+}
+
+/// V5 tables: immutable repository-scoped proposals and terminal reviews.
+fn create_v5_proposals_tables(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS repository_proposals (
+            repository_id  TEXT NOT NULL,
+            proposal_id    TEXT NOT NULL,
+            schema_version TEXT NOT NULL,
+            proposal_json  TEXT NOT NULL,
+            revision_sha256 TEXT NOT NULL,
+            publisher_id   TEXT NOT NULL,
+            published_at   TEXT NOT NULL,
+            PRIMARY KEY (repository_id, proposal_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS repository_proposal_reviews (
+            repository_id        TEXT NOT NULL,
+            proposal_id          TEXT NOT NULL,
+            schema_version       TEXT NOT NULL,
+            decision_json        TEXT NOT NULL,
+            decision_sha256      TEXT NOT NULL,
+            outcome              TEXT NOT NULL,
+            reviewer             TEXT NOT NULL,
+            authenticated_actor_id TEXT NOT NULL,
+            decided_at           TEXT NOT NULL,
+            recorded_at          TEXT NOT NULL,
+            PRIMARY KEY (repository_id, proposal_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_repository_proposals_inventory
+            ON repository_proposals(repository_id, proposal_id);",
+    )
+}
+
 /// Server-owned SQLite store for central trace ingest with idempotent inserts.
 pub struct ServerStore {
-    conn: Connection,
+    pub(crate) conn: Connection,
     signal_threshold: u32,
 }
 
@@ -196,6 +268,159 @@ impl ServerStore {
 
         self.conn.execute_batch("COMMIT;")?;
         Ok(acks)
+    }
+
+    /// Return one repository-scoped page of sessions ordered by latest event ID.
+    pub fn list_sessions(
+        &self,
+        repository_id: &str,
+        limit: u32,
+        cursor: Option<EventCursor>,
+    ) -> Result<SessionsPage, rusqlite::Error> {
+        let fetch_limit = i64::from(limit) + 1;
+        let cursor_id = cursor.map(EventCursor::event_id);
+        let mut statement = self.conn.prepare(
+            "SELECT session_id, started_at, ended_at, event_count, source, last_event_id
+             FROM (
+                 SELECT session_id,
+                        MIN(timestamp) AS started_at,
+                        MAX(CASE WHEN event_type = 'SessionEnd' THEN timestamp END) AS ended_at,
+                        COUNT(*) AS event_count,
+                        COALESCE(MIN(tool_name), MIN(agent_id), 'unknown') AS source,
+                        MAX(id) AS last_event_id
+                 FROM server_trace_events
+                 WHERE repository_id = ?1
+                 GROUP BY session_id
+             )
+             WHERE (?2 IS NULL OR last_event_id < ?2)
+             ORDER BY last_event_id DESC
+             LIMIT ?3",
+        )?;
+        let mut rows = statement
+            .query_map(params![repository_id, cursor_id, fetch_limit], |row| {
+                Ok((
+                    SessionSummary {
+                        session_id: row.get(0)?,
+                        started_at: row.get(1)?,
+                        ended_at: row.get(2)?,
+                        event_count: row.get::<_, i64>(3)? as u64,
+                        source: row.get(4)?,
+                    },
+                    row.get::<_, i64>(5)? as u64,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let next_cursor = if rows.len() > limit as usize {
+            rows.pop();
+            rows.last().map(|(_, event_id)| EventCursor::new(*event_id))
+        } else {
+            None
+        };
+        Ok(SessionsPage {
+            sessions: rows.into_iter().map(|(session, _)| session).collect(),
+            next_cursor,
+        })
+    }
+
+    /// Return one repository-scoped session and all its events oldest first.
+    pub fn get_session_detail(
+        &self,
+        repository_id: &str,
+        session_id: &str,
+    ) -> Result<Option<SessionDetail>, rusqlite::Error> {
+        let session = self
+            .conn
+            .query_row(
+                "SELECT session_id,
+                        MIN(timestamp) AS started_at,
+                        MAX(CASE WHEN event_type = 'SessionEnd' THEN timestamp END) AS ended_at,
+                        COUNT(*) AS event_count,
+                        COALESCE(MIN(tool_name), MIN(agent_id), 'unknown') AS source
+                 FROM server_trace_events
+                 WHERE repository_id = ?1 AND session_id = ?2
+                 GROUP BY session_id",
+                params![repository_id, session_id],
+                |row| {
+                    Ok(SessionSummary {
+                        session_id: row.get(0)?,
+                        started_at: row.get(1)?,
+                        ended_at: row.get(2)?,
+                        event_count: row.get::<_, i64>(3)? as u64,
+                        source: row.get(4)?,
+                    })
+                },
+            )
+            .optional()?;
+        let Some(session) = session else {
+            return Ok(None);
+        };
+        let events = self.query_event_items(
+            "SELECT id, session_id, event_type, timestamp, subject_kind, subject, event_json
+             FROM server_trace_events
+             WHERE repository_id = ?1 AND session_id = ?2
+             ORDER BY id ASC",
+            params![repository_id, session_id],
+        )?;
+        Ok(Some(SessionDetail { session, events }))
+    }
+
+    /// Return repository-scoped events newest first using event-ID keyset pagination.
+    pub fn list_events(
+        &self,
+        repository_id: &str,
+        limit: u32,
+        cursor: Option<EventCursor>,
+        session_id: Option<&str>,
+    ) -> Result<EventsPage, rusqlite::Error> {
+        let fetch_limit = i64::from(limit) + 1;
+        let cursor_id = cursor.map(EventCursor::event_id);
+        let mut events = if let Some(session_id) = session_id {
+            self.query_event_items(
+                "SELECT id, session_id, event_type, timestamp, subject_kind, subject, event_json
+                 FROM server_trace_events
+                 WHERE repository_id = ?1
+                   AND (?2 IS NULL OR id < ?2)
+                   AND session_id = ?3
+                 ORDER BY id DESC
+                 LIMIT ?4",
+                params![repository_id, cursor_id, session_id, fetch_limit],
+            )?
+        } else {
+            self.query_event_items(
+                "SELECT id, session_id, event_type, timestamp, subject_kind, subject, event_json
+                 FROM server_trace_events
+                 WHERE repository_id = ?1 AND (?2 IS NULL OR id < ?2)
+                 ORDER BY id DESC
+                 LIMIT ?3",
+                params![repository_id, cursor_id, fetch_limit],
+            )?
+        };
+
+        let next_cursor = if events.len() > limit as usize {
+            events.pop();
+            events.last().map(|event| EventCursor::new(event.event_id))
+        } else {
+            None
+        };
+        Ok(EventsPage {
+            events,
+            next_cursor,
+        })
+    }
+
+    fn query_event_items<P>(
+        &self,
+        sql: &str,
+        query_params: P,
+    ) -> Result<Vec<TraceEventItem>, rusqlite::Error>
+    where
+        P: rusqlite::Params,
+    {
+        let mut statement = self.conn.prepare(sql)?;
+        statement
+            .query_map(query_params, event_item_from_row)?
+            .collect::<Result<Vec<_>, _>>()
     }
 
     fn process_item(
@@ -857,6 +1082,23 @@ impl ServerStore {
     }
 }
 
+fn event_item_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TraceEventItem> {
+    let event_json: String = row.get(6)?;
+    let payload = serde_json::from_str::<serde_json::Value>(&event_json)
+        .ok()
+        .and_then(|value| value.get("payload").cloned())
+        .unwrap_or(serde_json::Value::Null);
+    Ok(TraceEventItem {
+        event_id: row.get::<_, i64>(0)? as u64,
+        session_id: row.get(1)?,
+        event_type: row.get(2)?,
+        timestamp: row.get(3)?,
+        subject_kind: row.get(4)?,
+        subject: row.get(5)?,
+        payload,
+    })
+}
+
 /// Raw accumulator row exposed for tests.
 #[derive(Debug, Clone)]
 pub struct AccumulatorRow {
@@ -1094,15 +1336,20 @@ mod tests {
             .unwrap_or_else(|e| panic!("table check: {e}"));
         assert_eq!(table_count, 1);
 
-        // Unique dedup index exists.
-        let idx_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_server_events_dedup'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or_else(|e| panic!("index check: {e}"));
-        assert_eq!(idx_count, 1);
+        for index_name in [
+            "idx_server_events_dedup",
+            "idx_server_events_repository_id",
+            "idx_server_events_repository_session_id",
+        ] {
+            let index_count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name = ?1",
+                    [index_name],
+                    |row| row.get(0),
+                )
+                .unwrap_or_else(|e| panic!("index check for {index_name}: {e}"));
+            assert_eq!(index_count, 1, "missing {index_name}");
+        }
     }
 
     #[test]
@@ -1120,6 +1367,120 @@ mod tests {
         assert_eq!(acks[0].status, EventAckStatus::Accepted);
         assert!(acks[0].server_event_id.is_some());
         assert!(acks[0].error_reason.is_none());
+    }
+
+    #[test]
+    fn repository_event_pages_are_stable_and_session_filtered() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap_or_else(|e| panic!("open: {e}"));
+        let repo_a = make_envelope(
+            "repo-a",
+            "ws-1",
+            "pi",
+            vec![
+                env_event("evt-1", make_event("s1", "doc/1.md")),
+                env_event("evt-2", make_event("s1", "doc/2.md")),
+                env_event("evt-3", make_event("s2", "doc/3.md")),
+            ],
+        );
+        let repo_b = make_envelope(
+            "repo-b",
+            "ws-1",
+            "pi",
+            vec![env_event("evt-4", make_event("s1", "doc/4.md"))],
+        );
+        store
+            .ingest_batch(&repo_a)
+            .unwrap_or_else(|e| panic!("ingest repo-a: {e}"));
+        store
+            .ingest_batch(&repo_b)
+            .unwrap_or_else(|e| panic!("ingest repo-b: {e}"));
+
+        let first = store
+            .list_events("repo-a", 2, None, None)
+            .unwrap_or_else(|e| panic!("first page: {e}"));
+        assert_eq!(
+            first
+                .events
+                .iter()
+                .map(|event| event.event_id)
+                .collect::<Vec<_>>(),
+            vec![3, 2]
+        );
+        assert_eq!(first.next_cursor, Some(EventCursor::new(2)));
+
+        let second = store
+            .list_events("repo-a", 2, first.next_cursor, None)
+            .unwrap_or_else(|e| panic!("second page: {e}"));
+        assert_eq!(
+            second
+                .events
+                .iter()
+                .map(|event| event.event_id)
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
+        assert!(second.next_cursor.is_none());
+
+        let filtered = store
+            .list_events("repo-a", 10, None, Some("s1"))
+            .unwrap_or_else(|e| panic!("filtered page: {e}"));
+        assert_eq!(filtered.events.len(), 2);
+        assert!(filtered.events.iter().all(|event| event.session_id == "s1"));
+    }
+
+    #[test]
+    fn session_detail_is_repository_scoped_and_orders_events() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap_or_else(|e| panic!("open: {e}"));
+        let envelope = make_envelope(
+            "repo-a",
+            "ws-1",
+            "pi",
+            vec![
+                env_event("evt-1", make_event("s1", "doc/1.md")),
+                env_event("evt-2", make_event("s1", "doc/2.md")),
+            ],
+        );
+        store
+            .ingest_batch(&envelope)
+            .unwrap_or_else(|e| panic!("ingest: {e}"));
+        store
+            .conn
+            .execute(
+                "UPDATE server_trace_events
+                 SET event_type = 'SessionEnd', timestamp = '2026-06-24T10:05:00Z', event_json = 'invalid'
+                 WHERE repository_id = 'repo-a' AND producer_event_id = 'evt-2'",
+                [],
+            )
+            .unwrap_or_else(|e| panic!("update event: {e}"));
+
+        let detail = store
+            .get_session_detail("repo-a", "s1")
+            .unwrap_or_else(|e| panic!("detail: {e}"))
+            .unwrap_or_else(|| panic!("session missing"));
+        assert_eq!(detail.session.event_count, 2);
+        assert_eq!(
+            detail.session.ended_at.as_deref(),
+            Some("2026-06-24T10:05:00Z")
+        );
+        assert_eq!(
+            detail
+                .events
+                .iter()
+                .map(|event| event.event_id)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(detail.events[1].payload, serde_json::Value::Null);
+        assert!(
+            store
+                .get_session_detail("repo-b", "s1")
+                .unwrap_or_else(|e| panic!("cross-repo detail: {e}"))
+                .is_none()
+        );
     }
 
     #[test]
@@ -1278,17 +1639,17 @@ mod tests {
         assert!(acks.is_empty());
     }
 
-    // --- Schema migration v1 -> v2 ---
+    // --- Schema migration to current version ---
 
     #[test]
-    fn v2_tables_created_on_fresh_store() {
+    fn current_schema_created_on_fresh_store() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
         let _store = ServerStore::open(&store_path, 10).unwrap_or_else(|e| panic!("open: {e}"));
 
         let conn = Connection::open(&store_path).unwrap_or_else(|e| panic!("reopen: {e}"));
 
-        // Version is now 2.
+        // Version is current.
         let version: String = conn
             .query_row(
                 "SELECT value FROM server_schema_meta WHERE key = 'server_store_schema_version'",
@@ -1296,7 +1657,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap_or_else(|e| panic!("version query: {e}"));
-        assert_eq!(version, "2");
+        assert_eq!(version, SERVER_STORE_SCHEMA_VERSION.to_string());
 
         // hotspot_accumulators table exists.
         let acc_count: i64 = conn
@@ -1320,7 +1681,103 @@ mod tests {
     }
 
     #[test]
-    fn existing_v1_store_migrates_to_v2_additively() {
+    fn repository_event_query_plans_use_scoped_indexes() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let store = ServerStore::open(&store_path, 10).unwrap_or_else(|e| panic!("open: {e}"));
+
+        let event_plan = store
+            .conn
+            .prepare(
+                "EXPLAIN QUERY PLAN
+                 SELECT id FROM server_trace_events
+                 WHERE repository_id = ?1 AND id < ?2
+                 ORDER BY id DESC LIMIT 50",
+            )
+            .and_then(|mut statement| {
+                statement
+                    .query_map(params!["repo-a", 100_i64], |row| row.get::<_, String>(3))?
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .unwrap_or_else(|e| panic!("event query plan: {e}"));
+        assert!(
+            event_plan
+                .iter()
+                .any(|detail| detail.contains("idx_server_events_repository_id")),
+            "unexpected event plan: {event_plan:?}"
+        );
+
+        let session_plan = store
+            .conn
+            .prepare(
+                "EXPLAIN QUERY PLAN
+                 SELECT id FROM server_trace_events
+                 WHERE repository_id = ?1 AND session_id = ?2 AND id < ?3
+                 ORDER BY id DESC LIMIT 50",
+            )
+            .and_then(|mut statement| {
+                statement
+                    .query_map(params!["repo-a", "s1", 100_i64], |row| {
+                        row.get::<_, String>(3)
+                    })?
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .unwrap_or_else(|e| panic!("session event query plan: {e}"));
+        assert!(
+            session_plan
+                .iter()
+                .any(|detail| { detail.contains("idx_server_events_repository_session_id") }),
+            "unexpected session plan: {session_plan:?}"
+        );
+    }
+
+    #[test]
+    fn repository_reads_succeed_during_write_transaction() {
+        let dir = temp_dir();
+        let store_path = dir.path().join("server.db");
+        let seed = ServerStore::open(&store_path, 10).unwrap_or_else(|e| panic!("open seed: {e}"));
+        seed.ingest_batch(&make_envelope(
+            "repo-a",
+            "ws-1",
+            "pi",
+            vec![env_event("evt-1", make_event("s1", "doc/1.md"))],
+        ))
+        .unwrap_or_else(|e| panic!("seed event: {e}"));
+        drop(seed);
+
+        let writer = ServerStore::open(&store_path, 10).unwrap_or_else(|e| panic!("writer: {e}"));
+        let reader = ServerStore::open(&store_path, 10).unwrap_or_else(|e| panic!("reader: {e}"));
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let writer_barrier = barrier.clone();
+        let writer_thread = std::thread::spawn(move || {
+            writer
+                .conn
+                .execute_batch(
+                    "BEGIN IMMEDIATE;
+                     UPDATE server_trace_events SET received_at = received_at WHERE id = 1;",
+                )
+                .unwrap_or_else(|e| panic!("begin write: {e}"));
+            writer_barrier.wait();
+            writer_barrier.wait();
+            writer
+                .conn
+                .execute_batch("COMMIT;")
+                .unwrap_or_else(|e| panic!("commit write: {e}"));
+        });
+
+        barrier.wait();
+        let page = reader
+            .list_events("repo-a", 10, None, None)
+            .unwrap_or_else(|e| panic!("read during write: {e}"));
+        assert_eq!(page.events.len(), 1);
+        barrier.wait();
+        writer_thread
+            .join()
+            .unwrap_or_else(|_| panic!("writer thread panicked"));
+    }
+
+    #[test]
+    fn existing_v1_store_migrates_to_current_schema_additively() {
         let dir = temp_dir();
         let store_path = dir.path().join("server.db");
 
@@ -1366,11 +1823,11 @@ mod tests {
 
         // Open with the upgraded store — migration should succeed.
         let store =
-            ServerStore::open(&store_path, 10).unwrap_or_else(|e| panic!("open v1→v2: {e}"));
+            ServerStore::open(&store_path, 10).unwrap_or_else(|e| panic!("open v1 migration: {e}"));
 
         let conn = Connection::open(&store_path).unwrap_or_else(|e| panic!("reopen: {e}"));
 
-        // Version is now 2.
+        // Version is current.
         let version: String = conn
             .query_row(
                 "SELECT value FROM server_schema_meta WHERE key = 'server_store_schema_version'",
@@ -1378,7 +1835,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap_or_else(|e| panic!("version query: {e}"));
-        assert_eq!(version, "2");
+        assert_eq!(version, SERVER_STORE_SCHEMA_VERSION.to_string());
 
         // New tables exist.
         let acc_count: i64 = conn
@@ -1398,6 +1855,15 @@ mod tests {
             )
             .unwrap_or_else(|e| panic!("signals check: {e}"));
         assert_eq!(sig_count, 1);
+
+        let routes_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='repository_route_manifests'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or_else(|e| panic!("route manifests check: {e}"));
+        assert_eq!(routes_count, 1);
 
         // Pre-existing event row still there.
         let old_count: i64 = conn

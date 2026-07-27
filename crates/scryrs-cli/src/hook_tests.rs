@@ -295,8 +295,9 @@ fn pi_tool_result_maps_and_persists() {
     assert_eq!(outcome, "Success");
 }
 
+/// A failed `read` is a failed lookup, not an opened file with a sad outcome.
 #[test]
-fn pi_is_error_yields_failure_outcome() {
+fn pi_failed_read_persists_failed_lookup() {
     let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
     let raw = serde_json::json!({
         "session_id": "pi-1",
@@ -308,35 +309,77 @@ fn pi_is_error_yields_failure_outcome() {
     assert_eq!(run_pi_file(dir.path(), &raw), 0);
     let store_path = dir.path().join(".scryrs/scryrs.db");
     let (_, _, event_type, outcome) = single_row(&store_path);
-    assert_eq!(event_type, "FileOpened");
+    assert_eq!(event_type, "FailedLookup");
     assert_eq!(outcome, "Failure");
 }
 
+/// Pi's own search tools produce the `SearchRun` evidence the corpus lacked.
 #[test]
-fn pi_lsp_navigation_success_and_failure_branches() {
-    // success → SymbolInspected
-    let dir1 = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    let ok = serde_json::json!({
-        "session_id": "pi-1", "toolName": "lsp_navigation",
-        "input": {"symbol": "Dispatcher"}, "isError": false,
-    })
-    .to_string();
-    assert_eq!(run_pi_file(dir1.path(), &ok), 0);
-    let (_, _, et, oc) = single_row(&dir1.path().join(".scryrs/scryrs.db"));
-    assert_eq!(et, "SymbolInspected");
-    assert_eq!(oc, "Success");
+fn pi_grep_and_find_persist_search_run() {
+    for tool in ["grep", "find"] {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+        let raw = serde_json::json!({
+            "session_id": "pi-1",
+            "toolName": tool,
+            "input": {"pattern": "fn main"},
+            "isError": false,
+        })
+        .to_string();
+        assert_eq!(run_pi_file(dir.path(), &raw), 0);
+        let (_, _, event_type, _) = single_row(&dir.path().join(".scryrs/scryrs.db"));
+        assert_eq!(event_type, "SearchRun", "tool {tool}");
+    }
+}
 
-    // error → FailedLookup
-    let dir2 = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
-    let bad = serde_json::json!({
+/// `lsp_navigation` is an operation dispatcher with no single key field, so it
+/// is not mapped. It must pass through without persisting anything.
+#[test]
+fn pi_lsp_navigation_is_not_persisted() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    let raw = serde_json::json!({
         "session_id": "pi-1", "toolName": "lsp_navigation",
-        "input": {"symbol": "Missing"}, "isError": true,
+        "input": {"operation": "workspaceSymbol", "query": "Dispatcher"}, "isError": false,
     })
     .to_string();
-    assert_eq!(run_pi_file(dir2.path(), &bad), 0);
-    let (_, _, et2, oc2) = single_row(&dir2.path().join(".scryrs/scryrs.db"));
-    assert_eq!(et2, "FailedLookup");
-    assert_eq!(oc2, "Failure");
+    assert_eq!(run_pi_file(dir.path(), &raw), 0);
+    let store_path = dir.path().join(".scryrs/scryrs.db");
+    assert!(
+        !store_path.exists() || event_count(&store_path) == 0,
+        "lsp_navigation must not persist an event"
+    );
+}
+
+/// A missing key input field is dropped, recorded in the warning log, and still
+/// exits 0 — fail-open toward the agent, never a placeholder subject.
+#[test]
+fn pi_missing_key_field_is_dropped_with_a_warning_and_exit_zero() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("temp dir: {e}"));
+    let raw = serde_json::json!({
+        "session_id": "pi-1",
+        "toolName": "read",
+        "input": {},
+        "isError": false,
+    })
+    .to_string();
+    assert_eq!(
+        run_pi_file(dir.path(), &raw),
+        0,
+        "must fail open with exit 0"
+    );
+
+    let store_path = dir.path().join(".scryrs/scryrs.db");
+    assert!(
+        !store_path.exists() || event_count(&store_path) == 0,
+        "no event may be persisted for a missing key field"
+    );
+
+    let log = read_warning_log(dir.path(), "pi");
+    assert!(
+        log.contains("missing key input field"),
+        "warning log must record the contract violation, got: {log}"
+    );
+    assert!(log.contains("expected_key=path"), "log must name the key");
+    assert!(log.contains("tool=read"), "log must name the tool");
 }
 
 #[test]

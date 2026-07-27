@@ -3,6 +3,7 @@ import type { ProposalDetail } from "@/shared/api/client";
 import {
 	canEditReviewedContent,
 	contentDisplay,
+	proposalReviewErrorLabel,
 	reviewedContentPayload,
 	reviewInputsValid,
 	showReviewForm,
@@ -24,12 +25,12 @@ function makeDetail(overrides: Partial<ProposalDetail> = {}): ProposalDetail {
 }
 
 describe("proposal detail review helpers", () => {
-	it("shows the review form only for pending local proposals", () => {
-		expect(showReviewForm(false, makeDetail())).toBe(true);
-		expect(showReviewForm(true, makeDetail())).toBe(false);
+	it("shows the review form only for pending proposals with write capability", () => {
+		expect(showReviewForm(true, makeDetail())).toBe(true);
+		expect(showReviewForm(false, makeDetail())).toBe(false);
 		expect(
 			showReviewForm(
-				false,
+				true,
 				makeDetail({
 					reviewDecision: {
 						reviewer: "alice",
@@ -54,30 +55,30 @@ describe("proposal detail review helpers", () => {
 	});
 
 	it("allows reviewed content edits only for markdown-backed pending proposals", () => {
-		expect(canEditReviewedContent(false, makeDetail())).toBe(true);
+		expect(canEditReviewedContent(true, makeDetail())).toBe(true);
 		expect(
 			canEditReviewedContent(
-				false,
+				true,
 				makeDetail({
 					targetType: "memory_patch",
 					proposedContent: { patch: "alpha" },
 				}),
 			),
 		).toBe(false);
-		expect(canEditReviewedContent(true, makeDetail())).toBe(false);
+		expect(canEditReviewedContent(false, makeDetail())).toBe(false);
 	});
 
 	it("omits unchanged reviewed content and rejects structured target overrides", () => {
 		const markdownDetail = makeDetail({ proposedContent: "# Draft" });
 		expect(
-			reviewedContentPayload(false, markdownDetail, "# Draft"),
+			reviewedContentPayload(true, markdownDetail, "# Draft"),
 		).toBeUndefined();
-		expect(reviewedContentPayload(false, markdownDetail, "# Final")).toBe(
+		expect(reviewedContentPayload(true, markdownDetail, "# Final")).toBe(
 			"# Final",
 		);
 		expect(
 			reviewedContentPayload(
-				false,
+				true,
 				makeDetail({
 					targetType: "semantic_graph_grouping",
 					proposedContent: {
@@ -89,6 +90,13 @@ describe("proposal detail review helpers", () => {
 				"override",
 			),
 		).toBeUndefined();
+	});
+
+	it("labels authorization, validation, conflict, and upstream errors", () => {
+		expect(proposalReviewErrorLabel(403)).toBe("Authorization failed");
+		expect(proposalReviewErrorLabel(422)).toBe("Validation failed");
+		expect(proposalReviewErrorLabel(409)).toBe("Review conflict");
+		expect(proposalReviewErrorLabel(502)).toBe("Live server failed");
 	});
 
 	it("formats structured proposal content for display", () => {

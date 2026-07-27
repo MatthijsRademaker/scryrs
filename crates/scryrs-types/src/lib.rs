@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Write;
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -75,6 +76,116 @@ pub struct TraceEvent {
     pub outcome: Outcome,
 }
 
+/// A path subject resolved against the repository root.
+///
+/// The two variants are distinguishable by absoluteness alone: internal
+/// subjects are always relative and external subjects are always absolute.
+/// That invariant is what lets `subject_kind` be derived from the stored
+/// subject without a schema change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PathSubject {
+    /// Inside the repository — canonical repository-relative POSIX form.
+    Internal(String),
+    /// Outside the repository — recorded verbatim, never rewritten.
+    External(String),
+}
+
+impl PathSubject {
+    /// The subject string to persist.
+    #[must_use]
+    pub fn into_subject(self) -> String {
+        match self {
+            PathSubject::Internal(value) | PathSubject::External(value) => value,
+        }
+    }
+}
+
+/// Normalize a path subject to canonical repository-relative POSIX form.
+///
+/// Lexical only — never touches the filesystem, because a failed lookup is
+/// itself evidence and must normalize the same way a successful one does.
+///
+/// Repository-external paths are returned verbatim as [`PathSubject::External`]
+/// rather than rewritten into `../` traversals (which produce meaningless
+/// subjects) or dropped (which loses real agent behavior).
+#[must_use]
+pub fn normalize_path_subject(raw: &str, repo_root: &Path) -> PathSubject {
+    let raw_path = Path::new(raw);
+
+    // Anchor relative inputs to the repository root before comparing, so
+    // `crates/x.rs` and `<root>/crates/x.rs` collapse to the same subject.
+    let absolute = if raw_path.is_absolute() {
+        lexical_normalize(raw_path)
+    } else {
+        lexical_normalize(&repo_root.join(raw_path))
+    };
+
+    let root = lexical_normalize(repo_root);
+
+    match absolute.strip_prefix(&root) {
+        Ok(relative) => {
+            let posix = to_posix(relative);
+            if posix.is_empty() {
+                // The subject *is* the repository root; nothing relative to say.
+                PathSubject::External(to_posix(&absolute))
+            } else {
+                PathSubject::Internal(posix)
+            }
+        }
+        // Outside the repository: preserve exactly what the agent addressed.
+        Err(_) => PathSubject::External(to_posix(&absolute)),
+    }
+}
+
+/// Resolve `.` and `..` segments and collapse duplicate separators lexically.
+fn lexical_normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                // Popping past the anchor is a no-op, matching path semantics.
+                if !out.pop() {
+                    out.push(Component::ParentDir);
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Render a path with `/` separators so subjects are stable across platforms.
+fn to_posix(path: &Path) -> String {
+    path.components()
+        .filter_map(|c| match c {
+            Component::Normal(part) => Some(part.to_string_lossy().into_owned()),
+            Component::RootDir => Some(String::new()),
+            Component::ParentDir => Some("..".to_string()),
+            Component::Prefix(prefix) => Some(prefix.as_os_str().to_string_lossy().into_owned()),
+            Component::CurDir => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Classify a path subject as repository-internal or external.
+///
+/// Public so the one-time historical migration in `scryrs-core` derives
+/// `subject_kind` exactly the way [`TraceEvent::subject_kind`] does.
+///
+/// Adapters normalize internal paths to repository-relative form, so an
+/// absolute subject is by construction external. A Windows drive-prefixed path
+/// (`C:\...`) is absolute for this purpose too.
+pub fn path_subject_kind(subject: &str) -> &'static str {
+    let is_absolute = subject.starts_with('/')
+        || subject
+            .as_bytes()
+            .get(1)
+            .is_some_and(|&b| b == b':' && subject.as_bytes()[0].is_ascii_alphabetic());
+    if is_absolute { "external_file" } else { "file" }
+}
+
 impl TraceEvent {
     /// Return a hotspot subject for subject-bearing events, or `None` for
     /// lifecycle events that have no hotspot subject.
@@ -95,15 +206,26 @@ impl TraceEvent {
     /// Return a short category tag for subject-bearing events, or `None`
     /// for lifecycle events. This is the `subject_kind` column used for
     /// indexed subject lookup in the datastore.
+    ///
+    /// Path-bearing payloads resolve to `"file"` or `"external_file"` based on
+    /// the subject itself: harness adapters normalize repository-internal paths
+    /// to relative form, so an absolute subject is by construction a path
+    /// outside the repository. External subjects group separately because a
+    /// path outside the repository is not loadable context for a reader of it.
+    ///
+    /// `FailedLookup` is path-based like `FileOpened` and `EditMade`. That is
+    /// deliberate: a failed read and a successful read of the same file must
+    /// land in one hotspot entry, so `counts.eventType` carries both and the
+    /// failure ratio for that subject is meaningful.
     #[must_use]
     pub fn subject_kind(&self) -> Option<&'static str> {
         match &self.payload {
             TraceEventPayload::SessionStart(_) | TraceEventPayload::SessionEnd(_) => None,
-            TraceEventPayload::FileOpened(_) | TraceEventPayload::EditMade(_) => Some("file"),
+            TraceEventPayload::FileOpened(p) => Some(path_subject_kind(&p.path)),
+            TraceEventPayload::EditMade(p) => Some(path_subject_kind(&p.target)),
+            TraceEventPayload::FailedLookup(p) => Some(path_subject_kind(&p.subject)),
             TraceEventPayload::SearchRun(_) => Some("search"),
-            TraceEventPayload::SymbolInspected(_) | TraceEventPayload::FailedLookup(_) => {
-                Some("symbol")
-            }
+            TraceEventPayload::SymbolInspected(_) => Some("symbol"),
             TraceEventPayload::CommandExecuted(_) => Some("command"),
             TraceEventPayload::DocRetrieved(_) => Some("document"),
         }

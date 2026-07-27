@@ -2,16 +2,25 @@ import { describe, expect, it } from "vitest";
 import {
 	hotspotSubjectDisplay,
 	navigationForMode,
+	routeErrorMessage,
 	routeUnavailableMessage,
+	traceEventSubjectDisplay,
 } from "@/shared/lib/dashboard-mode";
 
 describe("navigationForMode", () => {
-	it("shows signals and hides local-only routes in live mode", () => {
-		expect(navigationForMode("live").map((item) => item.label)).toEqual([
+	it("shows Proposals in live mode only when read capability exists", () => {
+		expect(navigationForMode("live", true).map((item) => item.label)).toEqual([
 			"Hotspots",
 			"Signals",
+			"Sessions",
+			"Proposals",
+			"Events",
+			"Routes",
 			"About",
 		]);
+		expect(
+			navigationForMode("live", false).map((item) => item.label),
+		).not.toContain("Proposals");
 	});
 
 	it("keeps existing local navigation in local mode", () => {
@@ -58,27 +67,51 @@ describe("hotspotSubjectDisplay", () => {
 	});
 });
 
+describe("traceEventSubjectDisplay", () => {
+	it("preserves raw server subjects in live mode", () => {
+		expect(
+			traceEventSubjectDisplay(
+				{ subject: "/srv/repo/src/main.rs", subjectKind: "file" },
+				{ mode: "live", repositoryPath: "/srv/repo" },
+			).label,
+		).toBe("/srv/repo/src/main.rs");
+	});
+});
+
 describe("routeUnavailableMessage", () => {
-	it("returns a live-mode explanation for local-only routes", () => {
-		expect(routeUnavailableMessage("sessions", "live")).toContain(
-			"not available in live mode",
-		);
-		expect(routeUnavailableMessage("events", "live")).toContain(
-			"not available in live mode",
-		);
+	it("returns a live-mode explanation when proposal APIs are not configured", () => {
 		expect(routeUnavailableMessage("proposals", "live")).toContain(
-			"not available in live mode",
+			"not configured",
 		);
 		expect(routeUnavailableMessage("proposal-detail", "live")).toContain(
-			"not available in live mode",
+			"not configured",
 		);
-		expect(routeUnavailableMessage("routes", "live")).toContain(
-			"Route explain is not available",
-		);
+		expect(routeUnavailableMessage("routes", "live")).toBeNull();
 	});
 
 	it("keeps live-capable routes available", () => {
+		expect(routeUnavailableMessage("proposals", "live", true)).toBeNull();
+		expect(routeUnavailableMessage("proposal-detail", "live", true)).toBeNull();
 		expect(routeUnavailableMessage("hotspots", "live")).toBeNull();
 		expect(routeUnavailableMessage("signals", "live")).toBeNull();
+		expect(routeUnavailableMessage("sessions", "live")).toBeNull();
+		expect(routeUnavailableMessage("session-detail", "live")).toBeNull();
+		expect(routeUnavailableMessage("events", "live")).toBeNull();
+		expect(routeUnavailableMessage("routes", "live")).toBeNull();
+	});
+});
+
+describe("routeErrorMessage", () => {
+	it("explains missing live publication", () => {
+		expect(routeErrorMessage("live", 404, "missing")).toContain(
+			"scryrs route publish <PATH>",
+		);
+	});
+
+	it("distinguishes live upstream failure from local artifact corruption", () => {
+		expect(routeErrorMessage("live", 502, "failed")).toContain(
+			"Live route service",
+		);
+		expect(routeErrorMessage("local", 502, "failed")).toContain("regenerate");
 	});
 });

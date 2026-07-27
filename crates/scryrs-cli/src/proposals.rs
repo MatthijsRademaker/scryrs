@@ -24,6 +24,7 @@ pub(crate) fn execute_proposals_cli(
     match args[0].as_str() {
         "--help" | "-h" => write_proposals_help(out).map_or(1, |_| 0),
         "list" => execute_list_cli(out, err, &args[1..]),
+        "publish" => crate::proposal_publish::execute_proposal_publish(out, err, &args[1..]),
         "accept" => execute_review_cli(out, err, &args[1..], ReviewOutcome::Accepted, stdin),
         "reject" => execute_review_cli(out, err, &args[1..], ReviewOutcome::Rejected, stdin),
         other => write_usage_error(
@@ -40,11 +41,15 @@ pub(crate) fn write_proposals_help(out: &mut impl Write) -> io::Result<()> {
         "scryrs proposals — review proposal inbox artifacts\n\n\
 USAGE\n\
   scryrs proposals list <PATH> [--state pending|accepted|rejected|all]\n\
+  scryrs proposals publish <PATH> <ID> [--server-url <URL>] [--repository-id <ID>]\n\
   scryrs proposals accept <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339> [--content-file <PATH> | --content-stdin]\n\
   scryrs proposals reject <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>\n\n\
 SUBCOMMANDS\n\
   list\n\
       Emit deterministic JSON describing pending, accepted, and rejected proposal states.\n\
+  publish\n\
+      Publish one validated local proposal to repository-scoped live storage.\n\
+      Uses SCRYRS_PROPOSAL_WRITE_TOKEN and preserves the local proposal artifact.\n\
   accept\n\
       Write .scryrs/accepted/{{proposalId}}.json as a validated ProposalReviewDecision.\n\
       Optional --content-file or --content-stdin overrides accepted Markdown content.\n\

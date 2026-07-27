@@ -1,0 +1,1 @@
+{"session_id":"fixture","cwd":"/repo","hook_event_name":"PostToolUse","tool_name":"WebSearch","tool_input":{"query":"rust trait objects"}}

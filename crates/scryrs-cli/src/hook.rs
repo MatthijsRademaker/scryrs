@@ -110,6 +110,8 @@ pub(crate) fn execute_hook<R: Read>(
         store_path: store_path.clone(),
         timestamp: now_iso8601(),
         bash_debug: debug,
+        // Path subjects normalize against the same root the store lives under.
+        repo_root: base_dir.clone(),
     };
 
     // --- translate ---

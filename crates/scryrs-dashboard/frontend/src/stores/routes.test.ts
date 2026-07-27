@@ -50,6 +50,20 @@ describe("useRouteStore", () => {
 		expect(spy).toHaveBeenCalledWith("auth");
 	});
 
+	it("search preserves successful empty live results", async () => {
+		vi.spyOn(client, "getRouteHints").mockResolvedValue({
+			schemaVersion: "1.0.0",
+			hints: [],
+		});
+
+		const store = useRouteStore();
+		await store.search("no-match");
+
+		expect(store.error).toBeNull();
+		expect(store.hints).toEqual([]);
+		expect(store.query).toBe("no-match");
+	});
+
 	it("search handles API error and preserves status code (404)", async () => {
 		const apiError = new client.ApiError(404, "route artifact not found");
 		vi.spyOn(client, "getRouteHints").mockRejectedValue(apiError);
@@ -136,9 +150,10 @@ describe("navigationForMode route entry", () => {
 		expect(routeItem?.label).toBe("Routes");
 	});
 
-	it("excludes Routes in live mode", () => {
+	it("includes Routes in live mode", () => {
 		const nav = navigationForMode("live");
 		const routeItem = nav.find((item) => item.to === "/routes");
-		expect(routeItem).toBeUndefined();
+		expect(routeItem).toBeDefined();
+		expect(routeItem?.label).toBe("Routes");
 	});
 });

@@ -1,0 +1,1 @@
+{"session_id":"fixture","cwd":"/repo","toolName":"find","input":{"pattern":"*.rs","path":"crates/","limit":100},"isError":false}

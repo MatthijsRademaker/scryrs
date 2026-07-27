@@ -789,11 +789,13 @@ fn full_subject_family_fixture_produces_correct_ranking() {
                 reason: Some("write error".into()),
             },
         ),
-        // FailedLookup: "nonexistent_fn", session s1, weight 4 + 2 bonus → score 6
+        // FailedLookup: "src/nonexistent.rs", session s1, weight 4 + 2 bonus → score 6.
+        // FailedLookup carries a path (an agent addressed a file that is not
+        // there), so its subject_kind is "file" like FileOpened and EditMade.
         make_failed_lookup(
             "s1",
-            "nonexistent_fn",
-            "symbol not found",
+            "src/nonexistent.rs",
+            "file not found",
             "2026-06-21T09:08:00Z",
         ),
         // FileOpened: src/main.rs again, same session s1, adds +1 → total 2
@@ -829,7 +831,7 @@ fn full_subject_family_fixture_produces_correct_ranking() {
 
     // Verify ranking and scores against documented weight table.
     // Expected scores:
-    // nonexistent_fn (FailedLookup): 4 + 2 = 6
+    // src/nonexistent.rs (FailedLookup): 4 + 2 = 6
     // src/broken.rs (EditMade Failure): 3 + 2 = 5
     // src/lib.rs (EditMade Success): 3
     // cargo test (CommandExecuted Failure): 1 + 2 = 3
@@ -839,8 +841,8 @@ fn full_subject_family_fixture_produces_correct_ranking() {
     // docs/api.md (DocRetrieved): 2
     // cargo build (CommandExecuted Success): 1
 
-    assert_eq!(entries[0]["subject"], "nonexistent_fn");
-    assert_eq!(entries[0]["subjectKind"], "symbol");
+    assert_eq!(entries[0]["subject"], "src/nonexistent.rs");
+    assert_eq!(entries[0]["subjectKind"], "file");
     assert_eq!(entries[0]["score"], 6);
 
     assert_eq!(entries[1]["subject"], "src/broken.rs");

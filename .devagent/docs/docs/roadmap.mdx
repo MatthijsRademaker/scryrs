@@ -236,6 +236,49 @@ Runtime work should consume prior artifacts, not bypass them.
 
 **Partial delivery (2026-06-27):** `scryrs route explain <PATH> --query <TEXT>`, `scryrs route bundle <PATH> --query <TEXT> --limit <N>`, route hint schema (`RouteHintDocument` / `RouteHintItem`), and `explain_hints` deterministic matching are shipped. Explain uses case-insensitive tiered matching (exact/prefix/substring) across label, subject, id, target, kind, and evidence-link subjects. **This is NOT product-complete.** Retrieval is deterministic manifest matching with packed display relevance, explicit `non_loadable` targets, and no automatic source/docs context loading. Semantic ranking, autonomous context loading, and runtime optimizer behavior remain deferred.
 
+## Future Direction: Session Co-occurrence Evidence (spike)
+
+A **spike**, not committed scope, and independent of every other direction on this page.
+
+scryrs records which files an agent opens, but never which files it opens *together*. The dogfooded store holds 386 `FileOpened` events across 30 sessions — a real co-occurrence graph that is fully captured today and entirely unmined.
+
+Why it matters: hotspot scoring answers "which file is hot?", which an agent can often guess. Co-occurrence answers **"what should I load alongside this?"** — which is precisely what `scryrs route bundle` needs to emit, and which no amount of per-subject scoring can produce.
+
+It requires no new capture, no schema change, and no harness work: `session_id` and `timestamp` are already on every event. The work is entirely in scoring and graph construction.
+
+Open questions for the spike:
+
+- What window defines "together" — whole session, sliding time window, or contiguous run?
+- Does co-occurrence belong in the hotspot report, the knowledge graph, or only in route-bundle ranking?
+- How is it kept deterministic, given the ranking chain in `route explain` is contract-bound?
+- Does pair-count scale acceptably, or does it need a support threshold?
+
+Recorded as strategic intent only. Noted here because it was surfaced while fixing trace signal fidelity and would otherwise stay implicit.
+
+## Future Direction: Hook-Injected Route Hints (spike)
+
+A **spike**, not committed scope. The concept: instead of relying on an agent to invoke `scryrs route bundle` itself, a harness hook (for example Claude Code's `UserPromptSubmit`) would query the route manifest for the incoming prompt and inject the resulting hints into the agent's context unprompted.
+
+Why it is attractive:
+
+- The instructing path shipped in `agent-skill-surface` can be ignored — a skill only works if the model chooses to load and follow it. Injection does not depend on model cooperation.
+- The hints are already bounded and deterministic (`RouteBundleDocument`), so the injected payload has a known shape and a known size cap.
+
+Why it is deferred rather than built:
+
+- It crosses the observer-first boundary. `trace-hook-contract` requires that hooks not modify agent semantics, and `hooks/pi/index.ts` states the hook "never registers scryrs as an agent-callable tool, never modifies agent-visible tool results." Injecting context modifies what the agent sees, which is a different product than an observer.
+- It is closely adjacent to the Runtime Optimizer direction below and inherits its prerequisite: the observer chain must be stable and its evidence proven actionable first.
+- Injecting hints from a low-quality corpus actively degrades sessions. Unlike an ignored skill, bad injected context cannot be ignored. This spike is gated on the evidence-quality work in `trace-signal-fidelity`.
+
+What the spike should answer, before any implementation:
+
+- Do agents actually invoke the instructing skill? Real invocation rates from `agent-skill-surface` are the input that decides whether injection is needed at all.
+- What is the token cost of injected hints per prompt, and does it pay for itself against the searching it replaces?
+- Is injection opt-in per session, and how does a user turn it off?
+- Does injection remain fail-open — a missing manifest, an empty result, or an unavailable binary must leave the session unchanged.
+
+Strategic intent only. No implementation, schema change, or prompt middleware should be built toward this direction until `agent-skill-surface` has shipped and produced real invocation data.
+
 ## Future Direction: Runtime Optimizer (RTK-style Rewrite)
 
 A runtime optimizer/rewrite layer modeled on RTK-style command rewriting is a **later-phase optional capability**, not current implementation scope. The concept:

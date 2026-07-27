@@ -64,7 +64,7 @@ Rewrite-tool co-installation behaves differently across harnesses, and Bash capt
 | Harness | Capture point | What the hook sees |
 |---------|---------------|--------------------|
 | **Pi** | `tool_result` (post-execution) | `event.input.command` from the `tool_result` event — reflects whatever command string the harness presents after execution completes. If an upstream rewrite extension mutated the `tool_call` input, and the harness propagates that mutation into `tool_result`, scryrs records the rewritten form. **Only active when `SCRYRS_DEBUG` is set.** |
-| **Claude Code** | PreToolUse (pre-execution) | `tool_input.command` from the PreToolUse event — reflects whatever command string the harness presents at the time the scryrs hook runs in the PreToolUse pipeline. Co-installed rewrite hooks can change this value depending on hook order. **Only active when `SCRYRS_DEBUG` is set.** |
+| **Claude Code** | PostToolUse / PostToolUseFailure (post-execution) | `tool_input.command` from the post-tool event — the command string as executed. **Only active when `SCRYRS_DEBUG` is set.** |
 
 ### Limitations
 
@@ -72,7 +72,7 @@ Rewrite-tool co-installation behaves differently across harnesses, and Bash capt
 
 - **Hotspot subjects remain fragmented** between rewritten and non-rewritten commands (e.g., `ls -la` and `rtk ls -la` are distinct subjects). Command canonicalization remains a known limitation not scheduled for any current roadmap phase.
 - **Pi mutation propagation** from `tool_call` input mutations through to `tool_result` is an empirical assumption. If not yet verified, this behavior is presented as a limitation rather than a guarantee.
-- **Claude Code updated-input forwarding** between PreToolUse hooks is platform-dependent. The observed command may differ if hook-order changes between environments.
+- **Claude Code post-tool events** report the command as executed, so pre-execution rewrite hooks no longer affect what scryrs observes.
 - The `CommandExecutedPayload` schema contains a single `command` field. Preserving both original and effective commands within a single trace event is not supported in Phase 1.
 
 ## TraceEvent Schema
@@ -156,7 +156,7 @@ Transport differs by harness, and this asymmetry is intentional:
 
 | Harness | Transport | Input | Why |
 |---------|-----------|-------|-----|
-| **Claude Code** | Native `scryrs hook claude-code` command hook (no JavaScript, no node) | `PreToolUse` event JSON on **stdin** | Claude Code `command` hooks spawn a subprocess and pipe the event on stdin |
+| **Claude Code** | Native `scryrs hook claude-code` command hook (no JavaScript, no node) | `PostToolUse` / `PostToolUseFailure` event JSON on **stdin** | Claude Code `command` hooks spawn a subprocess and pipe the event on stdin |
 | **Pi** | Thin in-process extension (`hooks/pi/index.ts`) delegating to `scryrs hook pi` | raw event via **`--file <PATH>`** | Pi loads a module rather than spawning a subprocess hook; its `exec()` opens stdin as `/dev/null` |
 
 The Pi shim resolves `session_id` from Pi's `SessionManager`, serializes the raw
@@ -318,13 +318,15 @@ and persists it through the canonical store.
 - **Pi** — a thin transport shim at `hooks/pi/index.ts`. Pi's `.pi/extensions/`
   directory loads the module; the shim forwards raw `session_start`/`tool_result`
   events to `scryrs hook pi --file`. The `pi` adapter captures `SessionStart` and
-  five default tool events (read, ast_grep_search, lsp_navigation, edit, write).
+  seven mapped tool events (read, grep, find, edit, write, bash, and the
+  pi-lens `ast_grep_search`). `ls` and `lsp_navigation` are not mapped.
   Bash is debug-gated via `SCRYRS_DEBUG`.
 - **Claude Code** — the native `scryrs hook claude-code` command hook (no
-  JavaScript file). Configured in `.claude/settings.json` under `PreToolUse`,
+  JavaScript file). Configured in `.claude/settings.json` under both
+  `PostToolUse` and `PostToolUseFailure`,
   it receives the event on stdin. The `claude-code` adapter captures eight
-  default PreToolUse events (Read, Grep, Glob, Edit, Write, NotebookEdit,
-  WebSearch, WebFetch). Bash is debug-gated. PreToolUse-only; no lifecycle events.
+  default post-tool events (Read, Grep, Glob, Edit, Write, NotebookEdit,
+  WebSearch, WebFetch). Bash is debug-gated. No lifecycle events.
 
 ### Tier 2: Plugin
 
@@ -374,7 +376,7 @@ command that writes `scryrs.json` `remote` and the `.scryrs/` scaffold).
 ### Manual setup (alternative)
 
 1. **Ensure scryrs is on `$PATH`** — the harness must be able to invoke `scryrs hook <harness>`.
-2. **Configure the harness:** for Claude Code, add `{"type":"command","command":"scryrs hook claude-code"}` under `PreToolUse` in `.claude/settings.json`; for Pi, install `hooks/pi/index.ts` into `.pi/extensions/scryrs/index.ts`.
+2. **Configure the harness:** for Claude Code, add `{"type":"command","command":"scryrs hook claude-code"}` under **both** `PostToolUse` and `PostToolUseFailure` in `.claude/settings.json`; for Pi, install `hooks/pi/index.ts` into `.pi/extensions/scryrs/index.ts`.
 3. **Create `scryrs.json`** at the repository root (optional, recommended).
 4. **Verify fail-open behavior** — confirm that scryrs failures do not block tool execution.
 
@@ -391,11 +393,13 @@ command that writes `scryrs.json` `remote` and the `.scryrs/` scaffold).
 
 ### Claude Code Hook Limitations
 
-The Claude Code hook is a **PreToolUse-only** hook. This creates specific limitations that integrators must understand:
+The Claude Code hook registers on **both** `PostToolUse` and `PostToolUseFailure`:
 
-- **Unconditional Success outcome:** PreToolUse hooks fire *before* tool execution. The real outcome (success or failure) cannot be determined. Every emitted event carries `outcome: Success` unconditionally. These are pre-execution metadata signals, not post-execution outcomes.
-- **No session lifecycle events:** PreToolUse hooks have no session-open or session-close trigger. No `SessionStart` or `SessionEnd` lifecycle events are emitted. Only subject-bearing tool events are produced.
-- **Session IDs come from the payload:** the integration reads `session_id` directly from the `PreToolUse` payload (no per-process UUID, no `CLAUDE_SESSION_ID`-style environment variables). The trace store is resolved against the payload `cwd`.
+- **Two events are required, not one.** `PostToolUse` fires only after a tool call *succeeds*; failures arrive on the separate `PostToolUseFailure` event. Registering on `PostToolUse` alone would leave every recorded outcome `Success` — the defect that made the previous `PreToolUse`-only integration unusable as an outcome source. The outcome is derived from `hook_event_name`, not inferred from `tool_response`.
+- **The two events are mutually exclusive** per tool call, so registering both does not double-count. `scryrs init --agent claude-code` removes a stale `PreToolUse` registration written by an earlier release, and `scryrs doctor` reports one that is left behind.
+- **Non-interference requires restraint.** `PostToolUse` supports `decision: "block"` and `updatedToolOutput`, which would replace the tool result before the model sees it. The hook emits neither, writes nothing to stdout, and always exits 0. Diagnostics go to `.scryrs/hooks/claude-code-warnings.log` rather than stderr, because Claude Code can surface hook stderr.
+- **No session lifecycle events:** no `SessionStart` or `SessionEnd` events are emitted. Claude Code does expose those hook events, so the gap is closable — it is simply not wired yet.
+- **Session IDs come from the payload:** the integration reads `session_id` directly from the hook payload. The trace store is resolved against the payload `cwd`.
 
 ### Claude Code Hook Fail-Open Warning Channel
 

@@ -488,8 +488,8 @@ fn doctor_and_publish_appear_in_help_and_help_json_output() {
         "--help-json must list doctor command, got:\n{help_json}"
     );
     assert!(
-        help_json.contains("\"surfaceVersion\":\"0.18.0\""),
-        "--help-json must bump surfaceVersion to 0.18.0, got:\n{help_json}"
+        help_json.contains("\"surfaceVersion\":\"0.20.0\""),
+        "--help-json must bump surfaceVersion to 0.20.0, got:\n{help_json}"
     );
     assert!(
         help_json.contains("\"name\":\"publish\""),
@@ -1574,8 +1574,8 @@ fn help_json_contains_grouped_proposals_surface_and_bumped_version() {
     assert!(err.is_empty());
     let json_str = String::from_utf8_lossy(&out);
     assert!(
-        json_str.contains("\"surfaceVersion\":\"0.18.0\""),
-        "--help-json must bump surfaceVersion to 0.18.0, got:\n{json_str}"
+        json_str.contains("\"surfaceVersion\":\"0.20.0\""),
+        "--help-json must bump surfaceVersion to 0.20.0, got:\n{json_str}"
     );
     assert!(
         json_str.contains("\"name\":\"proposals\""),
@@ -1586,8 +1586,69 @@ fn help_json_contains_grouped_proposals_surface_and_bumped_version() {
         "--help-json proposals entry must expose nested subcommands, got:\n{json_str}"
     );
     assert!(json_str.contains("\"name\":\"list\""));
+    assert!(json_str.contains("\"name\":\"publish\""));
     assert!(json_str.contains("\"name\":\"accept\""));
     assert!(json_str.contains("\"name\":\"reject\""));
+}
+
+// --- Route publish command tests ---
+
+#[test]
+fn route_publish_help_flag_prints_auth_and_retry_contract() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(["route", "publish", "--help"], &mut out, &mut err),
+        0
+    );
+    assert!(err.is_empty());
+    let help = String::from_utf8_lossy(&out);
+    assert!(help.contains("scryrs route publish"));
+    assert!(help.contains("SCRYRS_ROUTE_PUBLISH_TOKEN"));
+    assert!(help.contains("retried once"));
+    assert!(help.contains("unchanged"));
+}
+
+#[test]
+fn route_publish_missing_path_exits_2() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    assert_eq!(
+        run_with_writers(["route", "publish"], &mut out, &mut err),
+        2
+    );
+    assert!(out.is_empty());
+    let error = String::from_utf8_lossy(&err);
+    assert!(error.contains("missing required PATH"));
+    assert!(error.contains("Usage: scryrs route publish"));
+}
+
+#[test]
+fn root_help_and_help_json_include_route_publish() {
+    let mut help = Vec::new();
+    let mut help_error = Vec::new();
+    assert_eq!(run_with_writers(["--help"], &mut help, &mut help_error), 0);
+    assert!(String::from_utf8_lossy(&help).contains("scryrs route publish"));
+
+    let mut json = Vec::new();
+    let mut json_error = Vec::new();
+    assert_eq!(
+        run_with_writers(["--help-json"], &mut json, &mut json_error),
+        0
+    );
+    let document: serde_json::Value =
+        serde_json::from_slice(&json).unwrap_or_else(|error| panic!("help JSON: {error}"));
+    let route = document["commands"]
+        .as_array()
+        .and_then(|commands| commands.iter().find(|command| command["name"] == "route"))
+        .unwrap_or_else(|| panic!("route command missing"));
+    assert!(route["subcommands"].as_array().is_some_and(|subcommands| {
+        subcommands
+            .iter()
+            .any(|command| command["name"] == "publish")
+    }));
 }
 
 // --- Route explain command tests ---

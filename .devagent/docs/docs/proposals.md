@@ -154,6 +154,7 @@ Proposal review is now exposed as a grouped plural command surface:
 
 ```text
 scryrs proposals list <PATH> [--state pending|accepted|rejected|all]
+scryrs proposals publish <PATH> <ID> [--server-url <URL>] [--repository-id <ID>]
 scryrs proposals accept <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339> [--content-file <PATH> | --content-stdin]
 scryrs proposals reject <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decided-at <RFC3339>
 ```
@@ -161,8 +162,9 @@ scryrs proposals reject <PATH> <ID> --reviewer <NAME> --rationale <TEXT> --decid
 The naming split is intentional:
 
 - `scryrs propose` **generates** inbox proposals
-- `scryrs proposals ...` **reviews** existing inbox proposals
-- `scryrs publish ...` **publishes** accepted review decisions only, in a separate explicit step
+- `scryrs proposals publish` copies one validated inbox proposal to live server storage
+- `scryrs proposals accept|reject` **reviews locally** using filesystem artifacts
+- `scryrs publish ...` **publishes accepted knowledge** to docs surfaces only, in a separate explicit step
 
 ### `proposals list`
 
@@ -207,18 +209,37 @@ Rejected decisions copy only `sourceEvidence` and set `outcome = rejected`; they
 
 Accepting a proposal is still ledger-only. `scryrs proposals accept` writes `.scryrs/accepted/{proposalId}.json`, but it does not create generic Markdown output, it does not update `.devagent/docs/docs/accepted-knowledge/`, and it does not touch `.devagent/docs/docs/_nav.json`. Operators must run `scryrs publish markdown` or `scryrs publish rspress` separately to materialize accepted knowledge.
 
+## Remote publication and review
+
+`scryrs proposals publish <PATH> <ID>` sends one validated local `ProposalDocument` to `POST /v1/repositories/{repositoryId}/proposals`. Server URL and repository identity use normal remote precedence; authentication resolves only from `SCRYRS_PROPOSAL_WRITE_TOKEN` or `.scryrs/.env`. No token flag exists, and tokens are never read from committed `scryrs.json`.
+
+Server operators configure `SCRYRS_PROPOSAL_WRITE_CREDENTIALS` as JSON records containing `repositoryId`, `actorId`, and `token`. Tokens authorize writes only for their repository. Review request `reviewer` must equal authenticated `actorId`, preventing unaudited reviewer impersonation.
+
+Publication rules:
+
+- request limit: 1 MiB
+- validated proposal JSON is compact-serialized and SHA-256 hashed as immutable revision
+- identical proposal ID + revision retry returns success without rewriting audit metadata
+- same proposal ID + different revision returns `409 Conflict`
+- publication audit retains repository ID, proposal ID, schema version, revision hash, publisher actor, and first publication timestamp
+- local `.scryrs/proposals/{proposalId}.json` is never deleted or rewritten, including failed requests
+- transport failures and HTTP 5xx responses retry once; validation/auth/conflict responses do not retry
+
+Remote terminal decisions use authenticated `accept` and `reject` endpoints with a 64 KiB request limit. First terminal decision wins. Canonically identical retries succeed without replacing `recordedAt`; opposite outcomes or changed same-outcome metadata return `409 Conflict`. Audit metadata stores authenticated actor, explicit reviewer, outcome, decision hash, client decision timestamp, and server recording timestamp. No remote delete API exists. Rollback disables proposal routes/navigation while retaining stored audit records.
+
 ## Dashboard review surface
 
-Local dashboard proposal detail views now expose the same review semantics through `POST /api/proposals/{proposalId}/accept` and `POST /api/proposals/{proposalId}/reject`.
+Dashboard proposal routes keep one browser contract in both modes: `GET /api/proposals`, `GET /api/proposals/{proposalId}`, and matching `accept`/`reject` writes.
 
-- the dashboard requires explicit `reviewer`, `rationale`, and RFC3339 `decidedAt`; it does not fill defaults
-- Markdown-backed targets (`docs_note`, `adr`, `skill`, `debugging_playbook`) may submit optional reviewed Markdown content on accept
-- structured targets (`memory_patch`, `semantic_graph_grouping`) reject edited-content overrides
-- the dashboard writes only `.scryrs/accepted/{proposalId}.json` or `.scryrs/rejected/{proposalId}.json`
-- `.scryrs/proposals/{proposalId}.json`, `.devagent/docs/`, `.scryrs/graph.json`, and `.scryrs/routes.json` remain untouched
-- live dashboard mode still exposes proposals as unavailable for review writes
+- local mode keeps filesystem inventory and `ProposalReviewDecision` writes unchanged
+- live mode proxies only repository-scoped server proposal APIs; it never falls back to local proposal directories
+- `/api/meta` reports `proposalReadsAvailable` and `proposalReviewWritesAvailable`
+- live Proposals navigation renders only when reads are available
+- pending-detail review controls render only when write credentials are configured
+- authorization, validation, conflict, and upstream failures remain explicit; success is shown only after server success and state refresh
+- Markdown-backed targets may submit reviewed Markdown; structured targets reject overrides
 
-The backend uses the same shared review writer as the CLI, so validation, byte-identical idempotency, and conflict behavior stay aligned across both entrypoints.
+Both server and local filesystem paths use `scryrs-curator::proposals::wire` validation and decision construction, keeping target-type, RFC3339, evidence, idempotency, and conflict semantics aligned.
 
 ### Determinism and conflicts
 
@@ -270,7 +291,7 @@ Model output is proposal input only.
 
 ## Current Limitations
 
-- Proposal generation is deterministic and local-file based. A read-only dashboard review flow is available at `/proposals` and `/proposals/:proposalId` in local dashboard mode.
+- Proposal generation remains deterministic and local-file based; clients explicitly publish selected inbox documents to live storage.
 - Proposal inbox artifacts are still not consumed automatically by graph build, route generation, or adapters.
 - Accepted review decisions can affect graph build only through `.scryrs/accepted/`, and only accepted `semantic_graph_grouping` targets project into graph structure today.
 - Route generation still consumes `.scryrs/graph.json` only; it never reads proposal or review-artifact directories directly.

@@ -541,7 +541,7 @@ mod tests {
             make_edit_made("s1", "src/b.rs", "2026-06-21T10:00:05Z"),
             make_failed_lookup(
                 "s1",
-                "missing_fn",
+                "src/missing.rs",
                 Some("not found"),
                 "2026-06-21T10:00:06Z",
             ),
@@ -550,19 +550,22 @@ mod tests {
 
         let query = TraceQuery::open(dir.path()).unwrap_or_else(|e| panic!("open: {e}"));
 
-        // File kind: FileOpened + EditMade
+        // File kind: FileOpened + EditMade + FailedLookup (all path subjects).
         let files = query
             .query_by_subject_kind("file")
             .unwrap_or_else(|e| panic!("file: {e}"));
         let file_subjects: Vec<&str> = files.iter().filter_map(|e| e.subject()).collect();
-        assert_eq!(file_subjects, vec!["src/a.rs", "src/b.rs"]);
+        assert_eq!(
+            file_subjects,
+            vec!["src/a.rs", "src/b.rs", "src/missing.rs"]
+        );
 
-        // Symbol kind: SymbolInspected + FailedLookup
+        // Symbol kind: SymbolInspected only.
         let symbols = query
             .query_by_subject_kind("symbol")
             .unwrap_or_else(|e| panic!("symbol: {e}"));
         let sym_subjects: Vec<&str> = symbols.iter().filter_map(|e| e.subject()).collect();
-        assert_eq!(sym_subjects, vec!["MyStruct", "missing_fn"]);
+        assert_eq!(sym_subjects, vec!["MyStruct"]);
 
         // Search kind
         let searches = query

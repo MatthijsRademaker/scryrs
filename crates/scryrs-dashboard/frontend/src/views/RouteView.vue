@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { onMounted, ref } from "vue";
 import { Alert, Button, Card, CardContent, EmptyState } from "@/shared/ui";
-import { routeUnavailableMessage } from "@/shared/lib/dashboard-mode";
+import { routeErrorMessage } from "@/shared/lib/dashboard-mode";
 import { useRouteStore } from "@/stores/routes";
 import { useMetaStore } from "@/stores/meta";
 import type { EvidenceLink } from "@/shared/api/client";
@@ -9,9 +9,6 @@ import type { EvidenceLink } from "@/shared/api/client";
 const store = useRouteStore();
 const meta = useMetaStore();
 const searchInput = ref("");
-const unavailableMessage = computed(() =>
-  routeUnavailableMessage("routes", meta.mode),
-);
 
 onMounted(async () => {
   await meta.ensureLoaded();
@@ -32,14 +29,6 @@ function isZeroMatch() {
     store.hints.length === 0 &&
     store.query.trim().length > 0
   );
-}
-
-function is404Error(): boolean {
-  return store.errorStatus === 404;
-}
-
-function is502Error(): boolean {
-  return store.errorStatus === 502;
 }
 
 function evidenceText(link: EvidenceLink): string {
@@ -66,19 +55,7 @@ function relevanceDisplay(relevance: number | undefined): string {
       </p>
     </header>
 
-    <!-- Unavailable in live mode -->
-    <Card v-if="unavailableMessage">
-      <CardContent class="p-6">
-        <EmptyState
-          title="Unavailable in live mode"
-          :description="unavailableMessage"
-        />
-      </CardContent>
-    </Card>
-
-    <!-- Local mode -->
-    <template v-else>
-      <Card>
+    <Card>
         <CardContent class="flex flex-col gap-4 p-6">
           <!-- Search bar -->
           <form
@@ -112,23 +89,7 @@ function relevanceDisplay(relevance: number | undefined): string {
 
       <!-- Error states -->
       <Alert v-else-if="store.error" variant="destructive">
-        <template v-if="is404Error()">
-          <p>
-            Route artifact not found. Run
-            <code class="rounded bg-muted px-1 py-0.5 text-xs">scryrs route &lt;PATH&gt;</code>
-            to generate the route manifest.
-          </p>
-        </template>
-        <template v-else-if="is502Error()">
-          <p>
-            Route artifact is malformed or from an incompatible version. Run
-            <code class="rounded bg-muted px-1 py-0.5 text-xs">scryrs route &lt;PATH&gt;</code>
-            to regenerate.
-          </p>
-        </template>
-        <template v-else>
-          {{ store.error }}
-        </template>
+        <p>{{ routeErrorMessage(meta.mode, store.errorStatus, store.error) }}</p>
       </Alert>
 
       <!-- Zero-match state -->
@@ -202,6 +163,5 @@ function relevanceDisplay(relevance: number | undefined): string {
           </div>
         </Card>
       </div>
-    </template>
   </div>
 </template>

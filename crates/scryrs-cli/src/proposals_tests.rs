@@ -105,6 +105,21 @@ fn write_review_decision(root: &Path, decision: &ProposalReviewDecision) {
     .expect("write decision");
 }
 
+#[test]
+fn proposals_publish_help_documents_explicit_remote_publication() {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_eq!(
+        run_with_writers(["proposals", "publish", "--help"], &mut out, &mut err),
+        0
+    );
+    assert!(err.is_empty());
+    let help = String::from_utf8(out).expect("UTF-8 help");
+    assert!(help.contains("scryrs proposals publish <PATH> <ID>"));
+    assert!(help.contains("SCRYRS_PROPOSAL_WRITE_TOKEN"));
+    assert!(help.contains("preserves the local proposal artifact"));
+}
+
 fn seed_protected_paths(root: &Path) {
     let docs_dir = root.join(".devagent/docs/docs");
     fs::create_dir_all(&docs_dir).expect("create docs dir");

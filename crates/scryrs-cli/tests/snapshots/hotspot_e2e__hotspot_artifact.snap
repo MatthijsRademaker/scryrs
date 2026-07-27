@@ -1,6 +1,5 @@
 ---
 source: crates/scryrs-cli/tests/hotspot_e2e.rs
-assertion_line: 300
 expression: "&artifact_value"
 ---
 {
@@ -25,8 +24,8 @@ expression: "&artifact_value"
       "rank": 1,
       "score": 6,
       "sessionCount": 1,
-      "subject": "nonexistent_fn",
-      "subjectKind": "symbol"
+      "subject": "src/nonexistent.rs",
+      "subjectKind": "file"
     },
     {
       "counts": {

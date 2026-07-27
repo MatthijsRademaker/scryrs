@@ -1,0 +1,1 @@
+{"session_id":"fixture","cwd":"/repo","toolName":"ast_grep_search","input":{"pattern":"console.log($MSG)","lang":"typescript","paths":["hooks/"],"context":3},"isError":false}

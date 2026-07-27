@@ -179,11 +179,12 @@ fn build_multi_event_fixture() -> String {
         make_edit_made_json("s1", "src/lib.rs", "2026-06-21T09:06:00Z", true),
         // EditMade (failure) — src/broken.rs, session s2, score 3+2=5
         make_edit_made_json("s2", "src/broken.rs", "2026-06-21T09:07:00Z", false),
-        // FailedLookup — "nonexistent_fn", session s1, score 4+2=6
+        // FailedLookup — "src/nonexistent.rs", session s1, score 4+2=6.
+        // FailedLookup carries a path, so its subject_kind is "file".
         make_failed_lookup_json(
             "s1",
-            "nonexistent_fn",
-            "symbol not found",
+            "src/nonexistent.rs",
+            "file not found",
             "2026-06-21T09:08:00Z",
         ),
         // FileOpened — src/main.rs again (same session s1), adds +1 to src/main.rs score
@@ -287,7 +288,7 @@ fn e2e_record_to_hotspots_pipeline() {
         // 9 distinct (subject_kind, subject) pairs:
         // file:src/main.rs, search:error handling, symbol:Dispatcher,
         // command:cargo build, command:cargo test, document:docs/api.md,
-        // file:src/lib.rs, file:src/broken.rs, symbol:nonexistent_fn
+        // file:src/lib.rs, file:src/broken.rs, file:src/nonexistent.rs
         assert_eq!(report["runMetadata"]["analyzedSubjectCount"], 9);
 
         // Step 4: Verify artifact file exists and matches stdout.
@@ -310,7 +311,7 @@ fn e2e_record_to_hotspots_pipeline() {
         assert!(!entries.is_empty());
 
         // Expected scores:
-        // nonexistent_fn (FailedLookup): 4 + 2 failure = 6
+        // src/nonexistent.rs (FailedLookup): 4 + 2 failure = 6
         // src/broken.rs (EditMade Failure): 3 + 2 = 5
         // src/lib.rs (EditMade Success): 3
         // cargo test (CommandExecuted Failure): 1 + 2 = 3
@@ -320,9 +321,9 @@ fn e2e_record_to_hotspots_pipeline() {
         // docs/api.md (DocRetrieved): 2
         // cargo build (CommandExecuted Success): 1
 
-        // Top entry: nonexistent_fn with score 6
-        assert_eq!(entries[0]["subject"], "nonexistent_fn");
-        assert_eq!(entries[0]["subjectKind"], "symbol");
+        // Top entry: src/nonexistent.rs with score 6
+        assert_eq!(entries[0]["subject"], "src/nonexistent.rs");
+        assert_eq!(entries[0]["subjectKind"], "file");
         assert_eq!(entries[0]["score"], 6);
 
         // Second: src/broken.rs with score 5

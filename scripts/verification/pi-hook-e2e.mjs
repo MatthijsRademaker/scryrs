@@ -5,7 +5,7 @@
  *
  *  A. Drives the NATIVE `scryrs hook pi --file <tmp>` subcommand with crafted
  *     raw Pi events and asserts the canonical mapping (including isError→Failure
- *     and the lsp_navigation SymbolInspected/FailedLookup branches). Translation
+ *     and the failed-read→FailedLookup branch). Translation
  *     lives in the Rust `scryrs-adapter-harness` crate.
  *
  *  B. Loads the slimmed transport shim `hooks/pi/index.ts` via tsx with a mock
@@ -93,7 +93,7 @@ function testNativeMapping() {
 			raw: {
 				session_id: "pi-1",
 				toolName: "ast_grep_search",
-				input: { query: "fn main" },
+				input: { pattern: "fn main" },
 				isError: false,
 			},
 			type: "SearchRun",
@@ -125,30 +125,31 @@ function testNativeMapping() {
 			outcome: "Success",
 		},
 		{
-			name: "lsp_navigation success",
+			name: "grep",
 			raw: {
 				session_id: "pi-1",
-				toolName: "lsp_navigation",
-				input: { symbol: "Dispatcher" },
+				toolName: "grep",
+				input: { pattern: "fn main" },
 				isError: false,
 			},
-			type: "SymbolInspected",
-			tool: "lsp_navigation",
+			type: "SearchRun",
+			tool: "grep",
 			outcome: "Success",
 		},
 		{
-			name: "lsp_navigation error",
+			name: "find",
 			raw: {
 				session_id: "pi-1",
-				toolName: "lsp_navigation",
-				input: { symbol: "Missing" },
-				isError: true,
+				toolName: "find",
+				input: { pattern: "*.rs" },
+				isError: false,
 			},
-			type: "FailedLookup",
-			tool: "lsp_navigation",
-			outcome: "Failure",
+			type: "SearchRun",
+			tool: "find",
+			outcome: "Success",
 		},
 		{
+			// A failed read is a failed lookup, not an opened file.
 			name: "read isError",
 			raw: {
 				session_id: "pi-1",
@@ -156,7 +157,7 @@ function testNativeMapping() {
 				input: { path: "x.rs" },
 				isError: true,
 			},
-			type: "FileOpened",
+			type: "FailedLookup",
 			tool: "read",
 			outcome: "Failure",
 		},

@@ -89,7 +89,18 @@ pub(crate) fn execute_dashboard(err: &mut impl Write, m: &ArgMatches) -> i32 {
             repository_id,
         ) {
             Ok(Some((url, repo_id))) => match scryrs_dashboard::SourceMode::live(&url, &repo_id) {
-                Ok(mode) => mode,
+                Ok(mode) => {
+                    match crate::remote_config::resolve_proposal_write_token(Some(&repo_root)) {
+                        Some(token) => match mode.with_proposal_write_token(token) {
+                            Ok(mode) => mode,
+                            Err(error) => {
+                                let _ = writeln!(err, "scryrs dashboard: {error}");
+                                return 2;
+                            }
+                        },
+                        None => mode,
+                    }
+                }
                 Err(error) => {
                     let _ = writeln!(err, "scryrs dashboard: {error}");
                     return 2;

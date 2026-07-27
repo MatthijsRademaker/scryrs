@@ -2,11 +2,10 @@
 import { computed, onMounted } from "vue";
 import { useRoute } from "vue-router";
 import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, ConstellationGraph, EmptyState, EventSparkline } from "@/shared/ui";
-import { routeUnavailableMessage } from "@/shared/lib/dashboard-mode";
+import { routeUnavailableMessage, traceEventSubjectDisplay } from "@/shared/lib/dashboard-mode";
 import { useSessionStore } from "@/stores/sessions";
 import { useMetaStore } from "@/stores/meta";
 import { colorForKey } from "@/shared/lib/viz";
-import { formatSubject } from "@/shared/lib/subject";
 import type { TraceEventItem } from "@/shared/api/client";
 
 const route = useRoute();
@@ -14,7 +13,7 @@ const store = useSessionStore();
 const meta = useMetaStore();
 
 function subjectDisplay(event: TraceEventItem) {
-  return formatSubject(event.subject, meta.repositoryPath, event.subjectKind);
+  return traceEventSubjectDisplay(event, meta);
 }
 const sessionId = computed(() => String(route.params.sessionId));
 const shortId = computed(() => (sessionId.value.length > 18 ? `${sessionId.value.slice(0, 18)}…` : sessionId.value));
@@ -50,9 +49,7 @@ const sparkValues = computed(() => {
 
 onMounted(async () => {
   await meta.ensureLoaded();
-  if (!meta.isLiveMode) {
-    void store.loadSession(sessionId.value);
-  }
+  void store.loadSession(sessionId.value);
 });
 function payloadPreview(payload: unknown) { return JSON.stringify(payload)?.slice(0, 200) ?? "null"; }
 </script>
@@ -65,6 +62,10 @@ function payloadPreview(payload: unknown) { return JSON.stringify(payload)?.slic
 
     <Card v-if="unavailableMessage">
       <CardContent class="p-6"><EmptyState title="Unavailable in live mode" :description="unavailableMessage" /></CardContent>
+    </Card>
+
+    <Card v-else-if="store.loading && !store.detail">
+      <CardContent class="p-6"><EmptyState title="Loading session" description="Reading repository-scoped event timeline…" /></CardContent>
     </Card>
 
     <Card v-else-if="store.error">

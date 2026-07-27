@@ -34,6 +34,7 @@ tower-http = { version = "0.6", features = ["fs"] }
 bytes = "1"
 futures-util = "0.3"
 scryrs-core = { workspace = true }
+scryrs-server = { workspace = true }
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 

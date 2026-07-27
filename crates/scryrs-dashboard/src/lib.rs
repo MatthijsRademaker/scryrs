@@ -6,10 +6,32 @@ use std::path::PathBuf;
 pub mod route_explain;
 pub mod server;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct LiveSourceConfig {
     pub server_url: String,
     pub repository_id: String,
+    proposal_write_token: Option<String>,
+}
+
+impl std::fmt::Debug for LiveSourceConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LiveSourceConfig")
+            .field("server_url", &self.server_url)
+            .field("repository_id", &self.repository_id)
+            .field(
+                "proposal_write_token",
+                &self.proposal_write_token.as_ref().map(|_| "[REDACTED]"),
+            )
+            .finish()
+    }
+}
+
+impl LiveSourceConfig {
+    #[must_use]
+    pub fn proposal_write_token(&self) -> Option<&str> {
+        self.proposal_write_token.as_deref()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,7 +70,29 @@ impl SourceMode {
         Ok(Self::Live(LiveSourceConfig {
             server_url: server_url.to_string(),
             repository_id: repository_id.to_string(),
+            proposal_write_token: None,
         }))
+    }
+
+    pub fn with_proposal_write_token(
+        mut self,
+        token: impl Into<String>,
+    ) -> Result<Self, DashboardError> {
+        let token = token.into();
+        if token.is_empty() {
+            return Err(DashboardError::InvalidConfig(
+                "proposal write token must not be empty".into(),
+            ));
+        }
+        match &mut self {
+            Self::Live(config) => config.proposal_write_token = Some(token),
+            Self::Local => {
+                return Err(DashboardError::InvalidConfig(
+                    "proposal write token requires live mode".into(),
+                ));
+            }
+        }
+        Ok(self)
     }
 
     #[must_use]
@@ -217,6 +261,7 @@ mod tests {
             SourceMode::Live(LiveSourceConfig {
                 server_url: "http://localhost:8081".into(),
                 repository_id: "repo-a".into(),
+                proposal_write_token: None,
             })
         );
     }

@@ -5,9 +5,9 @@
 //! validation, and event insertion. CLI and other consumers compose this API.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use scryrs_types::TraceEvent;
 
 /// Current datastore schema version (independent of TraceEvent wire schema).
@@ -98,6 +98,165 @@ fn ensure_schema(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// `schema_meta` key recording that historical subjects were normalized.
+const SUBJECT_NORMALIZATION_KEY: &str = "subject_normalization_migrated";
+
+/// Payload field holding the path subject, per event family.
+fn path_field_for(event_type: &str) -> Option<&'static str> {
+    match event_type {
+        "FileOpened" => Some("path"),
+        "EditMade" => Some("target"),
+        "FailedLookup" => Some("subject"),
+        _ => None,
+    }
+}
+
+/// Derive the repository root from a canonical `<root>/.scryrs/scryrs.db` path.
+///
+/// The store is routinely opened through the *relative* [`CANONICAL_STORE_PATH`],
+/// so the path is resolved to an absolute one first. Without that, the derived
+/// root is the empty path, every absolute subject fails the prefix test, and the
+/// migration would mark all of them `external_file` — the exact corruption the
+/// caller's plausibility guard exists to prevent.
+///
+/// Returns `None` for any non-canonical layout (test stores, `SCRYRS_STORE`
+/// overrides) or when the root cannot be resolved to a non-empty absolute path.
+/// In those cases the root genuinely cannot be known and guessing would corrupt
+/// subjects.
+fn repo_root_of_store(store_path: &Path) -> Option<PathBuf> {
+    let absolute = store_path
+        .canonicalize()
+        .unwrap_or_else(|_| store_path.to_path_buf());
+
+    let scryrs_dir = absolute.parent()?;
+    if scryrs_dir.file_name()? != ".scryrs" {
+        return None;
+    }
+
+    let root = scryrs_dir.parent()?;
+    if !root.is_absolute() || root.as_os_str().is_empty() {
+        return None;
+    }
+    Some(root.to_path_buf())
+}
+
+/// Whether the derived repository root is a prefix of any recorded absolute
+/// subject — the evidence that it is the root the events were recorded under.
+fn root_matches_recorded_subjects(conn: &Connection, repo_root: &Path) -> rusqlite::Result<bool> {
+    let Some(root) = repo_root.to_str() else {
+        return Ok(false);
+    };
+    let prefix = format!("{}/", root.trim_end_matches('/'));
+    let matching: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM trace_events
+         WHERE subject LIKE ?1 || '%'
+           AND event_type IN ('FileOpened', 'EditMade', 'FailedLookup')",
+        params![prefix],
+        |row| row.get(0),
+    )?;
+    Ok(matching > 0)
+}
+
+/// One-time normalization of historical path subjects recorded before the
+/// adapter layer started normalizing them.
+///
+/// Rows written by older builds carry whatever path string the agent typed, so
+/// the same file appears under both an absolute and a repository-relative
+/// subject and its hotspot score is split across the two. This rewrites the
+/// `subject` column, the derived `subject_kind`, and the matching path inside
+/// `event_json` so historical evidence groups on the same key as new events.
+///
+/// Runs at most once per store, guarded by a `schema_meta` marker. It is a data
+/// migration only — the table shape is unchanged, so `datastore_schema_version`
+/// is untouched.
+fn migrate_subject_normalization(conn: &Connection, store_path: &Path) -> rusqlite::Result<()> {
+    let already: Option<String> = conn
+        .query_row(
+            "SELECT value FROM schema_meta WHERE key = ?1",
+            params![SUBJECT_NORMALIZATION_KEY],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if already.is_some() {
+        return Ok(());
+    }
+
+    // Without a canonical store path there is no knowable repository root. Leave
+    // the store untouched and unmarked, so a later canonical open still migrates.
+    let Some(repo_root) = repo_root_of_store(store_path) else {
+        return Ok(());
+    };
+
+    // Guard against a root that does not match the recorded data. The store can
+    // legitimately be opened from a different mount path than the one the events
+    // were recorded under — a container bind-mounting the repository at
+    // `/workspace` is the common case. Migrating with such a root would classify
+    // every genuinely-internal absolute subject as `external_file` and then mark
+    // the store done, making the damage permanent.
+    //
+    // A correct root is a prefix of at least one recorded absolute subject.
+    // If none match, the root is wrong (or there is nothing to migrate): skip
+    // without marking, so a later open under the right root still migrates.
+    if !root_matches_recorded_subjects(conn, &repo_root)? {
+        return Ok(());
+    }
+
+    let rows: Vec<(i64, String, String, Option<String>)> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, event_type, event_json, subject_kind FROM trace_events
+             WHERE subject IS NOT NULL AND event_type IN ('FileOpened', 'EditMade', 'FailedLookup')",
+        )?;
+        let mapped = stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?;
+        mapped.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+
+    for (id, event_type, event_json, stored_kind) in rows {
+        let Some(field) = path_field_for(&event_type) else {
+            continue;
+        };
+        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&event_json) else {
+            continue;
+        };
+        let Some(raw) = value
+            .get("payload")
+            .and_then(|p| p.get(field))
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+
+        let normalized = scryrs_types::normalize_path_subject(raw, &repo_root).into_subject();
+        let kind = scryrs_types::path_subject_kind(&normalized);
+
+        // The kind must be re-derived even when the subject is unchanged: an
+        // external path keeps its spelling but was stored as "file" by older
+        // builds, and leaving that would group it with repository files —
+        // exactly the split this migration exists to remove.
+        if normalized == raw && stored_kind.as_deref() == Some(kind) {
+            continue;
+        }
+
+        value["payload"][field] = serde_json::Value::String(normalized.clone());
+        let Ok(rewritten) = serde_json::to_string(&value) else {
+            continue;
+        };
+
+        conn.execute(
+            "UPDATE trace_events SET subject = ?1, subject_kind = ?2, event_json = ?3 WHERE id = ?4",
+            params![normalized, kind, rewritten, id],
+        )?;
+    }
+
+    conn.execute(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?1, '1')",
+        params![SUBJECT_NORMALIZATION_KEY],
+    )?;
+
+    Ok(())
+}
+
 /// Outcome string for the `outcome` column.
 fn outcome_str(event: &TraceEvent) -> &'static str {
     match &event.outcome {
@@ -147,6 +306,7 @@ impl EventStore {
         let path_ref = path.as_ref();
         let conn = open_connection(path_ref)?;
         ensure_schema(&conn)?;
+        migrate_subject_normalization(&conn, path_ref)?;
         Ok(Self {
             conn,
             stored_count: 0,
@@ -339,6 +499,249 @@ mod tests {
         assert!(
             !dir.path().join(".scryrs/events.jsonl").exists(),
             ".scryrs/events.jsonl must not be created"
+        );
+    }
+
+    // --- one-time historical subject normalization ---
+
+    /// Build a store at the canonical `<root>/.scryrs/scryrs.db` layout and
+    /// insert a raw row with an un-normalized subject, as an older build would.
+    fn seed_legacy_row(repo_root: &std::path::Path, absolute_path: &str) -> std::path::PathBuf {
+        let store_path = repo_root.join(CANONICAL_STORE_PATH);
+        {
+            let _store = open_ok(&store_path);
+        }
+        let conn = Connection::open(&store_path).unwrap_or_else(|e| panic!("open: {e}"));
+        let event_json = format!(
+            r#"{{"schema_version":"{}","timestamp":"2026-06-20T00:00:00Z","session_id":"s1","event_type":"FileOpened","tool_name":"read","payload":{{"type":"FileOpened","path":"{}"}},"outcome":{{"result":"Success"}}}}"#,
+            SCHEMA_VERSION, absolute_path
+        );
+        conn.execute(
+            "INSERT INTO trace_events
+             (event_json, schema_version, timestamp, session_id, event_type, tool_name,
+              subject_kind, subject, outcome, failure_reason)
+             VALUES (?1, ?2, '2026-06-20T00:00:00Z', 's1', 'FileOpened', 'read',
+                     'file', ?3, 'Success', NULL)",
+            params![event_json, SCHEMA_VERSION, absolute_path],
+        )
+        .unwrap_or_else(|e| panic!("seed: {e}"));
+        // Clear the marker the first open wrote, so the next open migrates.
+        conn.execute(
+            "DELETE FROM schema_meta WHERE key = ?1",
+            params![SUBJECT_NORMALIZATION_KEY],
+        )
+        .unwrap_or_else(|e| panic!("clear marker: {e}"));
+        store_path
+    }
+
+    /// Append one more un-normalized row to a store seeded by `seed_legacy_row`.
+    fn append_legacy_row(store_path: &std::path::Path, absolute_path: &str) {
+        let conn = Connection::open(store_path).unwrap_or_else(|e| panic!("open: {e}"));
+        let event_json = format!(
+            r#"{{"schema_version":"{}","timestamp":"2026-06-20T00:00:01Z","session_id":"s1","event_type":"FileOpened","tool_name":"read","payload":{{"type":"FileOpened","path":"{}"}},"outcome":{{"result":"Success"}}}}"#,
+            SCHEMA_VERSION, absolute_path
+        );
+        conn.execute(
+            "INSERT INTO trace_events
+             (event_json, schema_version, timestamp, session_id, event_type, tool_name,
+              subject_kind, subject, outcome, failure_reason)
+             VALUES (?1, ?2, '2026-06-20T00:00:01Z', 's1', 'FileOpened', 'read',
+                     'file', ?3, 'Success', NULL)",
+            params![event_json, SCHEMA_VERSION, absolute_path],
+        )
+        .unwrap_or_else(|e| panic!("append: {e}"));
+    }
+
+    #[test]
+    fn historical_absolute_subjects_are_normalized_on_open() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let root = dir.path();
+        let absolute = format!("{}/crates/a.rs", root.display());
+        let store_path = seed_legacy_row(root, &absolute);
+
+        // Opening runs the migration.
+        let _store = open_ok(&store_path);
+
+        let conn = Connection::open(&store_path).unwrap_or_else(|e| panic!("open: {e}"));
+        let (subject, kind, event_json): (String, String, String) = conn
+            .query_row(
+                "SELECT subject, subject_kind, event_json FROM trace_events LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap_or_else(|e| panic!("row: {e}"));
+
+        assert_eq!(subject, "crates/a.rs", "subject column must be normalized");
+        assert_eq!(kind, "file");
+        assert!(
+            event_json.contains(r#""path":"crates/a.rs""#),
+            "event_json must be rewritten in step with the column, got: {event_json}"
+        );
+    }
+
+    #[test]
+    fn migration_runs_once_and_records_a_marker() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let root = dir.path();
+        let absolute = format!("{}/crates/a.rs", root.display());
+        let store_path = seed_legacy_row(root, &absolute);
+
+        let _first = open_ok(&store_path);
+        let conn = Connection::open(&store_path).unwrap_or_else(|e| panic!("open: {e}"));
+        let marker: String = conn
+            .query_row(
+                "SELECT value FROM schema_meta WHERE key = ?1",
+                params![SUBJECT_NORMALIZATION_KEY],
+                |row| row.get(0),
+            )
+            .unwrap_or_else(|e| panic!("marker: {e}"));
+        assert_eq!(marker, "1");
+
+        // A second open is a no-op: the subject is already normalized and stays.
+        drop(conn);
+        let _second = open_ok(&store_path);
+        let conn = Connection::open(&store_path).unwrap_or_else(|e| panic!("open: {e}"));
+        let subject: String = conn
+            .query_row("SELECT subject FROM trace_events LIMIT 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap_or_else(|e| panic!("row: {e}"));
+        assert_eq!(subject, "crates/a.rs");
+    }
+
+    #[test]
+    fn migration_marks_repository_external_paths_without_rewriting_them() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let root = dir.path();
+        // An internal absolute subject confirms the root; the external one is
+        // what the assertion is about. A real store has both.
+        let internal = format!("{}/crates/a.rs", root.display());
+        let store_path = seed_legacy_row(root, &internal);
+        append_legacy_row(&store_path, "/etc/hosts");
+
+        let _store = open_ok(&store_path);
+
+        let conn = Connection::open(&store_path).unwrap_or_else(|e| panic!("open: {e}"));
+        let (subject, kind): (String, String) = conn
+            .query_row(
+                "SELECT subject, subject_kind FROM trace_events WHERE subject = '/etc/hosts'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap_or_else(|e| panic!("row: {e}"));
+
+        assert_eq!(subject, "/etc/hosts", "external paths stay verbatim");
+        assert_eq!(kind, "external_file");
+
+        // And the internal one collapsed in the same pass.
+        let internal_subject: String = conn
+            .query_row(
+                "SELECT subject FROM trace_events WHERE subject_kind = 'file'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or_else(|e| panic!("internal row: {e}"));
+        assert_eq!(internal_subject, "crates/a.rs");
+    }
+
+    /// Regression: the store is routinely opened through the *relative*
+    /// `CANONICAL_STORE_PATH`. If the root is derived without resolving that to
+    /// an absolute path it comes out empty, every absolute subject looks
+    /// external, and the migration corrupts the whole store and marks it done.
+    #[test]
+    fn migration_resolves_a_relative_canonical_store_path() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let root = dir
+            .path()
+            .canonicalize()
+            .unwrap_or_else(|e| panic!("canonicalize: {e}"));
+        let absolute = format!("{}/crates/a.rs", root.display());
+        seed_legacy_row(&root, &absolute);
+
+        // Open through the relative canonical path, as `record --mode local` does.
+        let previous = std::env::current_dir().unwrap_or_else(|e| panic!("cwd: {e}"));
+        std::env::set_current_dir(&root).unwrap_or_else(|e| panic!("chdir: {e}"));
+        let opened = EventStore::open(CANONICAL_STORE_PATH);
+        std::env::set_current_dir(&previous).unwrap_or_else(|e| panic!("restore cwd: {e}"));
+        opened.unwrap_or_else(|e| panic!("open relative: {e}"));
+
+        let conn = Connection::open(root.join(CANONICAL_STORE_PATH))
+            .unwrap_or_else(|e| panic!("open: {e}"));
+        let (subject, kind): (String, String) = conn
+            .query_row(
+                "SELECT subject, subject_kind FROM trace_events LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap_or_else(|e| panic!("row: {e}"));
+        assert_eq!(
+            subject, "crates/a.rs",
+            "relative store path must still resolve the root"
+        );
+        assert_eq!(kind, "file", "an internal path must not be marked external");
+    }
+
+    /// A store opened under a different mount path than the events were
+    /// recorded under (a container bind-mount is the common case) must not
+    /// migrate: it would mark every internal subject `external_file` and then
+    /// record the marker, making the damage permanent.
+    #[test]
+    fn migration_skips_a_root_that_does_not_match_recorded_subjects() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let root = dir.path();
+        // Recorded under a completely different root, as a bind-mounted or
+        // relocated repository would be.
+        let foreign = "/elsewhere/checkout/crates/a.rs";
+        let store_path = seed_legacy_row(root, foreign);
+
+        let _store = open_ok(&store_path);
+
+        let conn = Connection::open(&store_path).unwrap_or_else(|e| panic!("open: {e}"));
+        let (subject, kind): (String, String) = conn
+            .query_row(
+                "SELECT subject, subject_kind FROM trace_events LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap_or_else(|e| panic!("row: {e}"));
+        assert_eq!(subject, foreign, "subject must be left untouched");
+        assert_eq!(kind, "file", "kind must not be rewritten on a wrong root");
+
+        let marker: Option<String> = conn
+            .query_row(
+                "SELECT value FROM schema_meta WHERE key = ?1",
+                params![SUBJECT_NORMALIZATION_KEY],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap_or_else(|e| panic!("marker query: {e}"));
+        assert!(
+            marker.is_none(),
+            "a skipped migration must stay unmarked so a correct root can still migrate"
+        );
+    }
+
+    /// A non-canonical store path has no knowable repository root, so the
+    /// migration must leave it alone rather than guess and corrupt subjects.
+    #[test]
+    fn migration_skips_stores_outside_the_canonical_layout() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let store_path = dir.path().join("somewhere.db");
+        {
+            let _store = open_ok(&store_path);
+        }
+        let conn = Connection::open(&store_path).unwrap_or_else(|e| panic!("open: {e}"));
+        let marker: Option<String> = conn
+            .query_row(
+                "SELECT value FROM schema_meta WHERE key = ?1",
+                params![SUBJECT_NORMALIZATION_KEY],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap_or_else(|e| panic!("marker query: {e}"));
+        assert!(
+            marker.is_none(),
+            "a non-canonical store must not be marked migrated"
         );
     }
 
@@ -588,18 +991,36 @@ mod tests {
                     outcome: Outcome::Success,
                 },
             ),
+            // FailedLookup carries a path (an agent addressed a file that is
+            // not there), so it groups as "file" alongside FileOpened/EditMade.
             (
-                "symbol",
+                "file",
                 TraceEvent {
                     schema_version: SCHEMA_VERSION.into(),
                     timestamp: "t".into(),
                     session_id: "s".into(),
                     event_type: TraceEventType::FailedLookup,
-                    tool_name: Some("lsp".into()),
+                    tool_name: Some("read".into()),
                     payload: TraceEventPayload::FailedLookup(FailedLookupPayload {
-                        subject: "Bar".into(),
+                        subject: "src/missing.rs".into(),
                     }),
                     outcome: Outcome::Failure { reason: None },
+                },
+            ),
+            // An absolute subject is by construction outside the repository,
+            // because adapters normalize internal paths to relative form.
+            (
+                "external_file",
+                TraceEvent {
+                    schema_version: SCHEMA_VERSION.into(),
+                    timestamp: "t".into(),
+                    session_id: "s".into(),
+                    event_type: TraceEventType::FileOpened,
+                    tool_name: Some("read".into()),
+                    payload: TraceEventPayload::FileOpened(FileOpenedPayload {
+                        path: "/etc/hosts".into(),
+                    }),
+                    outcome: Outcome::Success,
                 },
             ),
             (
