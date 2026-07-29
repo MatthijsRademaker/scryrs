@@ -51,7 +51,7 @@ jobs:
       # The dashboard crate's build.rs compiles the frontend with Bun, so the
       # JS toolchain must be present for the --all-features release build.
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
 
